@@ -1,7 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import { Sidebar } from "./sidebar";
 import { EditorArea } from "./editor-area";
-import { EditorTabs } from "./editor-area/editor-tabs";
 import { SidebarToggleButton } from "./sidebar/sidebar-toggle-button";
 import { CompactFileLayout } from "./compact-file-layout";
 import { WelcomeScreen } from "./welcome";
@@ -34,7 +33,6 @@ function WorkspaceLayout({ showWelcome }: { showWelcome: boolean }) {
     clampSidebarWidth(sidebarWidth, maxSidebarWidth),
   );
   const draftSidebarWidthRef = useRef(draftSidebarWidth);
-  const tabChromeLeft = isSidebarCollapsed ? 132 : draftSidebarWidth + 12;
 
   const setClampedSidebarWidth = useCallback(
     (nextWidth: number) => {
@@ -132,20 +130,8 @@ function WorkspaceLayout({ showWelcome }: { showWelcome: boolean }) {
       >
         <SidebarToggleButton />
       </div>
-      {!showWelcome && (
-        <div
-          className="pointer-events-none absolute top-0 z-40"
-          style={{
-            left: tabChromeLeft,
-            right: 12,
-            transition: isSidebarDragging ? "none" : "left 140ms ease-out",
-          }}
-        >
-          <div className="pointer-events-auto">
-            <EditorTabs />
-          </div>
-        </div>
-      )}
+      {/* Tab strips live in the pane chrome (`editor-area/pane-layout.tsx`);
+          only the window-drag band and the sidebar toggle float here. */}
       <div className="flex h-full min-h-0 flex-col">
         <div className="flex min-h-0 flex-1">
           <div

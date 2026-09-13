@@ -662,3 +662,75 @@ export function buildFileDropCandidate(
   if (next === layout || !created) return null;
   return finalizeCandidate(layout, next, targetPaneId, region, area, created.id);
 }
+
+/**
+ * Where a dragged tab is going: a strip gap (the strip measured the gap, so
+ * it hands the preview rectangle in) or a pane body region.
+ */
+export type TabDropTarget =
+  | { paneId: string; insertionIndex: number; previewRect: Rect }
+  | { paneId: string; region: DropRegion };
+
+/**
+ * A tab's drop: reorder or move into a strip, move to a pane centre, or split
+ * off an edge. One transition, so an edge drop that empties its source pane
+ * previews the geometry left *after* that pane collapses.
+ *
+ * `duplicateTabId` is a tab in the target pane already showing the moved
+ * tab's document. The moved tab survives — its id, history, and view state
+ * are what the user picked up — and the duplicate leaves the layout in the
+ * same update. Only strip and centre drops replace; an edge drop is a
+ * deliberate second view.
+ *
+ * Returns `null` whenever the drop must not be offered: the tab or pane is
+ * gone, the drop would change nothing, a sole tab meets its own edge, or the
+ * split would starve a pane below its minimum.
+ */
+export function buildTabDropCandidate(
+  layout: Layout,
+  tabId: string,
+  target: TabDropTarget,
+  area: Rect,
+  duplicateTabId: string | null,
+): DropCandidate | null {
+  const source = paneOfTab(layout, tabId);
+  if (!source || !findPane(layout, target.paneId)) return null;
+  const duplicate = duplicateTabId !== null && duplicateTabId !== tabId ? duplicateTabId : null;
+
+  if ("region" in target && target.region !== "center") {
+    const edge = EDGES[target.region];
+    const next = splitPaneWithTab(layout, target.paneId, edge.axis, edge.placement, tabId);
+    const created = paneOfTab(next, tabId);
+    if (next === layout || !created) return null;
+    return finalizeCandidate(layout, next, target.paneId, target.region, area, created.id);
+  }
+
+  // The centre of the tab's own pane is where it already is.
+  if ("region" in target && source.id === target.paneId) return null;
+
+  const index = "region" in target ? Number.POSITIVE_INFINITY : target.insertionIndex;
+  if (source.id === target.paneId) {
+    const remaining = source.tabIds.filter((id) => id !== tabId);
+    remaining.splice(Math.max(0, Math.min(index, remaining.length)), 0, tabId);
+    if (remaining.join(" ") === source.tabIds.join(" ")) return null;
+  }
+
+  // Insert before removing the duplicate: if the duplicate was the target's
+  // only tab, removing it first would collapse the pane we are moving into.
+  let next = moveTab(layout, tabId, { paneId: target.paneId, index });
+  if (next === layout) return null;
+  if (duplicate) next = removeTab(next, duplicate);
+  if (paneOfTab(next, tabId)?.id !== target.paneId) return null;
+
+  if ("region" in target) {
+    return finalizeCandidate(layout, next, target.paneId, "center", area, target.paneId);
+  }
+  return {
+    targetPaneId: target.paneId,
+    region: null,
+    insertionIndex: target.insertionIndex,
+    expectedRevision: layout.revision,
+    layout: next,
+    previewRect: target.previewRect,
+  };
+}

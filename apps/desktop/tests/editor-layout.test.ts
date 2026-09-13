@@ -4,11 +4,13 @@ import {
   PANE_MIN_WIDTH,
   SEPARATOR_SIZE,
   activateTab,
+  buildTabDropCandidate,
   candidateBounds,
   computeBounds,
   createLayout,
   createPane,
   createSplitId,
+  findPane,
   fitsWithin,
   insertTab,
   layoutTabIds,
@@ -24,6 +26,7 @@ import {
   validateLayout,
   type Layout,
   type Pane,
+  type Rect,
   type Split,
 } from "../src/lib/editor-layout";
 
@@ -321,5 +324,162 @@ describe("geometry", () => {
     expect(fitsWithin(minimumSize(twoPanes.root), wide)).toBe(true);
     const nested = splitPaneWithTab(twoPanes, "right", "x", "after", "a");
     expect(fitsWithin(minimumSize(nested.root), wide)).toBe(false);
+  });
+});
+
+describe("tab drop candidates", () => {
+  const area: Rect = { x: 0, y: 0, width: 1000, height: 600 };
+  const gap: Rect = { x: 10, y: 0, width: 4, height: 56 };
+
+  it("inserts into another strip at the index and previews the gap it was given", () => {
+    const candidate = buildTabDropCandidate(
+      twoPaneLayout(),
+      "a",
+      { paneId: "right", insertionIndex: 1, previewRect: gap },
+      area,
+      null,
+    );
+    expect(candidate).not.toBeNull();
+    expect(candidate!.insertionIndex).toBe(1);
+    expect(candidate!.region).toBeNull();
+    expect(candidate!.previewRect).toBe(gap);
+    expect(panes(candidate!.layout).map((pane) => pane.tabIds)).toEqual([["b"], ["c", "a"]]);
+    expect(findPane(candidate!.layout, "right")!.activeTabId).toBe("a");
+    expect(candidate!.layout.focusedPaneId).toBe("right");
+    expect(candidate!.expectedRevision).toBe(0);
+  });
+
+  it("resolves a within-strip index against the strip without the source", () => {
+    const layout = createLayout(["a", "b", "c"], "a");
+    const candidate = buildTabDropCandidate(
+      layout,
+      "a",
+      { paneId: layout.focusedPaneId, insertionIndex: 2, previewRect: gap },
+      area,
+      null,
+    );
+    expect(panes(candidate!.layout)[0]!.tabIds).toEqual(["b", "c", "a"]);
+  });
+
+  it("offers nothing for a drop back at the tab's own position", () => {
+    const layout = createLayout(["a", "b"], "b");
+    expect(
+      buildTabDropCandidate(
+        layout,
+        "a",
+        { paneId: layout.focusedPaneId, insertionIndex: 0, previewRect: gap },
+        area,
+        null,
+      ),
+    ).toBeNull();
+    // The centre of its own pane is the same non-move.
+    expect(
+      buildTabDropCandidate(
+        layout,
+        "a",
+        { paneId: layout.focusedPaneId, region: "center" },
+        area,
+        null,
+      ),
+    ).toBeNull();
+  });
+
+  it("moves to the centre of another pane, appending and previewing the whole body", () => {
+    const candidate = buildTabDropCandidate(
+      twoPaneLayout(),
+      "a",
+      { paneId: "right", region: "center" },
+      area,
+      null,
+    );
+    expect(panes(candidate!.layout).map((pane) => pane.tabIds)).toEqual([["b"], ["c", "a"]]);
+    expect(candidate!.previewRect).toEqual({ x: 502, y: 0, width: 498, height: 600 });
+  });
+
+  it("replaces a destination tab showing the same document, keeping the moved tab's id", () => {
+    // "c" in the right pane shows the same file as "a"; the move keeps "a"
+    // (its history and view state) and drops "c" from the layout.
+    const candidate = buildTabDropCandidate(
+      twoPaneLayout(),
+      "a",
+      { paneId: "right", region: "center" },
+      area,
+      "c",
+    );
+    expect(panes(candidate!.layout).map((pane) => pane.tabIds)).toEqual([["b"], ["a"]]);
+    expect(layoutTabIds(candidate!.layout)).not.toContain("c");
+    expect(validateLayout(candidate!.layout)).toEqual([]);
+  });
+
+  it("splits on an edge from the layout the source collapse leaves behind", () => {
+    // "c" is the right pane's only tab, so dropping it on the left pane's
+    // bottom edge first collapses the right pane: the new pane gets the full
+    // window width, not half of it.
+    const candidate = buildTabDropCandidate(
+      twoPaneLayout(),
+      "c",
+      { paneId: "left", region: "bottom" },
+      area,
+      null,
+    );
+    expect(candidate).not.toBeNull();
+    expect(candidate!.previewRect).toEqual({ x: 0, y: 302, width: 1000, height: 298 });
+    expect(candidateBounds(candidate!.layout, area, paneOfTab(candidate!.layout, "c")!.id)).toEqual(
+      candidate!.previewRect,
+    );
+    expect(validateLayout(candidate!.layout)).toEqual([]);
+  });
+
+  it("collapses an emptied source pane on a strip move", () => {
+    const candidate = buildTabDropCandidate(
+      twoPaneLayout(),
+      "c",
+      { paneId: "left", insertionIndex: 0, previewRect: gap },
+      area,
+      null,
+    );
+    expect(candidate!.layout.root.kind).toBe("pane");
+    expect(layoutTabIds(candidate!.layout)).toEqual(["c", "a", "b"]);
+  });
+
+  it("offers no edge for a sole tab on its own pane", () => {
+    const layout = createLayout(["only"], "only");
+    expect(
+      buildTabDropCandidate(
+        layout,
+        "only",
+        { paneId: layout.focusedPaneId, region: "right" },
+        area,
+        null,
+      ),
+    ).toBeNull();
+  });
+
+  it("offers no edge when the split would fall below the minimum", () => {
+    const narrow: Rect = { x: 0, y: 0, width: 400, height: 600 };
+    expect(
+      buildTabDropCandidate(
+        twoPaneLayout(),
+        "a",
+        { paneId: "right", region: "right" },
+        narrow,
+        null,
+      ),
+    ).toBeNull();
+  });
+
+  it("is null for a tab or pane that no longer exists", () => {
+    expect(
+      buildTabDropCandidate(
+        twoPaneLayout(),
+        "gone",
+        { paneId: "right", region: "center" },
+        area,
+        null,
+      ),
+    ).toBeNull();
+    expect(
+      buildTabDropCandidate(twoPaneLayout(), "a", { paneId: "gone", region: "center" }, area, null),
+    ).toBeNull();
   });
 });

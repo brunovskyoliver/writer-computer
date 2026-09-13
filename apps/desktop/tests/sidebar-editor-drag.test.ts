@@ -195,6 +195,7 @@ function createHarness(): Harness {
     geometry: {
       area: { x: 100, y: 0, width: 1000, height: 600 },
       panes: new Map([[layout.root.id, { left: 0, top: 0, width: 1000, height: 600 }]]),
+      strips: new Map(),
     },
     layout,
     tabs: [{ id: "a", location: { kind: "file", path: "/a.md" }, back: [], forward: [] }],
@@ -226,6 +227,7 @@ function createHarness(): Harness {
       harness.drops.push(drop);
       return harness.outcome;
     },
+    moveTabFromDrop: () => true,
     suppressNextClick: () => {
       harness.suppressed += 1;
     },
@@ -478,6 +480,7 @@ describe("resolveFileDrop", () => {
   const geometry: EditorAreaGeometry = {
     area: { x: 0, y: 0, width: 1000, height: 600 },
     panes: new Map([["p", { left: 0, top: 0, width: 1000, height: 600 }]]),
+    strips: new Map(),
   };
   const tabForPath = (path: string) => createFileTab(path);
 

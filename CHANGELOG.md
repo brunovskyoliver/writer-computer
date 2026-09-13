@@ -2,6 +2,8 @@
 
 ## 2026-09-13
 
+- Tab tiling, phases 4–5: tabs can now be dragged. Drop a tab into a strip gap to reorder it or move it to another pane, onto a pane centre to move it there, or onto a pane edge to split that pane; the moved tab keeps its content, cursor, scroll, undo, and back/forward history, and nothing is saved or reloaded by the move. Every tab strip now belongs to its pane, so close-others and close-all act on that strip only. While dragging a file or a tab, a translucent accent overlay shows exactly where it will land — the new pane's final shape (after an emptied source pane collapses), the whole target body, or the gap in the strip — and disappears on release, Escape, or any interruption. Dropping a tab where it already is, a pane's only tab onto its own edge, or a file selection containing a folder shows nothing and changes nothing. Still to come: resizable dividers, focus-aware command routing, and saving the layout with the session.
+
 - Opening a drawing no longer takes over the tab it was opened from. Double-clicking an inline embed, the New Drawing command, and the sidebar all leave the note open in the tab bar and put the drawing in a tab of its own; a drawing that already has a tab is brought forward rather than opened twice.
 - Drawing fixes: inline drawing embeds keep their colours in dark mode (the exported SVG stays canonical light-mode, as Excalidraw's dark theme is a display filter, and the embed now gets that same filter), the Excalidraw zoom controls no longer float over other tabs when a drawing tab is in the background, and drawing autosave waits a second instead of 150 ms so a full scene export plus embed re-decode no longer fires on every pause mid-stroke.
 

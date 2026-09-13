@@ -19,8 +19,14 @@ export interface PaneRect {
   height: number;
 }
 
+/** A pane's tab strip plus the box of every tab in it, in area coordinates. */
+export interface StripRect extends PaneRect {
+  tabs: Array<{ tabId: string; left: number; width: number }>;
+}
+
 const slots = new Map<string, HTMLElement>();
 const rects = new Map<string, PaneRect>();
+const strips = new Map<string, HTMLElement>();
 const listeners = new Set<() => void>();
 
 let container: HTMLElement | null = null;
@@ -86,27 +92,62 @@ export function registerPaneBody(paneId: string, element: HTMLElement | null) {
   };
 }
 
+/** Register a pane's tab strip. Strips are measured on demand, not observed:
+ *  their tab boxes shift with strip scrolling, which no observer reports. */
+export function registerPaneStrip(paneId: string, element: HTMLElement | null) {
+  if (!element) return () => {};
+  strips.set(paneId, element);
+  return () => {
+    if (strips.get(paneId) === element) strips.delete(paneId);
+  };
+}
+
 /** The current rectangles, for hit-testing a drag against pane bodies. */
 export function getPaneRects(): ReadonlyMap<string, PaneRect> {
   return rects;
 }
 
+function measureStrips(base: DOMRect): Map<string, StripRect> {
+  const measured = new Map<string, StripRect>();
+  for (const [paneId, element] of strips) {
+    const box = element.getBoundingClientRect();
+    const tabs = Array.from(element.querySelectorAll<HTMLElement>("[data-tab-id]"), (tab) => {
+      const tabBox = tab.getBoundingClientRect();
+      return {
+        tabId: tab.getAttribute("data-tab-id")!,
+        left: tabBox.left - base.left,
+        width: tabBox.width,
+      };
+    });
+    measured.set(paneId, {
+      left: box.left - base.left,
+      top: box.top - base.top,
+      width: box.width,
+      height: box.height,
+      tabs,
+    });
+  }
+  return measured;
+}
+
 /**
  * The editor area in viewport coordinates plus every pane body relative to
  * it — everything a drag needs to turn a pointer position into a pane and a
- * region. Null until the area has mounted. Pane bodies are the drop surfaces;
- * there are no DOM listeners on them because the dragged source holds pointer
- * capture, so hit-testing is geometric.
+ * region. Null until the area has mounted. Pane bodies and strips are the drop
+ * surfaces; there are no DOM listeners on them because the dragged source
+ * holds pointer capture, so hit-testing is geometric.
  */
 export function getEditorAreaGeometry(): {
   area: { x: number; y: number; width: number; height: number };
   panes: ReadonlyMap<string, PaneRect>;
+  strips: ReadonlyMap<string, StripRect>;
 } | null {
   if (!container) return null;
   const box = container.getBoundingClientRect();
   return {
     area: { x: box.left, y: box.top, width: box.width, height: box.height },
     panes: rects,
+    strips: measureStrips(box),
   };
 }
 

@@ -108,6 +108,7 @@ interface EditorState {
   setActiveTab: (tabId: string) => void;
   setFocusedPane: (paneId: string) => void;
   openFilesFromDrop: (drop: FileDrop, isCurrent?: () => boolean) => Promise<FileDropOutcome>;
+  moveTabFromDrop: (candidate: DropCandidate) => boolean;
   navigateToFile: (path: string) => Promise<void>;
   navigateBack: () => Promise<void>;
   navigateForward: () => Promise<void>;
@@ -788,6 +789,33 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     // target for a centre drop. One publish applies tabs, tree, and focus.
     set((state) => publish([...state.tabs, ...newTabs], candidate.layout));
     return { status: "committed" };
+  },
+
+  /**
+   * Commit a tab drop: reorder, move, or split, in one update. The candidate
+   * was resolved against a layout revision; if the store has moved on since,
+   * the drop is refused rather than applied to a tree it was not built for.
+   *
+   * A move changes view ownership only. The moved tab keeps its id, history,
+   * and view state, and no close or save boundary runs — the document was
+   * open before and is still open after. A destination tab the candidate
+   * replaced (same document, same pane) is the one thing that goes away, and
+   * only its view state goes with it: the document itself stays open in the
+   * moved tab.
+   */
+  moveTabFromDrop: (candidate) => {
+    const state = get();
+    if (state.layout.revision !== candidate.expectedRevision) return false;
+    const kept = new Set(layoutTabIds(candidate.layout));
+    const removed = state.tabs.filter((tab) => !kept.has(tab.id));
+    if (state.tabs.length - removed.length !== kept.size) return false;
+
+    set(publish(state.tabs, candidate.layout));
+    for (const tab of removed) {
+      pendingNavigationVersionByTabId.delete(tab.id);
+      clearTabViewState(tab.id);
+    }
+    return true;
   },
 
   navigateToFile: async (path: string) => {

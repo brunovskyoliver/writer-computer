@@ -21,6 +21,7 @@ import { createPendingOpenDrainer, handleOpenPayload } from "../src/hooks/use-op
 import { getEditorSessionSnapshot } from "../src/stores/editor-store";
 import {
   buildFileDropCandidate,
+  buildTabDropCandidate,
   createLayout,
   findPane,
   layoutTabIds,
@@ -30,7 +31,9 @@ import {
   validateLayout,
   type DropRegion,
   type Rect,
+  type TabDropTarget,
 } from "../src/lib/editor-layout";
+import { getTabViewState, setTabCursor } from "../src/lib/editor-views";
 // Side-effect: registers the subscription that re-points the standalone
 // single-file watcher whenever the active file changes in a compact window.
 import "../src/lib/standalone-watch";
@@ -1533,5 +1536,138 @@ describe("editor-store sidebar drops", () => {
     const created = paneOfTab(state.layout, drop.newTabs[0]!.id)!;
     expect(panes(state.layout)[0]!.id).toBe(created.id);
     expect(layoutTabIds(state.layout)).toEqual(state.tabs.map((tab) => tab.id));
+  });
+});
+
+describe("editor-store tab drops", () => {
+  const area: Rect = { x: 0, y: 0, width: 1000, height: 600 };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useEditorStore.setState({
+      openFiles: new Map(),
+      tabs: [],
+      layout: createLayout(),
+      activeTabId: null,
+      activeFilePath: null,
+    });
+    useWorkspaceStore.setState({ chromeMode: "workspace" });
+    mockedInvoke.mockImplementation(async (cmd: string, args: unknown) => {
+      if (cmd !== "read_file") return null;
+      const { path } = args as { path: string };
+      return { path, content: `body of ${path}`, modified_at: 1 };
+    });
+  });
+
+  /** Open a.md and b.md as two panes: [a] | [b], with b focused. */
+  async function twoPanes() {
+    await useEditorStore.getState().openFile("/a.md");
+    await useEditorStore.getState().openFileInNewTab("/b.md");
+    const [a, b] = useEditorStore.getState().tabs;
+    const { layout } = useEditorStore.getState();
+    useEditorStore.setState({
+      layout: splitPaneWithTab(layout, layout.focusedPaneId, "x", "after", b!.id),
+    });
+    const [left, right] = panes(useEditorStore.getState().layout);
+    return { a: a!, b: b!, left: left!, right: right! };
+  }
+
+  function plan(tabId: string, target: TabDropTarget, duplicateTabId: string | null = null) {
+    return buildTabDropCandidate(
+      useEditorStore.getState().layout,
+      tabId,
+      target,
+      area,
+      duplicateTabId,
+    )!;
+  }
+
+  test("a strip move keeps the tab's id, history, dirty content, and view state, and saves nothing", async () => {
+    const { a, b, right } = await twoPanes();
+    useEditorStore.getState().updateContent("/a.md", "edited");
+    setTabCursor(a.id, "/a.md", 3);
+    useEditorStore.setState((state) => ({
+      tabs: state.tabs.map((tab) =>
+        tab.id === a.id ? { ...tab, back: [{ kind: "file", path: "/old.md" }] } : tab,
+      ),
+    }));
+    const before = useEditorStore.getState();
+    const calls = mockedInvoke.mock.calls.length;
+
+    const committed = useEditorStore
+      .getState()
+      .moveTabFromDrop(plan(a.id, { paneId: right.id, insertionIndex: 1, previewRect: area }));
+
+    expect(committed).toBe(true);
+    const state = useEditorStore.getState();
+    expect(panes(state.layout)).toHaveLength(1);
+    expect(panes(state.layout)[0]!.tabIds).toEqual([b.id, a.id]);
+    const moved = state.tabs.find((tab) => tab.id === a.id)!;
+    expect(moved.back).toEqual([{ kind: "file", path: "/old.md" }]);
+    expect(state.openFiles.get("/a.md")).toBe(before.openFiles.get("/a.md"));
+    expect(state.openFiles.get("/a.md")!.isDirty).toBe(true);
+    expect(getTabViewState(a.id, "/a.md").cursor).toBe(3);
+    expect(state.activeTabId).toBe(a.id);
+    expect(mockedInvoke.mock.calls.length).toBe(calls);
+    expect(validateLayout(state.layout)).toEqual([]);
+  });
+
+  test("an edge drop of a pane's last tab collapses the source and focuses the new pane", async () => {
+    const { b, left } = await twoPanes();
+    const candidate = plan(b.id, { paneId: left.id, region: "bottom" });
+
+    expect(useEditorStore.getState().moveTabFromDrop(candidate)).toBe(true);
+
+    const state = useEditorStore.getState();
+    const [top, bottom] = panes(state.layout);
+    expect(state.layout.root.kind === "split" && state.layout.root.axis).toBe("y");
+    expect(top!.id).toBe(left.id);
+    expect(bottom!.tabIds).toEqual([b.id]);
+    expect(state.layout.focusedPaneId).toBe(bottom!.id);
+    expect(state.layout).toBe(candidate.layout);
+  });
+
+  test("a centre move onto a pane already showing the document drops that pane's tab without closing the file", async () => {
+    const { a, left, right } = await twoPanes();
+    useEditorStore.getState().setFocusedPane(right.id);
+    await useEditorStore.getState().openFileInNewTab("/a.md");
+    const duplicate = useEditorStore.getState().tabs.at(-1)!;
+    setTabCursor(duplicate.id, "/a.md", 9);
+    setTabCursor(a.id, "/a.md", 2);
+    useEditorStore.getState().updateContent("/a.md", "edited");
+
+    useEditorStore
+      .getState()
+      .moveTabFromDrop(plan(a.id, { paneId: right.id, region: "center" }, duplicate.id));
+
+    const state = useEditorStore.getState();
+    expect(state.tabs.map((tab) => tab.id)).not.toContain(duplicate.id);
+    expect(state.tabs.map((tab) => tab.id)).toContain(a.id);
+    expect(findPane(state.layout, left.id)).toBeNull();
+    expect(state.openFiles.get("/a.md")!.isDirty).toBe(true);
+    expect(getTabViewState(a.id, "/a.md").cursor).toBe(2);
+    // The dropped duplicate is gone for good, so its view state is too.
+    expect(getTabViewState(duplicate.id, "/a.md").cursor).toBe(0);
+  });
+
+  test("a candidate resolved against an older layout revision is refused", async () => {
+    const { a, right } = await twoPanes();
+    const candidate = plan(a.id, { paneId: right.id, region: "center" });
+    useEditorStore.getState().openNewTab();
+    const before = useEditorStore.getState();
+
+    expect(useEditorStore.getState().moveTabFromDrop(candidate)).toBe(false);
+    expect(useEditorStore.getState().layout).toBe(before.layout);
+    expect(useEditorStore.getState().tabs).toBe(before.tabs);
+  });
+
+  test("a candidate whose tab was closed meanwhile is refused", async () => {
+    const { a, right } = await twoPanes();
+    const candidate = plan(a.id, { paneId: right.id, region: "center" });
+    useEditorStore.getState().closeTab(a.id);
+    const before = useEditorStore.getState();
+
+    expect(useEditorStore.getState().moveTabFromDrop(candidate)).toBe(false);
+    expect(useEditorStore.getState().layout).toBe(before.layout);
   });
 });

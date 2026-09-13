@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { createSettingsTab, useEditorStore } from "@/stores/editor-store";
 import { usePaneTabIds } from "@/hooks/use-editor-layout";
+import { findPane } from "@/lib/editor-layout";
 import type { DocumentStats } from "@/lib/document-stats";
 import type { Tab } from "@/stores/editor-store";
 
@@ -97,6 +98,22 @@ export function useCanNavigateForward() {
     const activeTab = s.tabs.find((tab) => tab.id === s.activeTabId);
     return activeTab ? activeTab.forward.length > 0 : false;
   });
+}
+
+/** Whether `paneId`'s own active tab has history, for that pane's strip
+ *  controls — which must not show the focused pane's state. */
+export function usePaneCanNavigate(paneId: string): { back: boolean; forward: boolean } {
+  const back = useEditorStore((s) => {
+    const activeTabId = findPane(s.layout, paneId)?.activeTabId;
+    const activeTab = s.tabs.find((tab) => tab.id === activeTabId);
+    return activeTab ? activeTab.back.length > 0 : false;
+  });
+  const forward = useEditorStore((s) => {
+    const activeTabId = findPane(s.layout, paneId)?.activeTabId;
+    const activeTab = s.tabs.find((tab) => tab.id === activeTabId);
+    return activeTab ? activeTab.forward.length > 0 : false;
+  });
+  return { back, forward };
 }
 
 export function useIsFileLoading(path: string) {

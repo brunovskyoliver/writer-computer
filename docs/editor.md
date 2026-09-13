@@ -167,6 +167,16 @@ Pure-helper tests (`computeToggleSelection`-style) catch math bugs but not focus
 
 When a widget has a click → dispatch → mode-change cycle, mount a real `EditorView` with two instances and simulate clicks. Assert against `view.state.selection.main` and `view.state.field(foldExtension)`, not against helper outputs.
 
+## Panes, tab strips, and drags
+
+The editor area is a binary tree of panes (`lib/editor-layout.ts`, owned by `editor-store.ts`). Rules that hold in the shipped code:
+
+- **One writable layout, one exit.** Every tab/pane mutation goes through the store's `publish`, which normalizes the tree (collapses empty panes, repairs active members and focus) and re-derives `activeTabId`/`activeFilePath` from the focused pane. `revision` moves for layout changes only, never for edits or cursor moves.
+- **Tab bodies never move in the React tree.** `editor-area/index.tsx` renders every body once under a stable tab-id parent and positions it over the rectangle its pane slot measures (`pane-bounds.ts`). A moved tab keeps its editor instance, undo, cursor, and scroll; no save or reload runs on a move. Only a true close, a location replacement, or shutdown crosses a save boundary.
+- **Each pane owns its strip.** `EditorTabs` takes a `paneId`; close-others / close-all, scroll-into-view, and the back/forward enabled state are scoped to that strip. The strip floats over the top of its pane body (like the old global strip floated over the editor), so bodies keep their existing headroom. Only empty strip space carries `data-tauri-drag-region`; tabs never do, so a press on a tab never drags the OS window.
+- **One pointer coordinator** (`hooks/use-editor-drag.ts`) owns every drag that can end in the editor area: threshold, pointer capture, the per-frame geometry pass, the resolved candidate, and every end path (release, Escape, `pointercancel`, `lostpointercapture`, blur, source renamed/deleted). Sources are the sidebar tree (`use-tree-drag.ts`, an adapter; its move-on-disk stays the only disk-move path) and a tab. Strips take precedence over body regions; edge bands are `min(25%, 80px)`; corner ties go left, right, top, bottom.
+- **Preview and commit share one candidate.** `buildFileDropCandidate` / `buildTabDropCandidate` return the exact post-transition layout plus its preview rectangle, computed _after_ the source pane collapses. `DropPreview` paints `candidate.previewRect` and nothing else; release re-resolves against the live layout and geometry and the store refuses a candidate whose `expectedRevision` is stale. A drop that would change nothing (same position, own centre, sole tab on its own edge, split below the 240×160 minimum) has no candidate, so no overlay and no commit.
+
 ## File map
 
 - `mermaid-decorations.ts` — canonical replace-only block widget with in-widget editing. Reference for live position lookup (`findEnclosingFencedCode`) and writing the fence back from a nested editor.

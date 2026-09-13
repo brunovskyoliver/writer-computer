@@ -1,12 +1,13 @@
 import { useCallback } from "react";
 import { useActiveTab, useOpenTabs } from "@/hooks/use-tabs";
-import { usePane, useIsTabFocused } from "@/hooks/use-editor-layout";
+import { usePane, useIsTabFocused, useSetFocusedPane } from "@/hooks/use-editor-layout";
 import { useEditorStore } from "@/stores/editor-store";
 import { paneOfTab } from "@/lib/editor-layout";
 import type { Tab } from "@/stores/editor-store";
 import { pageKind } from "./page-kinds";
 import { pageKindView } from "./page-kinds/views";
 import { PaneLayout } from "./pane-layout";
+import { DropPreview } from "./drop-preview";
 import { setPaneContainer, usePaneRect } from "./pane-bounds";
 import { EditorSearchOverlay } from "./editor-search-overlay";
 import { EditorNoticeBanner } from "./editor-notice-banner";
@@ -29,6 +30,7 @@ function TabHost({ tab }: { tab: Tab }) {
   const rect = usePaneRect(paneId ?? "");
   const isVisible = pane?.activeTabId === tab.id;
   const isFocused = useIsTabFocused(tab.id);
+  const setFocusedPane = useSetFocusedPane();
 
   const kind = pageKind(tab.location);
   if (!kind.keepAlive && !isVisible) return null;
@@ -56,6 +58,10 @@ function TabHost({ tab }: { tab: Tab }) {
         // no visual space and receives nothing.
         display: isVisible ? undefined : "none",
       }}
+      // A body sits over its pane slot, so the slot never sees these
+      // presses: focus the pane here, before any editor handler runs.
+      onPointerDownCapture={() => paneId && setFocusedPane(paneId)}
+      onFocusCapture={() => paneId && setFocusedPane(paneId)}
     >
       <Component
         location={tab.location}
@@ -84,6 +90,7 @@ function EditorArea() {
         {tabs.map((tab) => (
           <TabHost key={tab.id} tab={tab} />
         ))}
+        <DropPreview />
       </div>
       {activeTab ? pageKindView(activeTab.location).renderFooter?.(activeTab.location) : null}
       <EditorSearchOverlay />

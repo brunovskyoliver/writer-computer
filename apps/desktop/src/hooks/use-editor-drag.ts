@@ -1,8 +1,14 @@
 import { useSyncExternalStore } from "react";
-import { getEditorAreaGeometry, type PaneRect } from "@/components/editor-area/pane-bounds";
-import { locationBehavior } from "@/components/editor-area/page-kinds";
+import {
+  getEditorAreaGeometry,
+  type PaneRect,
+  type StripRect,
+} from "@/components/editor-area/pane-bounds";
+import { locationBehavior, serializeLocation } from "@/components/editor-area/page-kinds";
 import {
   buildFileDropCandidate,
+  buildTabDropCandidate,
+  containsPoint,
   findPane,
   resolveDropRegion,
   type DropCandidate,
@@ -23,7 +29,7 @@ import {
  * The window's one pointer-drag coordinator.
  *
  * Every drag that can end in the editor area — a file selection from the
- * sidebar today, a tab from a strip next — is armed here. The coordinator owns
+ * sidebar, a tab from a strip — is armed here. The coordinator owns
  * what must be owned exactly once: the activation threshold, pointer capture,
  * the per-frame geometry pass, the resolved candidate, and every way a drag
  * can end (release, Escape, pointercancel, lost capture, blur). The source
@@ -49,15 +55,20 @@ export interface EditorAreaGeometry {
   area: Rect;
   /** Pane bodies, relative to `area`. */
   panes: ReadonlyMap<string, PaneRect>;
+  /** Tab strips and their tab boxes, relative to `area`. A strip takes
+   *  precedence over the body it floats over. */
+  strips: ReadonlyMap<string, StripRect>;
 }
 
-export type DragSource = {
-  kind: "files";
-  paths: string[];
-  /** False when the selection holds something that is not a document (a
-   *  folder): the editor area is then not a target at all. */
-  droppable: boolean;
-};
+export type DragSource =
+  | {
+      kind: "files";
+      paths: string[];
+      /** False when the selection holds something that is not a document (a
+       *  folder): the editor area is then not a target at all. */
+      droppable: boolean;
+    }
+  | { kind: "tab"; tabId: string };
 
 export interface DragAdapter {
   /** The threshold was crossed; the drag is now live. */
@@ -107,6 +118,8 @@ export interface DragEnvironment {
   workspaceIdentity: () => unknown;
   isWorkspaceCurrent: (identity: unknown) => boolean;
   openFilesFromDrop: (drop: FileDrop, isCurrent: () => boolean) => Promise<FileDropOutcome>;
+  /** Synchronous: a tab move needs no I/O. False means the store refused it. */
+  moveTabFromDrop: (candidate: DropCandidate) => boolean;
   suppressNextClick: () => void;
   reportFailure: (message: string) => void;
 }
@@ -120,6 +133,10 @@ export interface DragCoordinator {
   subscribe: (listener: () => void) => () => void;
 }
 
+/** What the last frame resolved: the sidebar's drop with its minted tabs, or
+ *  a tab's candidate. Both carry the one candidate the preview paints. */
+type ResolvedDrop = { kind: "files"; drop: FileDrop } | { kind: "tab"; candidate: DropCandidate };
+
 interface DragSession {
   pointerId: number;
   target: PointerCaptureTarget | null;
@@ -129,7 +146,10 @@ interface DragSession {
   start: Point;
   point: Point;
   started: boolean;
-  drop: FileDrop | null;
+  drop: ResolvedDrop | null;
+  /** A tab source's location at press time. If the tab is renamed or deleted
+   *  under the pointer, the thing being dragged is gone and the drag ends. */
+  sourceLocation: string | null;
   frame: number | null;
   abort: AbortController;
   /** One tab per path for the life of the drag, so the candidate's tab ids
@@ -157,10 +177,103 @@ function existingTabForPath(layout: Layout, tabs: Tab[], paneId: string, path: s
   return matches.find((tabId) => tabId === pane.activeTabId) ?? matches[0]!;
 }
 
+/** Width of the insertion bar painted in a strip gap. */
+const INSERTION_GAP_WIDTH = 4;
+
+/**
+ * The strip under `point`, with the insertion index the pointer is nearest:
+ * the count of tabs (other than `excludeTabId`, the dragged tab itself) whose
+ * midpoint is left of it. Excluding the source is what makes the index valid
+ * for the strip *after* the source is removed. `previewRect` is the gap bar.
+ */
+function resolveStripInsertion(
+  geometry: EditorAreaGeometry,
+  local: Point,
+  excludeTabId: string | null,
+): { paneId: string; insertionIndex: number; previewRect: Rect } | null {
+  for (const [paneId, strip] of geometry.strips) {
+    const rect = { x: strip.left, y: strip.top, width: strip.width, height: strip.height };
+    if (!containsPoint(rect, local)) continue;
+    const tabs = strip.tabs.filter((box) => box.tabId !== excludeTabId);
+    let insertionIndex = 0;
+    for (const box of tabs) {
+      if (local.x < box.left + box.width / 2) break;
+      insertionIndex += 1;
+    }
+    const gapX =
+      tabs.length === 0
+        ? strip.left
+        : insertionIndex < tabs.length
+          ? tabs[insertionIndex]!.left
+          : tabs[tabs.length - 1]!.left + tabs[tabs.length - 1]!.width;
+    return {
+      paneId,
+      insertionIndex,
+      previewRect: {
+        x: gapX - INSERTION_GAP_WIDTH / 2,
+        y: strip.top,
+        width: INSERTION_GAP_WIDTH,
+        height: strip.height,
+      },
+    };
+  }
+  return null;
+}
+
+/** The pane body under `local`, and which of its regions. */
+function resolveBodyRegion(geometry: EditorAreaGeometry, local: Point) {
+  for (const [paneId, body] of geometry.panes) {
+    const rect = { x: body.left, y: body.top, width: body.width, height: body.height };
+    const region = resolveDropRegion(rect, local);
+    if (region) return { paneId, region };
+  }
+  return null;
+}
+
+function localPoint(geometry: EditorAreaGeometry, point: Point): Point {
+  return { x: point.x - geometry.area.x, y: point.y - geometry.area.y };
+}
+
+function areaRect(geometry: EditorAreaGeometry): Rect {
+  return { x: 0, y: 0, width: geometry.area.width, height: geometry.area.height };
+}
+
+/**
+ * Resolve a dragged tab at `point`: a strip gap first, else a body region.
+ * Null outside every target or where the drop must not be offered.
+ */
+export function resolveTabDrop({
+  layout,
+  tabs,
+  geometry,
+  point,
+  tabId,
+}: {
+  layout: Layout;
+  tabs: Tab[];
+  geometry: EditorAreaGeometry;
+  point: Point;
+  tabId: string;
+}): DropCandidate | null {
+  const local = localPoint(geometry, point);
+  const strip = resolveStripInsertion(geometry, local, tabId);
+  const target = strip ?? resolveBodyRegion(geometry, local);
+  if (!target) return null;
+
+  const tab = tabs.find((candidate) => candidate.id === tabId);
+  const path = tab ? tabPath(tab) : null;
+  // Only a strip or centre drop lands in the target pane; an edge opens a
+  // deliberate second view, so nothing is replaced there.
+  const replaces = "insertionIndex" in target || target.region === "center";
+  const duplicate = replaces && path ? existingTabForPath(layout, tabs, target.paneId, path) : null;
+  return buildTabDropCandidate(layout, tabId, target, areaRect(geometry), duplicate);
+}
+
 /**
  * Resolve a file selection at `point` against the live layout: which pane,
  * which region, and the exact layout that would commit. Null when the point
- * is outside every pane body or the drop must not be offered there.
+ * is outside every pane body or the drop must not be offered there. A strip
+ * counts as its pane's centre: the files open there as tabs.
  */
 export function resolveFileDrop({
   layout,
@@ -178,26 +291,35 @@ export function resolveFileDrop({
   tabForPath: (path: string) => Tab;
 }): FileDrop | null {
   if (paths.length === 0) return null;
-  const local = { x: point.x - geometry.area.x, y: point.y - geometry.area.y };
-  const area = { x: 0, y: 0, width: geometry.area.width, height: geometry.area.height };
+  const local = localPoint(geometry, point);
+  const strip = resolveStripInsertion(geometry, local, null);
+  const target = strip
+    ? { paneId: strip.paneId, region: "center" as const }
+    : resolveBodyRegion(geometry, local);
+  if (!target) return null;
+  const { paneId, region } = target;
 
-  for (const [paneId, body] of geometry.panes) {
-    const rect = { x: body.left, y: body.top, width: body.width, height: body.height };
-    const region = resolveDropRegion(rect, local);
-    if (!region) continue;
+  const items = paths.map((path) => ({
+    tabId: tabForPath(path).id,
+    existingTabId: region === "center" ? existingTabForPath(layout, tabs, paneId, path) : null,
+  }));
+  const candidate = buildFileDropCandidate(layout, paneId, region, areaRect(geometry), items);
+  if (!candidate) return null;
+  const newTabs = items.flatMap((item, index) =>
+    item.existingTabId ? [] : [tabForPath(paths[index]!)],
+  );
+  return { candidate, newTabs };
+}
 
-    const items = paths.map((path) => ({
-      tabId: tabForPath(path).id,
-      existingTabId: region === "center" ? existingTabForPath(layout, tabs, paneId, path) : null,
-    }));
-    const candidate = buildFileDropCandidate(layout, paneId, region, area, items);
-    if (!candidate) return null;
-    const newTabs = items.flatMap((item, index) =>
-      item.existingTabId ? [] : [tabForPath(paths[index]!)],
-    );
-    return { candidate, newTabs };
-  }
-  return null;
+function candidateOf(drop: ResolvedDrop | null): DropCandidate | null {
+  if (!drop) return null;
+  return drop.kind === "files" ? drop.drop.candidate : drop.candidate;
+}
+
+/** The dragged tab's identity: its id plus where it points. */
+function tabSourceLocation(tabs: Tab[], tabId: string): string | null {
+  const tab = tabs.find((candidate) => candidate.id === tabId);
+  return tab ? JSON.stringify(serializeLocation(tab.location)) : null;
 }
 
 function sameCandidate(a: DropCandidate | null, b: DropCandidate | null) {
@@ -233,24 +355,35 @@ export function createDragCoordinator(env: DragEnvironment): DragCoordinator {
     for (const listener of listeners) listener();
   };
 
-  const setDrop = (drop: FileDrop | null) => {
+  const setDrop = (drop: ResolvedDrop | null) => {
     if (!session) return;
-    const changed = !sameCandidate(session.drop?.candidate ?? null, drop?.candidate ?? null);
+    const changed = !sameCandidate(candidateOf(session.drop), candidateOf(drop));
     session.drop = drop;
     if (changed) notify();
   };
 
-  const resolve = (current: DragSession): FileDrop | null => {
-    if (!current.source.droppable) return null;
+  const resolve = (current: DragSession): ResolvedDrop | null => {
     const geometry = env.geometry();
     if (!geometry) return null;
     const { layout, tabs } = env.editor();
-    return resolveFileDrop({
+    const { source } = current;
+    if (source.kind === "tab") {
+      const candidate = resolveTabDrop({
+        layout,
+        tabs,
+        geometry,
+        point: current.point,
+        tabId: source.tabId,
+      });
+      return candidate ? { kind: "tab", candidate } : null;
+    }
+    if (!source.droppable) return null;
+    const drop = resolveFileDrop({
       layout,
       tabs,
       geometry,
       point: current.point,
-      paths: current.source.paths,
+      paths: source.paths,
       tabForPath: (path) => {
         let tab = current.tabsByPath.get(path);
         if (!tab) {
@@ -260,6 +393,15 @@ export function createDragCoordinator(env: DragEnvironment): DragCoordinator {
         return tab;
       },
     });
+    return drop ? { kind: "files", drop } : null;
+  };
+
+  /** The source still exists as it was picked up: the adapter's check for
+   *  files, the tab's id and location for a tab. */
+  const isSourceValid = (current: DragSession) => {
+    if (current.adapter.isSourceValid && !current.adapter.isSourceValid()) return false;
+    if (current.source.kind !== "tab") return true;
+    return tabSourceLocation(env.editor().tabs, current.source.tabId) === current.sourceLocation;
   };
 
   /** Tear the drag down. Everything that can end a drag goes through here. */
@@ -289,7 +431,7 @@ export function createDragCoordinator(env: DragEnvironment): DragCoordinator {
     const current = session;
     if (!current) return;
     current.frame = null;
-    if (current.adapter.isSourceValid && !current.adapter.isSourceValid()) {
+    if (!isSourceValid(current)) {
       cancel();
       return;
     }
@@ -326,15 +468,22 @@ export function createDragCoordinator(env: DragEnvironment): DragCoordinator {
     }
   };
 
-  const commit = (current: DragSession, drop: FileDrop) => {
+  const commit = (current: DragSession, resolved: ResolvedDrop) => {
+    if (resolved.kind === "tab") {
+      // A refused move is the store seeing a newer revision than the one the
+      // candidate was re-resolved against a moment ago; nothing to report.
+      env.moveTabFromDrop(resolved.candidate);
+      return;
+    }
+    const paths = current.source.kind === "files" ? current.source.paths : [];
     const isCurrent = () => env.isWorkspaceCurrent(current.workspace);
     void env
-      .openFilesFromDrop(drop, isCurrent)
+      .openFilesFromDrop(resolved.drop, isCurrent)
       .then((outcome) => {
         if (outcome.status === "failed") env.reportFailure(describeFailure(outcome.errors));
       })
       .catch((error: unknown) => {
-        env.reportFailure(describeFailure([{ path: current.source.paths.join(", "), error }]));
+        env.reportFailure(describeFailure([{ path: paths.join(", "), error }]));
       });
   };
 
@@ -349,9 +498,11 @@ export function createDragCoordinator(env: DragEnvironment): DragCoordinator {
     if (event.clientX !== undefined && event.clientY !== undefined) {
       current.point = { x: event.clientX, y: event.clientY };
     }
-    const sourceValid = current.adapter.isSourceValid?.() ?? true;
-    // Resolve against the layout as it is at release, not as it was on the
-    // last frame: a candidate is only ever valid for one revision.
+    const sourceValid = isSourceValid(current);
+    // Resolve against the layout and geometry as they are at release, not as
+    // they were on the last frame: a candidate is only ever valid for one
+    // layout revision and one set of measured rectangles. Recomputing here is
+    // what makes the committed result the previewed one.
     const drop = sourceValid ? resolve(current) : null;
     env.suppressNextClick();
     if (drop) {
@@ -394,6 +545,8 @@ export function createDragCoordinator(env: DragEnvironment): DragCoordinator {
       point: { x: press.clientX, y: press.clientY },
       started: false,
       drop: null,
+      sourceLocation:
+        source.kind === "tab" ? tabSourceLocation(env.editor().tabs, source.tabId) : null,
       frame: null,
       abort,
       tabsByPath: new Map(),
@@ -410,7 +563,7 @@ export function createDragCoordinator(env: DragEnvironment): DragCoordinator {
     arm,
     cancel,
     isActive: () => session !== null,
-    getCandidate: () => session?.drop?.candidate ?? null,
+    getCandidate: () => candidateOf(session?.drop ?? null),
     subscribe: (listener) => {
       listeners.add(listener);
       return () => {
@@ -454,6 +607,7 @@ function browserEnvironment(): DragEnvironment {
       isCurrentWorkspaceIdentity(identity as ReturnType<typeof getWorkspaceIdentity>),
     openFilesFromDrop: (drop, isCurrent) =>
       useEditorStore.getState().openFilesFromDrop(drop, isCurrent),
+    moveTabFromDrop: (candidate) => useEditorStore.getState().moveTabFromDrop(candidate),
     suppressNextClick,
     reportFailure: (message) => window.alert(message),
   };

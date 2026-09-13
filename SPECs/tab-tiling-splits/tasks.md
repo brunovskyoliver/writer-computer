@@ -83,16 +83,19 @@ description: "Dependency-ordered implementation tasks for tab tiling and split p
 
 ### Tests for User Story 2
 
-- [ ] T020 [US2] Add failing transition/store tests for within-strip index correction, cross-strip insertion, centre moves, edge splits after source collapse, destination duplicate replacement, no-op drops, sole-tab self-edge rejection, source deletion/rename cancellation, and empty-source collapse in `apps/desktop/tests/editor-layout.test.ts` and `apps/desktop/tests/stores.test.ts`
-- [ ] T021 [US2] Add failing interaction tests for click suppression after drag activation, tab pointerdown excluding Tauri window drag, empty strip retaining window drag, and all cancellation paths clearing the drag without mutations in `apps/desktop/tests/editor-tabs-drag.test.tsx`
+- [x] T020 [US2] Add failing transition/store tests for within-strip index correction, cross-strip insertion, centre moves, edge splits after source collapse, destination duplicate replacement, no-op drops, sole-tab self-edge rejection, source deletion/rename cancellation, and empty-source collapse in `apps/desktop/tests/editor-layout.test.ts` and `apps/desktop/tests/stores.test.ts`
+- [x] T021 [US2] Add failing interaction tests for click suppression after drag activation, tab pointerdown excluding Tauri window drag, empty strip retaining window drag, and all cancellation paths clearing the drag without mutations in `apps/desktop/tests/editor-tabs-drag.test.tsx`
+  - Landed as `tests/editor-tabs-drag.test.ts`, driving the coordinator through the injected environment (same reason as T013: the runner is node-only and mounts nothing). Covered there: click suppression after activation (and none for a plain press), strip precedence, within-strip index correction, no-op drops, post-collapse preview, duplicate replacement, sole-tab self-edge, every cancel path, and rename/delete of the source. The window-drag rule is structural rather than tested: tabs carry no `data-tauri-drag-region` and Tauri only starts a window drag from the pressed element itself, so it belongs to the hand test.
 
 ### Implementation for User Story 2
 
-- [ ] T022 [US2] Add tab-ID drag sources and strip insertion targets, suppress the synthesized click after activation, and restrict `data-tauri-drag-region` to empty strip/titlebar space in `apps/desktop/src/components/editor-area/editor-tabs.tsx` and `apps/desktop/src/components/app-layout.tsx`
-- [ ] T023 [US2] Implement one atomic tab move/reorder/split action that preserves tab identity/history/registration, removes a same-document destination tab without invoking close/save, collapses empty source ancestors, and focuses the destination in `apps/desktop/src/lib/editor-layout.ts` and `apps/desktop/src/stores/editor-store.ts`
-- [ ] T024 [US2] Scope tab-strip scrolling and close/close-others/close-all context actions to the owning pane while keeping existing open/replace policy in `apps/desktop/src/components/editor-area/editor-tabs.tsx` and `apps/desktop/src/components/editor-area/editor-context-menu.ts`
+- [x] T022 [US2] Add tab-ID drag sources and strip insertion targets, suppress the synthesized click after activation, and restrict `data-tauri-drag-region` to empty strip/titlebar space in `apps/desktop/src/components/editor-area/editor-tabs.tsx` and `apps/desktop/src/components/app-layout.tsx`
+- [x] T023 [US2] Implement one atomic tab move/reorder/split action that preserves tab identity/history/registration, removes a same-document destination tab without invoking close/save, collapses empty source ancestors, and focuses the destination in `apps/desktop/src/lib/editor-layout.ts` and `apps/desktop/src/stores/editor-store.ts`
+- [x] T024 [US2] Scope tab-strip scrolling and close/close-others/close-all context actions to the owning pane while keeping existing open/replace policy in `apps/desktop/src/components/editor-area/editor-tabs.tsx` and `apps/desktop/src/components/editor-area/editor-context-menu.ts`
 
 **Checkpoint**: Tabs can be rearranged safely across the layout, including the source-collapse cases that change final geometry.
+
+> Status: done in code, 793 tests passing, `vp check`, `tsc`, and `vp build` clean. The global strip moved out of `app-layout.tsx` into `pane-layout.tsx`, one strip per pane, floating over the top of its body so existing headroom and the drawing chrome offset stay as they were. Strips are measured on demand (`registerPaneStrip` / `getEditorAreaGeometry().strips`) because their tab boxes shift with strip scrolling. Not done: strip autoscroll while a drag hovers its edge (the contract allows it; nothing needs it yet). Not runtime-verified — the checkpoint's hand test is owed together with Phase 3's.
 
 ---
 
@@ -104,14 +107,17 @@ description: "Dependency-ordered implementation tasks for tab tiling and split p
 
 ### Tests for User Story 3
 
-- [ ] T025 [US3] Add failing geometry tests for edge bands capped at `min(25%, 80px)`, reachable centres, normalized corner distance with left/right/top/bottom tie order, strip precedence, invalid-target absence, post-source-collapse bounds, stale-candidate recomputation, and preview/result equality in `apps/desktop/tests/editor-layout.test.ts`
+- [x] T025 [US3] Add failing geometry tests for edge bands capped at `min(25%, 80px)`, reachable centres, normalized corner distance with left/right/top/bottom tie order, strip precedence, invalid-target absence, post-source-collapse bounds, stale-candidate recomputation, and preview/result equality in `apps/desktop/tests/editor-layout.test.ts`
 
 ### Implementation for User Story 3
 
-- [ ] T026 [US3] Make the pointer coordinator retain one resolved candidate containing expected layout revision, geometry revision, validated resulting layout/focus, and final preview rectangle; recompute before release or cancel if revalidation fails in `apps/desktop/src/hooks/use-editor-drag.ts` and `apps/desktop/src/lib/editor-layout.ts`
-- [ ] T027 [US3] Render the candidate rectangle or insertion gap with the existing accent at 18% opacity, clip it to editor bounds, set `pointer-events: none`, and clear it synchronously on completion/cancellation in `apps/desktop/src/components/editor-area/drop-preview.tsx`, `apps/desktop/src/components/editor-area/pane-layout.tsx`, and `apps/desktop/src/App.css`
+- [x] T026 [US3] Make the pointer coordinator retain one resolved candidate containing expected layout revision, geometry revision, validated resulting layout/focus, and final preview rectangle; recompute before release or cancel if revalidation fails in `apps/desktop/src/hooks/use-editor-drag.ts` and `apps/desktop/src/lib/editor-layout.ts`
+  - No separate geometry revision: release always re-resolves against the live layout and freshly measured geometry, which subsumes "recompute if either changed" and is the smaller rule. The retained candidate is what the preview paints between frames; the store still refuses a candidate whose `expectedRevision` is stale.
+- [x] T027 [US3] Render the candidate rectangle or insertion gap with the existing accent at 18% opacity, clip it to editor bounds, set `pointer-events: none`, and clear it synchronously on completion/cancellation in `apps/desktop/src/components/editor-area/drop-preview.tsx`, `apps/desktop/src/components/editor-area/pane-layout.tsx`, and `apps/desktop/src/App.css`
 
 **Checkpoint**: All P1 drag gestures have an unambiguous preview backed by the same candidate they commit.
+
+> Status: done in code. `DropPreview` mounts only while a candidate exists and paints `candidate.previewRect` (18% accent for bodies, a denser 4 px bar for strip gaps, `pointer-events: none`, clipped by the editor area's `overflow-hidden`). Light/dark legibility is a hand check.
 
 ---
 
