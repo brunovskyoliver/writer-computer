@@ -147,11 +147,9 @@
   width: 100%;
   max-width: var(--writer-editor-outer-width, calc(734px + 4rem + 4rem));
   margin: 0 auto;
-  /* A small gap after the last line: enough to clear the scroller's bottom
-     fade (15% of its height, see editor-scroll-container.tsx) so the last
-     line is never dimmed, and never more. `cqh` is the scroll container's
-     height (a size container), so a half-height pane gets a half-size gap. */
-  padding: 0 var(--writer-editor-side-padding, 4rem) max(4rem, 15cqh);
+  /* A small fixed gap after the last line; the document stops scrolling
+     just above the pane's edge. */
+  padding: 0 var(--writer-editor-side-padding, 4rem) 2.5rem;
   font-family: var(
     --writer-editor-font-family,
     -apple-system-body,
