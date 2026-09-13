@@ -7,6 +7,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import type { DirEntry } from "@/types/fs";
+import { editorDrag, type DragAdapter } from "@/hooks/use-editor-drag";
 import type { FlatTreeItem } from "./flatten-tree";
 import { canMoveInto, resolveDropDir, resolveDropRange } from "./tree-move";
 import type { MoveOutcome } from "./use-move-entry";
@@ -27,9 +28,6 @@ export interface DragGhostState {
   isExpanded: boolean;
 }
 
-// Distance the pointer must travel before a press becomes a drag (so plain
-// clicks still open/select).
-const DRAG_THRESHOLD_PX = 4;
 // How close to the scroll container's edge the pointer must be to auto-scroll,
 // and how fast to scroll per animation frame.
 const AUTO_SCROLL_EDGE_PX = 28;
@@ -47,9 +45,6 @@ interface UseTreeDragArgs {
 }
 
 interface PendingDrag {
-  pointerId: number;
-  startX: number;
-  startY: number;
   /** Pointer offset within the grabbed row at press time, so the ghost lifts
    *  off exactly over the item and keeps the cursor at that same spot. */
   grabOffsetX: number;
@@ -60,7 +55,6 @@ interface PendingDrag {
   /** The grabbed row — drives the ghost's icon and name. */
   primary: DirEntry;
   entries: DirEntry[];
-  started: boolean;
 }
 
 /** Nearest scrollable ancestor, used to auto-scroll the tree during a drag. */
@@ -95,24 +89,17 @@ function rowPathAtY(container: HTMLElement, y: number): string | null {
 }
 
 /**
- * Swallow the single `click` that the browser fires after a drag completes, so
- * dragging an item never also opens/toggles it. Self-removes after that click
- * (or on the next tick if no click arrives).
- */
-function suppressNextClick() {
-  const handler = (event: MouseEvent) => {
-    event.stopPropagation();
-    event.preventDefault();
-    window.removeEventListener("click", handler, true);
-  };
-  window.addEventListener("click", handler, true);
-  setTimeout(() => window.removeEventListener("click", handler, true), 0);
-}
-
-/**
- * Pointer-based drag-and-drop for the file tree. We use raw pointer events
- * (not the HTML5 `draggable` API) because the Tauri window has OS drag-drop
- * enabled for the Finder-drop-to-open feature, which suppresses HTML5 DnD
+ * Drag-and-drop for the file tree, as an adapter on the window's one pointer
+ * coordinator (`editorDrag`). The coordinator owns the pointer: threshold,
+ * capture, the per-frame pass, and every way the gesture ends. This hook
+ * owns what only the tree knows — the ghost, autoscroll inside the tree,
+ * which folder is under the pointer, and the move on disk.
+ *
+ * A release over the editor area is committed by the coordinator and never
+ * reaches this hook, so a drag can open a file or move it, never both.
+ *
+ * Raw pointer events, not the HTML5 `draggable` API: the Tauri window has OS
+ * drag-drop enabled for Finder-drop-to-open, which suppresses HTML5 DnD
  * events inside the webview.
  */
 export function useTreeDrag({
@@ -158,8 +145,6 @@ export function useTreeDrag({
   const pointerPosRef = useRef({ x: 0, y: 0 });
   const dropTargetRef = useRef<string | null>(null);
   const scrollParentRef = useRef<HTMLElement | null>(null);
-  const rafRef = useRef<number | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
 
   const positionGhost = useCallback(() => {
     const ghost = ghostRef.current;
@@ -173,8 +158,9 @@ export function useTreeDrag({
   }, []);
 
   // Resolve the folder under the pointer and, if at least one dragged item can
-  // legally move there, highlight it as the drop target.
-  const updateDropTarget = useCallback(() => {
+  // legally move there, highlight it as the drop target. While the editor has
+  // claimed the pointer there is no tree target, whatever the geometry says.
+  const updateDropTarget = useCallback((overEditor: boolean) => {
     const pending = pendingRef.current;
     if (!pending) return;
     const { x, y } = pointerPosRef.current;
@@ -185,7 +171,7 @@ export function useTreeDrag({
     // non-hit-testable during a drag (to avoid stuck `:hover`), so they wouldn't
     // be returned by `elementFromPoint` anyway.
     let dest: string | null = null;
-    if (container) {
+    if (container && !overEditor) {
       const rect = container.getBoundingClientRect();
       const inside = x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
       if (inside) {
@@ -204,30 +190,24 @@ export function useTreeDrag({
     }
   }, []);
 
-  // Animation loop that runs for the duration of a drag: auto-scrolls near the
-  // edges and keeps the target/ghost in sync while the pointer is held still.
-  const tick = useCallback(() => {
+  // Auto-scroll the tree while the pointer sits near its top or bottom edge —
+  // and only while it is inside the tree. A pointer parked over the editor
+  // area at the same height must not scroll the sidebar.
+  const autoScroll = useCallback(() => {
     const scroller = scrollParentRef.current;
-    if (scroller) {
-      const rect = scroller.getBoundingClientRect();
-      const y = pointerPosRef.current.y;
-      if (y < rect.top + AUTO_SCROLL_EDGE_PX) {
-        scroller.scrollTop -= AUTO_SCROLL_SPEED_PX;
-      } else if (y > rect.bottom - AUTO_SCROLL_EDGE_PX) {
-        scroller.scrollTop += AUTO_SCROLL_SPEED_PX;
-      }
+    if (!scroller) return;
+    const rect = scroller.getBoundingClientRect();
+    const { x, y } = pointerPosRef.current;
+    if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) return;
+    if (y < rect.top + AUTO_SCROLL_EDGE_PX) {
+      scroller.scrollTop -= AUTO_SCROLL_SPEED_PX;
+    } else if (y > rect.bottom - AUTO_SCROLL_EDGE_PX) {
+      scroller.scrollTop += AUTO_SCROLL_SPEED_PX;
     }
-    positionGhost();
-    updateDropTarget();
-    rafRef.current = requestAnimationFrame(tick);
-  }, [positionGhost, updateDropTarget]);
+  }, []);
 
   const endDrag = useCallback(() => {
     document.body.classList.remove("tree-dragging");
-    abortRef.current?.abort();
-    abortRef.current = null;
-    if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
-    rafRef.current = null;
     scrollParentRef.current = null;
     pendingRef.current = null;
     dropTargetRef.current = null;
@@ -270,51 +250,6 @@ export function useTreeDrag({
     }
   }, []);
 
-  const handleMove = useCallback(
-    (event: PointerEvent) => {
-      const pending = pendingRef.current;
-      if (!pending || event.pointerId !== pending.pointerId) return;
-      pointerPosRef.current = { x: event.clientX, y: event.clientY };
-
-      if (!pending.started) {
-        const dx = event.clientX - pending.startX;
-        const dy = event.clientY - pending.startY;
-        if (dx * dx + dy * dy < DRAG_THRESHOLD_PX * DRAG_THRESHOLD_PX) return;
-        pending.started = true;
-        setDraggingPaths(new Set(pending.entries.map((entry) => entry.path)));
-        setDragGhost({
-          entry: pending.primary,
-          count: pending.entries.length,
-          width: pending.rowWidth,
-          paddingLeft: pending.rowPaddingLeft,
-          isExpanded:
-            pending.primary.is_dir && latest.current.expandedDirs.has(pending.primary.path),
-        });
-        scrollParentRef.current = findScrollParent(containerRef.current);
-        document.body.classList.add("tree-dragging");
-        rafRef.current = requestAnimationFrame(tick);
-      }
-
-      positionGhost();
-      updateDropTarget();
-    },
-    [positionGhost, tick, updateDropTarget],
-  );
-
-  const handleEnd = useCallback(
-    (event: PointerEvent) => {
-      const pending = pendingRef.current;
-      if (!pending || event.pointerId !== pending.pointerId) return;
-      const { started, entries } = pending;
-      const dest = dropTargetRef.current;
-      endDrag();
-      if (!started) return; // A plain click — let it open/select normally.
-      suppressNextClick();
-      if (dest) void performDrop(entries, dest);
-    },
-    [endDrag, performDrop],
-  );
-
   // Arm a drag for an already-decided set of rows. The caller (the tree's
   // pointer-down handler) owns selection and passes what should move, so drag
   // and selection are settled together at press time.
@@ -323,31 +258,73 @@ export function useTreeDrag({
       const rowRect = event.currentTarget.getBoundingClientRect();
       const rowPaddingLeft = getComputedStyle(event.currentTarget).paddingLeft;
 
-      pendingRef.current = {
-        pointerId: event.pointerId,
-        startX: event.clientX,
-        startY: event.clientY,
+      const pending: PendingDrag = {
         grabOffsetX: event.clientX - rowRect.left,
         grabOffsetY: event.clientY - rowRect.top,
         rowWidth: rowRect.width,
         rowPaddingLeft,
         primary,
         entries,
-        started: false,
       };
+      pendingRef.current = pending;
       pointerPosRef.current = { x: event.clientX, y: event.clientY };
 
-      const controller = new AbortController();
-      abortRef.current = controller;
-      window.addEventListener("pointermove", handleMove, { signal: controller.signal });
-      window.addEventListener("pointerup", handleEnd, { signal: controller.signal });
-      window.addEventListener("pointercancel", handleEnd, { signal: controller.signal });
+      const adapter: DragAdapter = {
+        onActivate: () => {
+          setDraggingPaths(new Set(entries.map((entry) => entry.path)));
+          setDragGhost({
+            entry: primary,
+            count: entries.length,
+            width: pending.rowWidth,
+            paddingLeft: pending.rowPaddingLeft,
+            isExpanded: primary.is_dir && latest.current.expandedDirs.has(primary.path),
+          });
+          scrollParentRef.current = findScrollParent(containerRef.current);
+          document.body.classList.add("tree-dragging");
+        },
+        onFrame: (point, overEditor) => {
+          pointerPosRef.current = point;
+          autoScroll();
+          positionGhost();
+          updateDropTarget(overEditor);
+        },
+        // A row renamed or deleted under the pointer — by the watcher, by a
+        // second window — is no longer the thing the user picked up.
+        isSourceValid: () => entries.every((entry) => latest.current.entryByPath.has(entry.path)),
+        onRelease: () => {
+          const dest = dropTargetRef.current;
+          if (dest) void performDrop(entries, dest);
+        },
+        onEnd: endDrag,
+      };
+
+      editorDrag().arm(
+        {
+          pointerId: event.pointerId,
+          clientX: event.clientX,
+          clientY: event.clientY,
+          target: event.currentTarget,
+        },
+        // A folder is not a document: the editor area offers nothing for a
+        // selection that contains one, and the tree keeps its move behavior.
+        {
+          kind: "files",
+          paths: entries.map((entry) => entry.path),
+          droppable: entries.every((entry) => !entry.is_dir),
+        },
+        adapter,
+      );
     },
-    [handleEnd, handleMove],
+    [autoScroll, endDrag, performDrop, positionGhost, updateDropTarget],
   );
 
   // Tear down a drag in progress if the tree unmounts mid-gesture.
-  useEffect(() => endDrag, [endDrag]);
+  useEffect(
+    () => () => {
+      editorDrag().cancel();
+    },
+    [],
+  );
 
   // Measure the destination "container" — the drop-target folder row plus its
   // visible descendants — into a single rectangle so it can be highlighted as

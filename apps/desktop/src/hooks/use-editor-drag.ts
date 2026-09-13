@@ -353,15 +353,19 @@ export function createDragCoordinator(env: DragEnvironment): DragCoordinator {
     // Resolve against the layout as it is at release, not as it was on the
     // last frame: a candidate is only ever valid for one revision.
     const drop = sourceValid ? resolve(current) : null;
-    const { adapter, point } = current;
-    teardown();
     env.suppressNextClick();
-    if (!sourceValid) return;
     if (drop) {
+      teardown();
       commit(current, drop);
       return;
     }
-    adapter.onRelease?.(point);
+    // The adapter decides its own drop while its state is still intact —
+    // `onEnd` clears it — and the teardown runs whatever that decision does.
+    try {
+      if (sourceValid) current.adapter.onRelease?.(current.point);
+    } finally {
+      teardown();
+    }
   };
 
   const handleCancel = (event: PointerLike) => {

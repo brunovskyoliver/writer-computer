@@ -338,9 +338,18 @@ describe("editor drag coordinator", () => {
     expect(harness.coordinator.getCandidate()).toBeNull();
     expect(adapter.frames.at(-1)?.overEditor).toBe(false);
 
+    // The tree reads its drop target inside onRelease and clears it in onEnd,
+    // so the order between the two is part of the contract.
+    let endedBeforeRelease: boolean | null = null;
+    adapter.onRelease = (point) => {
+      endedBeforeRelease = adapter.ended > 0;
+      adapter.released.push(point);
+    };
     harness.window.dispatchEvent(pointer("pointerup", 40, 300));
 
     expect(adapter.released).toEqual([{ x: 40, y: 300 }]);
+    expect(endedBeforeRelease).toBe(false);
+    expect(adapter.ended).toBe(1);
     expect(harness.drops).toEqual([]);
     expect(harness.suppressed).toBe(1);
   });
