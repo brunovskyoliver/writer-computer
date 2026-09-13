@@ -399,6 +399,9 @@ i{ a{ i< a< i" a" i' a' i\` a\``and`it at`.
 - `:s` / `:%s` do not report a substitution count: the emulation library only reports
   failures ("No matches for …", "Invalid regex …"), never a count, and Writer does not add
   one. The result is visible in the document and reverts with one `u`.
+- Search highlights do not persist the way Vim's `hlsearch` does: the first edit or mouse
+  click clears them (`n`/`N`/`*`/`#` keep them, `:noh` still works). Chosen on user
+  request during Story 3 validation; lit matches after leaving the search felt like debris.
 - Search-match colour is the CodeMirror search default: neither the app's find overlay nor
   the emulation library themes `.cm-searchMatch`, so both use the same base colour.
 - The emulation library scrolls the editor's own scroller. Writer's editor scrolls through

@@ -1,6 +1,6 @@
 import { Compartment, type Extension } from "@codemirror/state";
-import { EditorView, ViewPlugin, type PluginValue } from "@codemirror/view";
-import type { CodeMirror } from "@replit/codemirror-vim";
+import { EditorView, ViewPlugin, type PluginValue, type ViewUpdate } from "@codemirror/view";
+import type { CodeMirror, CodeMirrorV } from "@replit/codemirror-vim";
 import * as editorApi from "@/hooks/editor-api";
 import { saveNow } from "@/lib/save";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -131,6 +131,25 @@ class VimModePlugin implements PluginValue {
     // survive the flip.
     this.view.dispatch({ effects: this.compartment.reconfigure([]) });
     deleteTab(this.getTabId());
+  }
+
+  /**
+   * Vim keeps search matches lit until `:noh`. Writer drops them on the first
+   * edit or mouse click instead; `n` / `N` / `*` / `#` only move the caret
+   * and keep the highlight. `:noh` dispatches, so it runs after the update.
+   */
+  update(update: ViewUpdate) {
+    if (!this.enabled) return;
+    const searchState = this.cm?.state.vim?.searchState_;
+    if (!searchState?.getOverlay()) return;
+    const pointer = update.transactions.some((tr) => tr.isUserEvent("select.pointer"));
+    if (!update.docChanged && !pointer) return;
+    queueMicrotask(() => {
+      if (!this.enabled || !this.cm || !searchState.getOverlay()) return;
+      // `CodeMirrorV` only narrows `state.vim` to non-null, which the
+      // search-state read above already established.
+      this.vim?.handleEx(this.cm as CodeMirrorV, "nohlsearch");
+    });
   }
 
   private readonly onModeChange = (e: { mode: string; subMode?: string }) => {
