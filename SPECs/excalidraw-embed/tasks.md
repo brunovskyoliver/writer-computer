@@ -48,16 +48,16 @@ both branches. Do not start Phase 3 before T009 reports and the user picks a bra
 
 **⚠️ CRITICAL**: No implementation task may begin until T009 has reported and a branch is chosen.
 
-- [ ] T004 Add a throwaway spike module at `apps/desktop/src/lib/__spike-excalidraw.ts` that builds one scene containing **both a text element and an embedded image** (so `appState`, `elements`, and the `files` map are all exercised) and exports it via `exportToSvg({ appState: { exportEmbedScene: true } })`
-- [ ] T005 In `apps/desktop/src/lib/__spike-excalidraw.ts`, run the **repeated** round-trip: export → `loadFromBlob` → diff element array against the original → edit → export → `loadFromBlob` again. At least two full cycles; record per-cycle diffs of `elements`, `appState`, and `files`
-- [ ] T006 [P] In the spike, grep the exported SVG for the scene payload, for `@font-face`, and for `base64`; then load the exact file through `convertFileSrc` inside an `<img>` and record whether the hand-drawn glyphs render (a remote `@font-face` cannot be fetched from a sandboxed `<img>`)
-- [ ] T007 [P] Add a module with `import("@excalidraw/excalidraw")` behind a dynamic import, run `vp build` from `apps/desktop/`, and record the real emitted chunk sizes from the build output (the 46 MB npm unpacked figure is tarball-with-sourcemaps and is not the number that matters)
-- [ ] T008 [P] Verify offline behavior with `window.EXCALIDRAW_ASSET_PATH` unset vs. pointed at bundled assets, and record exactly what breaks (expected: fonts and workers)
-- [ ] T009 Report all four spike results to the user and **stop for the branch decision** (Principle VI). Losing `elements`, `appState`, or `files` on cycle two is a spike **failure** → Branch B, not a caveat to accept
-- [ ] T010 Delete `apps/desktop/src/lib/__spike-excalidraw.ts` and the throwaway dynamic-import module; nothing from the spike is committed
-- [ ] T011 Rewrite `SPECs/excalidraw-embed/spec.md` from research into a real spec for the chosen branch, keeping the section shape of `SPECs/mermaid-canvas-widget-spec.md` (Summary / Goals / Non-Goals / UX Decisions / Implementation Notes / Files Expected To Change / Acceptance Criteria)
+- [x] T004 Add a throwaway spike module at `apps/desktop/src/lib/__spike-excalidraw.ts` that builds one scene containing **both a text element and an embedded image** (so `appState`, `elements`, and the `files` map are all exercised) and exports it via `exportToSvg({ appState: { exportEmbedScene: true } })`
+- [x] T005 In `apps/desktop/src/lib/__spike-excalidraw.ts`, run the **repeated** round-trip: export → `loadFromBlob` → diff element array against the original → edit → export → `loadFromBlob` again. At least two full cycles; record per-cycle diffs of `elements`, `appState`, and `files`
+- [x] T006 [P] In the spike, grep the exported SVG for the scene payload, for `@font-face`, and for `base64`; then load the exact file through `convertFileSrc` inside an `<img>` and record whether the hand-drawn glyphs render (a remote `@font-face` cannot be fetched from a sandboxed `<img>`)
+- [x] T007 [P] Add a module with `import("@excalidraw/excalidraw")` behind a dynamic import, run `vp build` from `apps/desktop/`, and record the real emitted chunk sizes from the build output (the 46 MB npm unpacked figure is tarball-with-sourcemaps and is not the number that matters)
+- [x] T008 [P] Verify offline behavior with `window.EXCALIDRAW_ASSET_PATH` unset vs. pointed at bundled assets, and record exactly what breaks (expected: fonts and workers)
+- [x] T009 Report all four spike results to the user and **stop for the branch decision** (Principle VI). Losing `elements`, `appState`, or `files` on cycle two is a spike **failure** → Branch B, not a caveat to accept
+- [x] T010 Delete `apps/desktop/src/lib/__spike-excalidraw.ts`, `apps/desktop/src/lib/__spike-lazy.ts`, `apps/desktop/spike.html`, and `apps/desktop/spike-lazy.html`; nothing from the spike is committed
+- [x] T011 Rewrite `SPECs/excalidraw-embed/spec.md` from research into a real spec for the chosen branch, keeping the section shape of `SPECs/mermaid-canvas-widget-spec.md` (Summary / Goals / Non-Goals / UX Decisions / Implementation Notes / Files Expected To Change / Acceptance Criteria)
 
-**Checkpoint**: Branch chosen and recorded in spec.md. Phase 3 can begin.
+**Checkpoint**: ✅ **Branch A chosen** (`.excalidraw.svg`, `<img>` embeds, transparent background) and recorded in spec.md. Phase 3 can begin, Branch A block only.
 
 ---
 
@@ -68,14 +68,14 @@ both branches. Do not start Phase 3 before T009 reports and the user picks a bra
 ### Branch A — round-trip holds (`.excalidraw.svg`, scene in SVG metadata)
 
 - [ ] T012 Create `apps/desktop/src/lib/drawings.ts` with `isDrawingPath(path)` matching the **compound** extension `.excalidraw.svg` only — a plain `.svg` is an image, not a drawing
-- [ ] T013 In `apps/desktop/src/lib/drawings.ts`, implement the save path via `exportToSvg` with `exportEmbedScene: true` and `exportBackground: false` (transparent background so the drawing sits on the note's own background and reads correctly in both themes; an `<img>`-hosted SVG is inert and cannot react to a theme change afterward)
+- [ ] T013 In `apps/desktop/src/lib/drawings.ts`, implement the save path via `exportToSvg` with `exportEmbedScene: true` and `exportBackground: false`. Note from the spike: transparent does **not** mean "reads correctly in both themes" — the strokes are baked dark (`#1e1e1e`) and the SVG is inert, so a drawing is hard to read on a dark background. **Decided at T011: transparent, accepting the dark-theme cost.** The alternative (`exportBackground: true` with an explicit `viewBackgroundColor`, which the spike proved round-trips) was considered and not taken
 - [ ] T014 In `apps/desktop/src/lib/drawings.ts`, implement the load path via `loadFromBlob`, returning a parse error rather than an empty scene on failure
 
-### Branch B — round-trip fails (`.excalidraw` raw JSON)
+### Branch B — NOT TAKEN (Branch A chosen at T009; these tasks are dead)
 
-- [ ] T015 Create `apps/desktop/src/lib/drawings.ts` with `isDrawingPath(path)` matching `.excalidraw`
-- [ ] T016 In `apps/desktop/src/lib/drawings.ts`, implement the save path via the package's own `serializeAsJSON` — never a hand-rolled `JSON.stringify`. The on-disk envelope is `{ type, version, source, elements, appState, files }`; a bare scene object missing it is rejected by excalidraw.com and Obsidian, which destroys Branch B's only advantage (Principle VI)
-- [ ] T017 In `apps/desktop/src/lib/drawings.ts`, implement the load path via `loadFromBlob`, returning a parse error rather than an empty scene on failure
+- [~] T015 Create `apps/desktop/src/lib/drawings.ts` with `isDrawingPath(path)` matching `.excalidraw`
+- [~] T016 In `apps/desktop/src/lib/drawings.ts`, implement the save path via the package's own `serializeAsJSON` — never a hand-rolled `JSON.stringify`. The on-disk envelope is `{ type, version, source, elements, appState, files }`; a bare scene object missing it is rejected by excalidraw.com and Obsidian, which destroys Branch B's only advantage (Principle VI)
+- [~] T017 In `apps/desktop/src/lib/drawings.ts`, implement the load path via `loadFromBlob`, returning a parse error rather than an empty scene on failure
 
 ### Both branches
 
@@ -138,7 +138,7 @@ Scrolling a note with ten drawings is indistinguishable from ten PNGs.
 ### Implementation for User Story 2
 
 - [ ] T034 [US2] **Branch A only** — verify zero render code is needed: `WIKI_IMAGE_EXTENSIONS` (`apps/desktop/src/lib/wiki-links.ts:124`) already contains `svg`, so `![[x.excalidraw.svg]]` renders through `parseWikiImageEmbedTarget` → `ImageEmbedWidget` (`apps/desktop/src/components/editor-area/wiki-link-extension.ts:141`), and `![](x.excalidraw.svg)` resolves through `image-src-resolver.ts`. Confirm by hand; write no code
-- [ ] T035 [US2] **Branch B only** — add a `DrawingWidget` to a new CodeMirror decoration module that dynamically imports the bundle and calls `exportToSvg`, following the `MermaidWidget` shape in `apps/desktop/src/components/editor-area/mermaid-decorations.ts`: bounded LRU cache, stable `estimatedHeight`, synchronous `toDOM`
+- [~] T035 [US2] **Branch B only — not applicable** — add a `DrawingWidget` to a new CodeMirror decoration module that dynamically imports the bundle and calls `exportToSvg`, following the `MermaidWidget` shape in `apps/desktop/src/components/editor-area/mermaid-decorations.ts`: bounded LRU cache, stable `estimatedHeight`, synchronous `toDOM`
 - [ ] T036 [US2] Add a `dblclick` handler to the embed widget in `apps/desktop/src/components/editor-area/wiki-link-extension.ts` that resolves the embed target to an absolute path and, when `isDrawingPath` matches, opens it through the editor store (Phase 4's `locationForPath`)
 - [ ] T037 [US2] Confirm the `dblclick` handler does not interfere with the existing range-select-to-enter-edit-mode behavior on embeds (see `docs/editor.md` on block-widget patterns)
 

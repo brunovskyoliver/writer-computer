@@ -25,12 +25,171 @@ a single `locationForPath` helper before any drawing dispatch is added.
 ## Progress
 
 - **Phase 1 — Setup**: done. `@excalidraw/excalidraw` 0.18.1 added to `apps/desktop`.
-- **Phase 2 — Spike (blocking gate)**: not started. T009 stops for the branch decision.
-- Phases 3–8: blocked on the branch decision.
+- **Phase 2 — Spike**: complete. Findings reported at T009; user chose **Branch A**
+  (`.excalidraw.svg`, `<img>` embeds) with a **transparent** export background, accepting the
+  serif-text cost in embeds. Spike files deleted (T010); spec.md rewritten for Branch A (T011).
+- Phases 3–8: ready. Branch B tasks (T015–T017, T035) are dead.
+
+## Spike results (Phase 2, T004–T008)
+
+Method: throwaway `apps/desktop/src/lib/__spike-excalidraw.ts` plus `apps/desktop/spike.html`,
+run in a real browser against the running dev server. Not a docs check. Scene =
+rectangle + text (`Hand-drawn text`) + an image element backed by a `files` entry, so
+`elements`, `appState`, and `files` are all exercised. Three export → `loadFromBlob` → edit
+cycles. Offline simulated by rejecting every cross-origin `fetch` before the module loads.
+
+### 1. Repeated round-trip — **holds** (T004, T005)
+
+| Cycle | Elements before/after | Missing | Added | Changed (volatile fields excluded)                                       | `files` preserved             | Image element | Text                    |
+| ----- | --------------------- | ------- | ----- | ------------------------------------------------------------------------ | ----------------------------- | ------------- | ----------------------- |
+| 1     | 3 / 3                 | none    | none  | `boundElements` on all three (`undefined` → `[]`, restore normalisation) | yes, `dataURL` byte-identical | present       | `Hand-drawn text`       |
+| 2     | 3 / 3                 | none    | none  | **none**                                                                 | yes                           | present       | `Hand-drawn text +1`    |
+| 3     | 3 / 3                 | none    | none  | **none**                                                                 | yes                           | present       | `Hand-drawn text +1 +2` |
+
+The cycle-1 `boundElements` delta is a one-time normalisation, not loss: it does not recur on
+cycles 2 or 3. Edits made between cycles (moving the rectangle, appending to the text) survive
+intact. The embedded payload is tagged `payload-type:application/vnd.excalidraw+json`.
+
+**No degradation on cycle two.** By the gate in plan.md this is a pass.
+
+### 2. `appState` — user data survives; only the transient export flags reset
+
+`loadFromBlob` returns 85 `appState` keys. The two export flags come back at their defaults on
+every cycle — `exportEmbedScene: false`, `exportBackground: true` — regardless of what was
+exported with.
+
+To tell "preserved" from "reset to the default", cycles 2 and 3 were exported with a
+**non-default** `viewBackgroundColor: "#ffeedd"`. It came back as `#ffeedd` both times. So
+user-chosen canvas state does round-trip through the embedded payload; only the transient
+export flags do not. The save path must set `exportEmbedScene` and `exportBackground`
+explicitly on **every** write and never read them back off the file — which is what T013
+already specifies. Element data and `files` are unaffected.
+
+### 3. Fonts and `<img>` rendering — **works, but only with bundled assets** (T006, T008)
+
+`exportToSvg` inlines fonts by default (there is a `skipInliningFonts` opt-out). Measured on
+the same scene:
+
+| Run | `EXCALIDRAW_ASSET_PATH` | Network | SVG bytes | `@font-face` `src:`          | Font fetched from                                                |
+| --- | ----------------------- | ------- | --------- | ---------------------------- | ---------------------------------------------------------------- |
+| A   | unset                   | online  | 6206      | `url(data:font/woff2…)`      | `https://esm.sh/@excalidraw/excalidraw@0.18.1/dist/prod/fonts/…` |
+| B   | local dist dir          | online  | 6252      | `url(data:font/woff2…)`      | localhost only — **zero remote requests**                        |
+| C   | bogus local dir         | online  | 6310      | `url(data:font/woff2…)`      | falls back to `esm.sh`                                           |
+| D   | unset                   | offline | **3440**  | `url(https://esm.sh/…woff2)` | nothing — fetch failed                                           |
+| E   | local dist dir          | offline | 6296      | `url(data:font/woff2…)`      | localhost only                                                   |
+
+Run D is the failure mode: the export **does not throw**. It silently emits an SVG ~2.8 KB
+smaller whose `@font-face` points at a remote URL, which a sandboxed `<img>` cannot fetch — so
+the drawing renders in a fallback system font instead of Excalifont. Silent degradation, and it
+is baked into the saved file.
+
+Only one family is inlined (Excalifont — the one the scene uses), not all nine.
+
+The image element's `href` is a `data:` URI in every run, so pictures survive the `<img>` path.
+
+Visual check in **Chromium**: the final SVG loaded into a sandboxed `<img>` via a blob URL
+rendered at 230×264 with hand-drawn glyphs and the embedded picture both correct.
+
+### 3b. WebKit rejects the inlined subset font (the real target engine)
+
+Writer runs in WKWebView, not Chromium, so the same file was rendered through a real
+`WKWebView` (a small `swiftc` harness calling `takeSnapshot`, over both `file://` and
+`http://`). Artifacts in `/tmp/wkfont/`.
+
+| Hosting                           | Chromium   | WKWebView          |
+| --------------------------------- | ---------- | ------------------ |
+| `<img src=…svg>`                  | Excalifont | **serif fallback** |
+| `<object type="image/svg+xml">`   | Excalifont | **serif fallback** |
+| SVG inlined directly into the DOM | Excalifont | **serif fallback** |
+
+All three fail in WebKit, so it is not the `<img>` sandbox and not SVG-as-image. Isolating it:
+lifting the exported `@font-face` into a plain HTML document and reading `document.fonts` in
+WKWebView gives
+
+- inlined **subset** woff2 from the exported SVG → `Excalifont: error` (glyphs fall back)
+- the shipped **full** `Excalifont-Regular-*.woff2` from `dist/prod/fonts` → `Excalifont: loaded`, glyphs correct
+
+**WebKit rejects the subset woff2 that Excalidraw's subsetting worker inlines into the export.
+Chromium accepts it.** The font data Excalidraw ships is fine; the subset it generates is not.
+
+Consequences:
+
+- A drawing containing text renders in a **serif fallback** wherever Writer displays the
+  exported SVG. Shapes, strokes, and embedded images are unaffected.
+- The drawing **editor tab** should be unaffected — it loads the full fonts from
+  `EXCALIDRAW_ASSET_PATH`, a different path from the export subsetter. Not measured; verify at
+  the US1 checkpoint.
+- **The mitigation was tested and it works.** Exporting with `skipInliningFonts: true` (the
+  `<style class="style-fonts">` block comes out empty), declaring a document-level
+  `@font-face { font-family: Excalifont; src: url(<bundled full woff2>) }`, and inlining the
+  SVG into the DOM renders correct Excalifont glyphs in WKWebView (`Excalifont: loaded`). The
+  **same file shown through `<img>` in the same document still falls back to serif** — an
+  `<img>`-hosted SVG cannot use the host document's fonts. So the fix exists, and it costs
+  exactly the render path Branch A gives up to get "zero JS".
+- The exported `font-family` is `"Excalifont, Xiaolai, Segoe UI Emoji"`, so a document-level
+  face must use the family name `Excalifont` verbatim to be picked up.
+- It is worth re-checking against a newer `@excalidraw/excalidraw` before building around it;
+  this looks like a library bug, not a designed behaviour.
+
+**Conclusion: T028 (bundle assets, set `EXCALIDRAW_ASSET_PATH`) is mandatory, not optional,
+and it must be in place before the first save.**
+
+Font payload on disk: `dist/prod/fonts` is 13 MB, of which **Xiaolai (CJK) is 12 MB**. The
+other eight families total ~480 KB (Excalifont 80K, Assistant 80K, Liberation 72K, Cascadia
+68K, Nunito 68K, Virgil 56K, ComicShanns 40K, Lilita 16K). Bundling everything except Xiaolai
+costs half a megabyte; bundling Xiaolai too costs 13 MB. Worth a decision at T028.
+
+### 4. Real chunk size (T007)
+
+A separate `__spike-lazy.ts` with `import("@excalidraw/excalidraw")`, built with `vp build`
+into a throwaway `outDir`, then loaded from a static server and measured by
+`performance.getEntriesByType("resource")` — i.e. what the browser actually fetches when a
+drawing tab opens, not what sits on disk.
+
+- **Opening a drawing tab fetches 11 files, ~1.13 MB raw JS** (~370 KB gzipped).
+  Dominated by two chunks: 573 KB (`prod-*.js`, 180 KB gzip) and 528 KB
+  (`chunk-K2UTITRG-*.js`, 182 KB gzip).
+- `@excalidraw/excalidraw/index.css` is a further 144 KB.
+- The full emitted graph is 190 files / 7.7 MB, because Excalidraw ships
+  `mermaid-to-excalidraw` (mermaid, cytoscape, katex, per-diagram chunks). **None of it is
+  fetched on open** — it sits behind Excalidraw's own text-to-diagram dialog. The 46 MB npm
+  figure is irrelevant, as plan.md predicted.
+- Nothing lands in the main entry: the dynamic import splits cleanly.
+
+## Recommendation
+
+**The gate itself passes for Branch A**: the round-trip holds over three cycles with
+`elements`, `appState`, and `files` intact. Nothing here forces Branch B.
+
+But the branch decision now turns on finding 3b rather than on the round-trip, and the user
+should weigh two things the spike cannot settle:
+
+1. **Text in embeds renders in a serif fallback under WebKit.** Branch A's whole advantage is
+   the zero-JS `<img>` path, and that path has no fix for this — an `<img>`-hosted SVG cannot
+   borrow the host document's fonts. Branch B renders through a widget we control, where
+   `skipInliningFonts: true` plus an app-level `@font-face` on the bundled full woff2 does fix
+   it. A user whose drawings are mostly shapes and arrows will not notice; a user who labels
+   everything will.
+2. **Interop (Principle I).** `.excalidraw.svg` is viewable anywhere but editable only where
+   the embedded payload is understood. Raw `.excalidraw` opens natively on excalidraw.com and
+   in Obsidian.
+
+One fact that bears on how reversible the choice is: the font fix is a **render-path** change,
+not a format change. Branch A's `.excalidraw.svg` files stay valid if the embed renderer is
+later swapped from `<img>` to an inline-SVG widget — at which point Branch A costs roughly what
+Branch B costs on read. The format decision and the font decision are therefore separable.
+
+Both branches also share an unrelated problem worth deciding at T011: with
+`exportBackground: false` the strokes are baked dark (`#1e1e1e`) and the SVG is inert, so a
+drawing is hard to read on a dark background. plan.md's claim that transparent "reads correctly
+in both themes" does not hold. The concrete alternative is `exportBackground: true` with an
+explicit `viewBackgroundColor` — which finding 2 proves does round-trip.
+
+**Decision taken (T009): Branch A, transparent background.** Recorded in spec.md.
 
 ## Implementation
 
-_Pending._
+_Blocked on the branch decision (T009)._
 
 ## Review
 

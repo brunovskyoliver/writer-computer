@@ -1,207 +1,189 @@
-# Excalidraw Embed + Edit Spec (Research)
+# Excalidraw Embed + Edit Spec
 
-Status: **research / not yet approved for implementation.** Feasibility verdict, the one
-decision that has to be made before any code, and the open risks that must be settled by
-experiment first.
+**Status**: approved for implementation. **Branch A** chosen at the Phase 2 spike gate
+(T009) — `.excalidraw.svg` with the scene in SVG metadata, embeds rendered as plain
+`<img>`. The measurements behind that choice are in
+[`../Agent/worksheet-excalidraw-embed.md`](../Agent/worksheet-excalidraw-embed.md); the
+task breakdown is in [`tasks.md`](./tasks.md) and the phase rationale in
+[`plan.md`](./plan.md).
 
 ## Summary
 
-Render Excalidraw drawings inline in markdown notes, and double-click one to open the full
-Excalidraw editor in a new tab. Feasible. The whole design hinges on one file-format
-decision (below); pick the embedded-scene SVG branch and the inline render path costs
-**zero new JavaScript** and reuses the image-embed code that already ships.
+Drawings live as `.excalidraw.svg` files beside the note. A note embedding one renders it
+inline with no Excalidraw code loaded at all — the file is an SVG, and Writer's existing
+image-embed path already handles SVGs. Double-clicking the embed opens the drawing in a
+full Excalidraw editor tab; edits save back to the same file. A "New Drawing" command
+creates the file in the note's directory, inserts the embed at the cursor, and opens the
+tab.
 
-## Feasibility
+The scene rides in the SVG's metadata, so the same file is both the rendered picture and
+the editable source. The Phase 2 spike confirmed this survives repeated export → import →
+edit cycles with `elements`, `appState`, and the `files` map intact — that was the
+condition for choosing this format over raw `.excalidraw` JSON.
 
-Confirmed from the package metadata and docs:
+## Goals
 
-- `@excalidraw/excalidraw@0.18.1` declares `react: ^17 || ^18 || ^19` / `react-dom` the
-  same. This repo is on React 19.1 — supported, no hedge needed.
-- It is a React component plus a utils surface (`exportToSvg`, `exportToBlob`,
-  `loadFromBlob`, `loadSceneOrLibraryFromBlob`) exported from the same entry point. There
-  is no separate lightweight render-only entry; `@excalidraw/utils` is a re-wrap, not a
-  slimmer build.
-- The `.excalidraw` file is plain JSON: `{ type, version, source, elements[], appState,
-files }`. Local-first and git-diffable — compatible with the constitution's Principle I.
-- `appState.exportEmbedScene: boolean` is a first-class field, and `loadFromBlob` restores
-  a scene from a blob. Those two are the mechanism the format decision below rests on —
-  but that they close into a working round-trip is **not** confirmed by the docs. See risk
-  1; it is the one thing that has to be tested before the recommendation is final.
-
-Nothing here requires a network hop. Drawing stays a file on disk beside the note.
-
-## The decision: what a drawing is on disk
-
-The discriminating question: **must a note containing a drawing render without loading the
-Excalidraw bundle?**
-
-### Option A — `.excalidraw.svg`, scene embedded in the SVG (recommended)
-
-Save with `exportToSvg({ ..., appState: { exportEmbedScene: true } })`. The file is a
-real SVG that any viewer can display, and the scene JSON is meant to ride along in its
-metadata so the editor can load it back via `loadFromBlob`. That round-trip is the
-unverified assumption this whole option stands on (risk 1).
-
-- Inline embed: `![[diagram.excalidraw.svg]]` already works today. The wiki-embed widget in
-  `wiki-link-extension.ts` resolves the target, `convertFileSrc`s it, and drops it in an
-  `<img>`. **No new render code, no bundle, no parse.** Scrolling a note full of drawings
-  costs the same as a note full of PNGs.
-- The Excalidraw bundle is pulled only when a drawing tab is actually opened, behind a
-  dynamic `import()`. A user who never edits a drawing never pays for it.
-- One file holds one truth. Satisfies `docs/consolidation.md` on its first principle.
-- Consequence to accept explicitly: `foo.excalidraw.svg` opens in the drawing editor,
-  plain `foo.svg` does not. That is a compound-extension check, and it is a design
-  decision, not a detail.
-- Cost: not directly interoperable with excalidraw.com / the Obsidian plugin's default
-  `.excalidraw` files, and the file is not meaningfully git-diffable.
-
-### Option B — `.excalidraw` JSON, lazily rendered
-
-Store the raw JSON; a widget dynamically imports the bundle and calls `exportToSvg` to
-produce the inline preview.
-
-- Buys interop with excalidraw.com and the Obsidian plugin, and clean git diffs.
-- Costs the Excalidraw chunk load on any note containing a drawing, plus an async render
-  per embed — exactly the drain the goal rules out.
-
-### Rejected — the hybrid
-
-`.excalidraw` JSON plus a sibling `.excalidraw.svg` for embedding. Two files holding one
-truth, kept in sync by remembering to. This is the opening smell in
-`docs/consolidation.md`; naming it here so it isn't rediscovered later.
-
-**Recommendation: Option A, conditional on risk 1.** Editability on every revisit is a hard
-requirement, so this is not a preference — it is a gate. If the spike in
-[`plan.md`](./plan.md) Phase 0 shows the scene does not survive repeated round-trips through
-SVG metadata, Option B is the design, not a fallback to argue about. Both options keep
-drawings editable; only the inline-render cost differs.
-
-## Open risks — test before writing the spec proper
-
-Risk 1 gates the **recommendation itself**; the rest gate implementation details.
-
-1. **Scene round-trip through the SVG (blocking).** Option A only works if a drawing is
-   still editable after being saved. The docs confirm `exportEmbedScene` exists as an
-   `AppState` field and that `loadFromBlob` restores a scene from a blob — but they do
-   **not** confirm the pair closes. The `loadSceneOrLibraryFromBlob` signature branches on
-   `MIME_TYPES.excalidraw` / `MIME_TYPES.excalidrawlib`, neither of which is
-   `image/svg+xml`; and whether the standalone `exportToSvg` util honors
-   `exportEmbedScene` (rather than excalidraw.com's own export layer doing the embedding)
-   is unverified. **Check, in two halves:** export a scene with
-   `appState.exportEmbedScene: true` and grep the SVG for the scene payload; then feed
-   that exact file to `loadFromBlob` and diff the returned element array against the
-   original. If either half fails, Option A collapses and Option B is the only branch.
-2. **Fonts in the exported SVG.** Excalidraw's hand-drawn text needs Excalifont. If
-   `exportToSvg` emits an `@font-face` pointing at a remote URL instead of an embedded
-   base64 subset, text renders in a fallback font — and inside an `<img>`-sandboxed SVG
-   the fetch is blocked outright, so it fails silently and visibly. **Check:** export one
-   drawing containing text, `grep` the SVG for `@font-face` and `base64`, load it through
-   `convertFileSrc` in an `<img>`, look at the glyphs. Degrades appearance, doesn't kill
-   the feature.
-3. **`window.EXCALIDRAW_ASSET_PATH`.** The editor loads fonts and workers from a CDN by
-   default. This app is offline-first, so the assets have to be bundled and this global
-   pointed at them. Verify what breaks without it (likely: fonts, and possibly nothing
-   else).
-4. **Real chunk size.** The 46 MB npm unpacked figure is tarball-with-sourcemaps and means
-   nothing. **Check:** install, add a throwaway module with
-   `import("@excalidraw/excalidraw")`, run `vp build`, read the emitted chunk list. Also
-   note `@excalidraw/excalidraw/index.css` is a mandatory separate import.
-5. **Theming, in two separate places.**
-   - _The editor tab:_ Excalidraw ships its own light/dark theming (`theme` prop) and will
-     not follow this app's CSS custom properties. Decide whether the drawing tab simply
-     mirrors `appearance.theme` and otherwise looks like Excalidraw (honest, and what
-     Obsidian does) or gets restyled (expensive, fragile across upgrades).
-   - _The inline embed:_ an `<img>`-hosted SVG is inert — colors and background are baked
-     in at export time, so no theme reaction is possible after the fact. The mermaid
-     precedent solves the equivalent problem with `transparent: true` plus CSS custom
-     properties; Excalidraw can't do the custom-property half, but exporting with
-     `exportBackground: false` puts the drawing on the note's own background and so reads
-     correctly in both themes. Make that the export default.
-
-## Implementation shape (Option A)
-
-Three pieces, roughly in dependency order:
-
-- **Inline embed — nothing to build.** Confirmed: `WIKI_IMAGE_EXTENSIONS` in
-  `lib/wiki-links.ts:124` already contains `svg`, so `![[x.excalidraw.svg]]` renders today
-  through `parseWikiImageEmbedTarget` → `ImageEmbedWidget`. Markdown
-  `![](x.excalidraw.svg)` likewise resolves through `image-src-resolver.ts`. Zero lines.
-- **Double-click → editor tab.** New page kind `drawing` under
-  `components/editor-area/page-kinds/`, one entry in the `kinds` tuple in `index.ts` and
-  one in the view registry in `views.tsx` — the registry is built so nothing else needs
-  touching. The view lazy-loads `<Excalidraw>` and saves through the existing fs command
-  path.
-  The routing change is the part to get right. Every open path currently produces a
-  `file` (markdown) tab, so a `.png` clicked in the sidebar opens as text. `openFile`
-  (`editor-store.ts:342`) is _not_ the chokepoint — it delegates to `replaceTabWithFile`
-  and `navigateToFile`, and `openFileInNewTab` is a separate entry. The location object is
-  actually built in five places: `createFileTab` (`editor-store.ts:119`), called from
-  lines 370, 412, 450, and 532 — plus one inline `{ kind: "file", path }` in
-  `navigateToFile` at line 660 that bypasses the factory. The change is to route path →
-  location through a single helper (`createFileTab` generalized, with line 660 fixed to
-  call it) so extension dispatch happens exactly once. Branching in `openFile` instead
-  would still open drawings as text from the sidebar and from wiki-link navigation, and
-  per-call-site branching is the registry smell in `docs/consolidation.md`.
-  `open_target::classify` in Rust is out of scope unless `writer drawing.excalidraw.svg`
-  from the terminal is wanted; it only gates startup/CLI/Finder opens.
-- **Double-click affordance on the embed.** The wiki-embed widget needs a `dblclick`
-  handler resolving the target path to an open. Small.
-
-### Optional upgrade: pan/zoom frame
-
-If a plain `<img>` turns out to be too static, `mountMermaidCanvas` in
-`mermaid-canvas.ts` already implements a fixed-height frame with drag-pan, wheel/button
-zoom, reset-to-fit, hover-revealed control clusters, keyboard bindings, and a fullscreen
-overlay — and it takes arbitrary `svgHtml`, so it is reusable as-is. Note the file is not
-fully generic (it also carries a mermaid stream-language highlighter and a nested source
-editor for the Edit-code toggle), so reuse means splitting the frame out into a generic
-`svg-canvas.ts` and leaving the mermaid-specific editing behind. Worth doing **only** if
-the static image proves insufficient — not preemptively.
+- A drawing is one file on disk, readable as a picture by anything that renders SVG.
+- `![[drawing.excalidraw.svg]]` in a note renders inline at zero JavaScript cost —
+  scrolling a note with ten drawings is indistinguishable from ten PNGs.
+- Double-clicking an inline drawing opens it in an Excalidraw editor tab on that file.
+- Edits autosave back to the same path through the existing Rust write path, without the
+  watcher reading the save as an external change.
+- A drawing tab survives session restore.
+- "New Drawing" creates the file, inserts the embed, and opens the tab in one command.
+- Everything works with no network reachable.
+- A file that fails to parse shows an error and **never** autosaves over the user's work.
 
 ## Non-Goals
 
-- Rendering `.excalidraw` JSON inline (that's Option B).
-- Restyling the Excalidraw editor to match Writer's design language.
+- Rendering raw `.excalidraw` JSON inline (that was Branch B, not taken).
+- Restyling the Excalidraw editor to match Writer's design language. It keeps its own look;
+  only `theme` is mirrored from `appearance.theme`.
 - Collaboration, the Excalidraw library/shapes browser, or excalidraw.com sync.
 - Converting existing Obsidian-plugin drawings.
-- Live-refreshing an already-open note's inline embed after a drawing is saved. Three
-  layers cache it: `embedResolutionCache` (`wiki-link-extension.ts:116`), the per-URL
-  measured-height cache behind `attachStableImageHeight`, and the webview's own cache of
-  the stable `convertFileSrc` URL. Saving writes the same path, so the note keeps showing
-  the old image until reopened. Promoting this to a goal means cache-busting the asset URL
-  on the watcher event and confirming the height cache re-measures — a real piece of work,
-  deliberately deferred rather than assumed.
+- An attachment-folder setting. Writer has no such concept and this feature does not add
+  one — new drawings go in the note's own directory.
+- A pan/zoom frame around the inline embed. `mountMermaidCanvas` could be generalised into
+  a shared `svg-canvas.ts` for this, but that is a refactor for a second caller that may
+  never exist. Not now, and not as a later phase of this spec.
+- **Live-refreshing an already-open note's embed after a drawing is saved.** Three layers
+  cache it: `embedResolutionCache` (`wiki-link-extension.ts:116`), the per-URL
+  measured-height cache behind `attachStableImageHeight`, and the webview's cache of the
+  stable `convertFileSrc` URL. Reopening the note shows the new version. Making it live
+  means cache-busting the asset URL on the watcher event and re-measuring height — real
+  work, deliberately deferred. Recorded here so it is not filed as a bug.
 
-## Acceptance Criteria (draft)
+## UX Decisions
 
-- A note embedding a drawing renders it inline with no Excalidraw code loaded — verifiable
-  as an absent chunk in the network/module graph.
-- Text in a drawing renders with the correct hand-drawn font inline and in the editor,
-  offline, with no CDN reachable.
-- Double-clicking an inline drawing opens it in a new tab, and edits save back to the
-  same file.
-- A drawing tab survives session restore (the page kind serializes its path).
+- **Extension.** `.excalidraw.svg`, matched as a compound extension. A plain `.svg` is an
+  image, not a drawing, and must keep opening as one.
+- **Inline embed is a plain `<img>`.** No widget, no decoration module, no lazy chunk.
+- **Double-click, not single-click,** opens the editor tab — single-click must keep
+  selecting the embed for the existing range-select-to-edit behaviour.
+- **Transparent background.** Drawings export with `exportBackground: false` and sit on the
+  note's own background. Accepted cost: Excalidraw bakes strokes at `#1e1e1e` and an
+  `<img>`-hosted SVG is inert, so a drawing is hard to read on a dark background. The
+  alternative — `exportBackground: true` with an explicit `viewBackgroundColor`, which the
+  spike proved round-trips — puts a light card on a dark note instead. Neither is free;
+  transparent is the smaller change and the one chosen.
+- **Text in embeds renders in a serif fallback.** WebKit rejects the subset woff2 that
+  Excalidraw inlines into the export (`Excalifont: error`; the shipped full font loads
+  fine). Shapes, strokes, and embedded images are unaffected. This is a known cost of the
+  `<img>` path, not a defect to chase — see Implementation Notes for the escape hatch.
+- **Autosave on a 150ms debounce**, matching `SOURCE_CHANGE_DEBOUNCE_MS` in
+  `mermaid-canvas.ts:31`. Excalidraw's `onChange` fires continuously.
+- **Parse failure shows an error in the tab and suppresses autosave for that tab.** It must
+  not fall back to an empty canvas — the next autosave would overwrite the real drawing
+  with nothing. This is the highest-consequence failure mode in the feature.
+- **New Drawing** names files `drawing`, then `drawing-1`, `drawing-2`, … on collision, in
+  the note's own directory. Run from anywhere that is not a file tab (launcher, settings,
+  another drawing tab), it creates the file in the workspace root and opens the tab with no
+  insert and no error.
+
+## Implementation Notes
+
+- **One module owns the format.** `lib/drawings.ts`: `isDrawingPath()` (compound
+  `.excalidraw.svg`), save via `exportToSvg({ exportEmbedScene: true, exportBackground:
+false })`, load via `loadFromBlob` returning a parse error rather than an empty scene, and
+  `nextAvailableDrawingPath()` for the collision suffix.
+- **The export flags must be set on every write.** `loadFromBlob` returns them at their
+  defaults (`exportEmbedScene: false`, `exportBackground: true`) regardless of what the
+  file was written with, so they can never be read back off disk. User-facing appState —
+  `viewBackgroundColor` was the probe — does round-trip correctly.
+- **One write path.** Drawing saves go through `tauri.writeFile` (`lib/tauri.ts:31` →
+  `write_file` in `commands/fs.rs:344`). A second write path would defeat `watcher.rs`
+  self-write detection, and the save would read back as an external change and reload the
+  tab under the user's cursor.
+- **Open routing is consolidated before drawing dispatch is added, not after.** A tab
+  location is built in six places in `editor-store.ts` today: `createFileTab` (line 119)
+  and its four callers (370, 412, 450, 532), plus an inline `{ kind: "file", path }` in
+  `navigateToFile` (line 660) that bypasses the factory. All six route through one
+  `locationForPath(path)` helper, and the `isDrawingPath` dispatch lives **inside that
+  helper only**. Branching in `openFile` would not work — it delegates to
+  `replaceTabWithFile` and `navigateToFile`, and `openFileInNewTab` is a separate entry, so
+  drawings would still open as raw text from the sidebar and from wiki-link navigation.
+  `open_target::classify` in Rust stays untouched; it gates startup/CLI/Finder opens only.
+- **The inline embed needs no render code.** `WIKI_IMAGE_EXTENSIONS`
+  (`lib/wiki-links.ts:124`) already contains `svg`, so `![[x.excalidraw.svg]]` renders
+  through `parseWikiImageEmbedTarget` → `ImageEmbedWidget`
+  (`wiki-link-extension.ts:141`), and `![](x.excalidraw.svg)` resolves through
+  `image-src-resolver.ts`. Confirm by hand; write nothing.
+- **Offline assets are mandatory, not optional.** With `window.EXCALIDRAW_ASSET_PATH`
+  unset, Excalidraw fetches fonts from `esm.sh`. Offline, that fetch fails and
+  `exportToSvg` **does not throw** — it silently writes a smaller file whose `@font-face`
+  points at a remote URL. The bundled asset path must be in place before the first save.
+  Bundling every family costs 13 MB because Xiaolai (CJK) is 12 MB of it; the other eight
+  total ~480 KB.
+- **The drawing tab costs ~1.13 MB of JS** (~370 KB gzipped, 11 files) plus 144 KB of CSS
+  on open, behind `React.lazy`. Excalidraw's own mermaid-to-excalidraw graph (7.7 MB
+  emitted) is not fetched on open — it sits behind its text-to-diagram dialog. Nothing
+  lands in the main entry.
+- **Escape hatch for the font, if it ever matters.** Exporting with `skipInliningFonts:
+true`, declaring a document-level `@font-face { font-family: Excalifont; src: url(<bundled
+full woff2>) }`, and rendering the SVG **inlined into the DOM** renders correct glyphs in
+  WKWebView — verified. That is a render-path change, not a format change: `.excalidraw.svg`
+  files stay valid. It costs a widget and the JS Branch A exists to avoid, so it is not
+  being built now.
+
+## Files Expected To Change
+
+- new `apps/desktop/src/lib/drawings.ts` — format detection, save, load, collision suffix.
+- `apps/desktop/src/stores/editor-store.ts` — `locationForPath` helper, six call sites
+  routed through it, drawing dispatch inside it.
+- new `apps/desktop/src/components/editor-area/page-kinds/drawing.ts` — the `drawing` page
+  kind.
+- `apps/desktop/src/components/editor-area/page-kinds/index.ts` — one entry in the `kinds`
+  tuple.
+- `apps/desktop/src/components/editor-area/page-kinds/views.tsx` — one view entry, no
+  footer.
+- new `apps/desktop/src/components/editor-area/drawing-pane.tsx` — lazy-loaded Excalidraw
+  host, theme mirroring, debounced save, parse-error state.
+- `apps/desktop/src/components/editor-area/wiki-link-extension.ts` — `dblclick` on the
+  embed widget.
+- `apps/desktop/src/components/command-palette/index.tsx` — the `new-drawing` command.
+- new `apps/desktop/tests/drawings.test.ts` — `isDrawingPath` extension table,
+  `locationForPath` extension table, collision-suffix search with the existence check
+  injected.
+- `docs/editor.md` — the `drawing` page kind and the no-live-refresh note.
+- `CHANGELOG.md`, `TODOS.md`.
+
+## Acceptance Criteria
+
+- A note embedding a drawing renders it inline with **no Excalidraw chunk in the module
+  graph** while the note is open.
 - Scrolling a note with ten drawings is indistinguishable from ten PNGs.
+- Double-clicking an inline drawing opens it in a drawing tab on that file; single-click
+  still selects the embed and does not open anything.
+- Edits in the drawing tab save back to the same file, and the watcher does not reload the
+  tab as an external change.
+- A drawing tab survives quit and relaunch with the edit intact.
+- A `.excalidraw.svg` clicked in the sidebar opens as a drawing; a plain `.svg` still opens
+  as an image; a `.md` still opens as a document.
+- A drawing that fails to parse shows an error in the tab, and the file on disk is
+  unchanged afterwards.
+- Drawing and saving works with no network reachable, and the saved file's `@font-face` is
+  a `data:` URI, not a remote URL.
+- "New Drawing" from a note creates the file in that note's directory, inserts
+  `![[name.excalidraw.svg]]` at the cursor, and opens the tab. Run twice more it yields
+  `drawing-1`, `drawing-2`. Run from the launcher it creates a file and a tab with no
+  insert and no error.
 
 ## Procedure in this repo
 
 The loop is in [`docs/workflows/agent-loop.md`](../../docs/workflows/agent-loop.md):
 
-1. Entry in [`TODOS.md`](../../TODOS.md) under **Up Next**, linking this spec.
-2. This spec, rewritten from research into a real spec once the five open risks above have
-   been settled by the Phase 0 spike in [`plan.md`](./plan.md) — risk 1 first, since it
-   decides which option is being specified at all. Keep the section shape of
-   [`mermaid-canvas-widget-spec.md`](../mermaid-canvas-widget-spec.md) — Summary / Goals /
-   Non-Goals / UX Decisions / Implementation Notes / Files Expected To Change / Acceptance
-   Criteria. Mirroring that spec **is** the mechanism for preserving the repo's
-   conventions and UI language; it is the closest precedent in every dimension (embedded
-   canvas widget, fold-to-edit, fullscreen, page-kind adjacency).
-3. `SPECs/Agent/worksheet-excalidraw-embed.md` when implementation starts.
-4. Plan → persona review per [`docs/workflows/agent-review.md`](../../docs/workflows/agent-review.md)
-   with fresh-context sub-agents → implement in small validated steps.
+1. Entry in [`TODOS.md`](../../TODOS.md), moved between sections as work progresses.
+2. This spec. Section shape mirrors
+   [`mermaid-canvas-widget-spec.md`](../mermaid-canvas-widget-spec.md), the closest
+   precedent in the repo.
+3. [`SPECs/Agent/worksheet-excalidraw-embed.md`](../Agent/worksheet-excalidraw-embed.md)
+   carries per-phase findings.
+4. Plan → persona review per
+   [`docs/workflows/agent-review.md`](../../docs/workflows/agent-review.md) with
+   fresh-context sub-agents → implement in small validated steps.
 5. Validate: `vp check`, `vp test`, and `cargo test` / `cargo clippy` / `cargo fmt --check`
    from `apps/desktop/src-tauri/`.
-6. Update [`CHANGELOG.md`](../../CHANGELOG.md). One commit for the task.
+6. Update [`CHANGELOG.md`](../../CHANGELOG.md). One commit per completed task.
 
 ### On speckit
 
@@ -213,3 +195,6 @@ Keep `SPECs/` + `agent-loop.md` canonical. Speckit's slash commands are fine as 
 aids as long as their output lands in `SPECs/` and `TODOS.md`. Do **not** let `.specify/`
 accumulate a parallel copy of spec content — two spec systems holding one truth is the
 exact drift `docs/consolidation.md` exists to prevent.
+
+Running speckit commands for this feature requires
+`SPECIFY_FEATURE_DIRECTORY=SPECs/excalidraw-embed` in the environment.
