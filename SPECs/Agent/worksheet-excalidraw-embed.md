@@ -287,6 +287,20 @@ explicit `viewBackgroundColor` — which finding 2 proves does round-trip.
   - No frontend change was needed: the click already routed through `openFile` →
     `locationForPath`. The `!entry.is_markdown` guard at `file-tree-node.tsx:78` is on the
     context menu only.
+- **The pane has to be offset below the window chrome, not padded.** Found at the checkpoint:
+  Excalidraw's toolbar drew over Writer's tab bar and none of its icons responded, though
+  keyboard shortcuts did. `EditorArea` starts at the top of the window and two layers float
+  over it — the tab bar (`z-40`, 56px) and a full-width `data-tauri-drag-region` (`z-30`,
+  `--chrome-drag-height` = 72px) with pointer events left on. `EditorPane` clears both by
+  padding its scrolling content (`pt-32`); Excalidraw cannot, because `.excalidraw` is
+  `height: 100%` and pins its own toolbar to the top of its container. So the whole pane is
+  `absolute inset-0` with `top: var(--chrome-drag-height)` — the drag region is the taller of
+  the two and is the one to clear. The split symptom is the tell: clicks were being swallowed
+  as window drags while document-level shortcuts still fired.
+- **`DrawingPane` also has to honour `isActive`.** `drawingKind.keepAlive` is `true`, so
+  `EditorArea` keeps inactive drawing tabs mounted; the pane hides itself with
+  `pointer-events-none invisible absolute inset-0`, matching `editor-pane.tsx:39`. The first
+  version ignored the prop and left every keepAlive tab in normal flow.
 - **Known rough edge, decide at the checkpoint:** `openFile` only navigates in place when the
   active tab's kind is `file`, so clicking the _same_ drawing in the sidebar while its tab is
   active opens a duplicate tab. Settings tabs behave identically today. T036 (Phase 6) hits this

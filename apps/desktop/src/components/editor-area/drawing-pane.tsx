@@ -8,9 +8,34 @@ import type { DrawingLocation } from "./page-kinds/drawing";
 // chunk and defeat the point of the SVG-embed format (see spec.md).
 const DrawingEditor = lazy(() => import("./drawing-editor"));
 
-export function DrawingPane({ location }: { location: DrawingLocation }) {
+// `EditorArea` starts at the top of the window and the window chrome floats
+// over it: the tab bar (`z-40`, 56px) and a full-width `data-tauri-drag-region`
+// (`z-30`, `--chrome-drag-height`) with pointer events left on. `EditorPane`
+// clears both by padding its scrolling content down; Excalidraw can't, because
+// `.excalidraw` is `height: 100%` and pins its own toolbar to the top of its
+// container. Offsetting the whole pane is the only thing that works — without
+// it the toolbar draws under the chrome and every click on it is eaten as a
+// window drag, while keyboard shortcuts (document-level) still fire.
+//
+// The drag region is the taller of the two, so it's the one to clear.
+const CHROME_OFFSET = "var(--chrome-drag-height)";
+
+export function DrawingPane({
+  location,
+  isActive,
+}: {
+  location: DrawingLocation;
+  isActive: boolean;
+}) {
   return (
-    <div className="h-full w-full">
+    // The drawing kind is `keepAlive`, so an inactive tab stays mounted —
+    // hidden the same way `EditorPane` hides itself rather than unmounting.
+    <div
+      className={
+        isActive ? "absolute inset-0 z-10" : "pointer-events-none invisible absolute inset-0 z-10"
+      }
+      style={{ top: CHROME_OFFSET }}
+    >
       <Suspense
         fallback={<div className="text-muted-foreground p-4 text-sm">Loading drawing…</div>}
       >
