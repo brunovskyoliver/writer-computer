@@ -28,7 +28,9 @@ a single `locationForPath` helper before any drawing dispatch is added.
 - **Phase 2 — Spike**: complete. Findings reported at T009; user chose **Branch A**
   (`.excalidraw.svg`, `<img>` embeds) with a **transparent** export background, accepting the
   serif-text cost in embeds. Spike files deleted (T010); spec.md rewritten for Branch A (T011).
-- Phases 3–8: ready. Branch B tasks (T015–T017, T035) are dead.
+- **Phase 3 — Storage format and I/O**: done (T012–T014, T018–T019). `lib/drawings.ts` owns
+  detection, load, and save; 12 `isDrawingPath` cases pass.
+- Phases 4–8: ready. Branch B tasks (T015–T017, T035) are dead.
 
 ## Spike results (Phase 2, T004–T008)
 
@@ -189,7 +191,33 @@ explicit `viewBackgroundColor` — which finding 2 proves does round-trip.
 
 ## Implementation
 
-_Blocked on the branch decision (T009)._
+### Phase 3 — `lib/drawings.ts` (T012–T014, T018–T019)
+
+- `isDrawingPath()` matches the compound extension on the **basename**, case-insensitively, and
+  requires a stem. So `sketch.excalidraw.svg` matches; `logo.svg`, `sketch.excalidraw`,
+  `.excalidraw.svg`, `sketch.excalidraw.svg.bak`, and a `.md` inside a directory that happens to
+  be named `sketch.excalidraw.svg/` do not.
+- **Excalidraw is behind `await import()` inside the function bodies, and the type imports are
+  `import type`.** This is structural, not stylistic: Phase 4 wires `isDrawingPath` into
+  `editor-store.ts`, which is in the main module graph. A static import would put ~1.13 MB in the
+  entry chunk and fail the "no Excalidraw chunk in the module graph" acceptance criterion.
+  Nothing imports the module yet, so this is verified at Phase 6's module-graph check.
+- `loadDrawing()` returns `{ ok: true, scene } | { ok: false, error }`. The blob is constructed
+  with type `image/svg+xml` — `loadFromBlob` gates the metadata decode on exactly that MIME type
+  (`parseFileContents` in the bundle), and a blob without it is parsed as JSON and rejected.
+- `files` (`BinaryFiles`) crosses in both directions — returned from the restore on load, passed
+  to `exportToSvg` on save. Dropping it silently loses embedded images with no error; the spike
+  exercised an image-backed `files` entry precisely because of this.
+- `saveDrawing()` sets `exportEmbedScene: true` and `exportBackground: false` on **every** write
+  and never reads them off the file (spike finding 2), serializes the returned `SVGSVGElement`
+  with `XMLSerializer`, and writes through `tauri.writeFile` — the one write path, so
+  `watcher.rs` self-write detection applies (T018).
+- **Writes are chained per path** through a module-level `Map<string, Promise>`. `exportToSvg` is
+  async (font subsetting runs in a worker), so under Phase 5's 150 ms debounce export N can
+  resolve after N+1 and write a stale SVG over a newer one. ~5 lines, and it keeps the ordering
+  guarantee in the module that owns the format rather than in a caller that does not exist yet.
+- Tests are logic-only per Principle VI: the `isDrawingPath` table. `loadDrawing`/`saveDrawing`
+  need a DOM and the real bundle, so they are verified at the US1 checkpoint, not in `vp test`.
 
 ## Review
 

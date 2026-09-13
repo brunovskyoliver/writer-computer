@@ -67,9 +67,9 @@ both branches. Do not start Phase 3 before T009 reports and the user picks a bra
 
 ### Branch A — round-trip holds (`.excalidraw.svg`, scene in SVG metadata)
 
-- [ ] T012 Create `apps/desktop/src/lib/drawings.ts` with `isDrawingPath(path)` matching the **compound** extension `.excalidraw.svg` only — a plain `.svg` is an image, not a drawing
-- [ ] T013 In `apps/desktop/src/lib/drawings.ts`, implement the save path via `exportToSvg` with `exportEmbedScene: true` and `exportBackground: false`. Note from the spike: transparent does **not** mean "reads correctly in both themes" — the strokes are baked dark (`#1e1e1e`) and the SVG is inert, so a drawing is hard to read on a dark background. **Decided at T011: transparent, accepting the dark-theme cost.** The alternative (`exportBackground: true` with an explicit `viewBackgroundColor`, which the spike proved round-trips) was considered and not taken
-- [ ] T014 In `apps/desktop/src/lib/drawings.ts`, implement the load path via `loadFromBlob`, returning a parse error rather than an empty scene on failure
+- [x] T012 Create `apps/desktop/src/lib/drawings.ts` with `isDrawingPath(path)` matching the **compound** extension `.excalidraw.svg` only — a plain `.svg` is an image, not a drawing
+- [x] T013 In `apps/desktop/src/lib/drawings.ts`, implement the save path via `exportToSvg` with `exportEmbedScene: true` and `exportBackground: false`. Note from the spike: transparent does **not** mean "reads correctly in both themes" — the strokes are baked dark (`#1e1e1e`) and the SVG is inert, so a drawing is hard to read on a dark background. **Decided at T011: transparent, accepting the dark-theme cost.** The alternative (`exportBackground: true` with an explicit `viewBackgroundColor`, which the spike proved round-trips) was considered and not taken
+- [x] T014 In `apps/desktop/src/lib/drawings.ts`, implement the load path via `loadFromBlob`, returning a parse error rather than an empty scene on failure
 
 ### Branch B — NOT TAKEN (Branch A chosen at T009; these tasks are dead)
 
@@ -79,8 +79,8 @@ both branches. Do not start Phase 3 before T009 reports and the user picks a bra
 
 ### Both branches
 
-- [ ] T018 Route every drawing write through the existing Rust path — `tauri.writeFile` (`apps/desktop/src/lib/tauri.ts:31` → `write_file` in `apps/desktop/src-tauri/src/commands/fs.rs:344`). Do **not** add a second write path: `watcher.rs` self-write detection keys off it, and a save that bypasses it reads back as an external change and can reload the tab under the user's cursor
-- [ ] T019 [P] Add `apps/desktop/tests/drawings.test.ts` covering `isDrawingPath` over an extension table — must include `.excalidraw.svg`, plain `.svg`, `.excalidraw`, `.png`, `.md`, no extension, and uppercase variants
+- [x] T018 Route every drawing write through the existing Rust path — `tauri.writeFile` (`apps/desktop/src/lib/tauri.ts:31` → `write_file` in `apps/desktop/src-tauri/src/commands/fs.rs:344`). Do **not** add a second write path: `watcher.rs` self-write detection keys off it, and a save that bypasses it reads back as an external change and can reload the tab under the user's cursor
+- [x] T019 [P] Add `apps/desktop/tests/drawings.test.ts` covering `isDrawingPath` over an extension table — must include `.excalidraw.svg`, plain `.svg`, `.excalidraw`, `.png`, `.md`, no extension, and uppercase variants
 
 ---
 
