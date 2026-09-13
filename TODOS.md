@@ -3,6 +3,7 @@
 ## In Progress
 
 - Reveal-in-sidebar + residual external-watcher misses: [`SPECs/reveal-in-sidebar-and-external-watcher-spec.md`](SPECs/reveal-in-sidebar-and-external-watcher-spec.md) — keep the explicit tab-context-menu "Reveal in sidebar" action working, leave ordinary file opens from expanding the Everything tree, and characterize the remaining external-file-watcher miss cases through a logging + manual-repro pass before patching further.
+- Excalidraw embed + edit: [`SPECs/excalidraw-embed/spec.md`](SPECs/excalidraw-embed/spec.md) + [`plan.md`](SPECs/excalidraw-embed/plan.md) — render drawings inline in notes and double-click to edit them in a tab; a drawing must stay editable on every revisit, not just the first. Approved. Phase 0 is a spike that gates the storage format: if a scene survives repeated export/import round-trips through `.excalidraw.svg` metadata (including image `files` and text fonts), inline embeds cost zero JavaScript; if it does not, fall back to raw `.excalidraw` JSON and a lazy render widget. Both branches keep drawings editable. Phase 2 must consolidate the five path-to-tab-location construction sites in `editor-store.ts` before adding drawing dispatch.
 
 ## Done
 
