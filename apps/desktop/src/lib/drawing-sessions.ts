@@ -6,11 +6,48 @@ import type {
 import { deleteEntry } from "./tauri";
 import { saveDrawing, type DrawingScene } from "./drawings";
 
-// No subscriptions or timers: drawing events only replace these references.
-export function createDrawingSession(path: string, initial: DrawingScene) {
+/**
+ * One drawing session per canonical path, however many panes show it.
+ *
+ * A drawing can be open in two panes at once, and two independent export
+ * queues writing the same `.excalidraw.svg` would race. So the scene, its
+ * assets, the dirty state and the single write queue belong to the path; each
+ * attached view contributes edits and receives the others'. Viewport and
+ * selection stay inside Excalidraw, per view — they are not scene state.
+ */
+
+/** What a session needs from a mounted Excalidraw instance to keep it in sync. */
+export interface DrawingViewHandle {
+  applyScene: (scene: { elements: readonly ExcalidrawElement[]; files: BinaryFiles }) => void;
+}
+
+interface AttachedView {
+  handle: DrawingViewHandle;
+  /**
+   * Fingerprint of the scene last pushed into this view. Excalidraw reports an
+   * applied `updateScene` back through `onChange`, and republishing that would
+   * bounce the scene between panes forever. Comparing fingerprints identifies
+   * the echo without walking the scene, which the per-stroke path cannot
+   * afford.
+   *
+   * ponytail: element count + newest version + asset count. Two genuinely
+   * different scenes could collide; if that ever shows up, hash element ids
+   * instead, still without a deep traversal.
+   */
+  echo: string | null;
+}
+
+function fingerprint(elements: readonly ExcalidrawElement[], files: BinaryFiles) {
+  const last = elements[elements.length - 1];
+  return `${elements.length}:${last?.version ?? 0}:${last?.id ?? ""}:${Object.keys(files).length}`;
+}
+
+function createSession(path: string, initial: DrawingScene) {
   let elements: readonly ExcalidrawElement[] = initial.elements;
   let appState = initial.appState;
   let files = initial.files;
+  // An empty scene is not "armed" until something is drawn, so a load that
+  // reports zero elements cannot overwrite a real drawing with nothing.
   let armed = elements.length === 0;
   const serialize = () =>
     JSON.stringify({
@@ -20,17 +57,69 @@ export function createDrawingSession(path: string, initial: DrawingScene) {
     });
   let saved = serialize();
   let queue = Promise.resolve();
+  const views = new Map<string, AttachedView>();
 
-  return {
-    change(next: readonly OrderedExcalidrawElement[], state: AppState, images: BinaryFiles) {
+  const session = {
+    path,
+    views,
+
+    /** The live scene — what a newly attached view must open at, rather than
+     *  re-reading a stale copy from disk. */
+    scene(): DrawingScene {
+      return { elements: elements as DrawingScene["elements"], appState, files };
+    },
+
+    attach(viewId: string, handle: DrawingViewHandle) {
+      views.set(viewId, { handle, echo: null });
+    },
+
+    /** Detach a view without writing. A tab moving between panes remounts its
+     *  editor, and a move must never trigger a save. */
+    detach(viewId: string) {
+      views.delete(viewId);
+    },
+
+    isDirty() {
+      return serialize() !== saved;
+    },
+
+    change(
+      viewId: string,
+      next: readonly OrderedExcalidrawElement[],
+      state: AppState,
+      images: BinaryFiles,
+    ) {
       if (state.isLoading || (!armed && next.length === 0)) return;
+
+      const view = views.get(viewId);
+      const incoming = fingerprint(next, images);
+      if (view?.echo === incoming) {
+        // This is the scene we just pushed into this view coming back.
+        view.echo = null;
+        return;
+      }
+      if (view) view.echo = null;
+
       armed = true;
       elements = next;
       appState = state;
       files = images;
+
+      for (const [otherId, other] of views) {
+        if (otherId === viewId) continue;
+        other.echo = incoming;
+        other.handle.applyScene({ elements: next, files: images });
+      }
     },
+
     settled: () => queue,
-    save(this: void): Promise<void> {
+
+    /**
+     * The one writer for this path. Serializing through `queue` is what makes
+     * two panes safe: a second request never starts a second export, it waits
+     * for the first and then no-ops if the content is unchanged.
+     */
+    save(): Promise<void> {
       // Capture before yielding: Excalidraw mutates elements during a stroke.
       const signature = serialize();
       const snapshot = JSON.parse(signature) as {
@@ -49,34 +138,60 @@ export function createDrawingSession(path: string, initial: DrawingScene) {
       return result;
     },
   };
+  return session;
 }
 
-type SessionEntry = { save: () => Promise<void>; settled: () => Promise<void>; retired: boolean };
-const sessions = new Map<string, Set<SessionEntry>>();
+export type DrawingSession = ReturnType<typeof createSession>;
 
-function saveEntry(path: string, entries: Set<SessionEntry>, entry: SessionEntry) {
-  return entry.save().then(() => {
-    if (!entry.retired) return;
-    entries.delete(entry);
-    if (entries.size === 0 && sessions.get(path) === entries) sessions.delete(path);
-  });
-}
+const sessions = new Map<string, DrawingSession>();
 
-export function registerDrawingSession(
+/**
+ * Attach a mounted editor to this path's session, creating it from `initial`
+ * if this is the first view. Returns the scene to open at — the *live* one, so
+ * a second pane joins mid-edit rather than reverting to what is on disk.
+ *
+ * Detaching does not save. Writes happen at explicit boundaries: Cmd+S, tab
+ * close, and quit.
+ */
+export function attachDrawingView(
   path: string,
-  save: () => Promise<void>,
-  settled: () => Promise<void> = () => Promise.resolve(),
-) {
-  const entries = sessions.get(path) ?? new Set<SessionEntry>();
-  const entry = { save, settled, retired: false };
-  entries.add(entry);
-  sessions.set(path, entries);
-  return () => {
-    if (!entries.has(entry)) return;
-    // Keep a retiring session until its write succeeds, including retries.
-    entry.retired = true;
-    void saveEntry(path, entries, entry).catch(reportDrawingSaveError);
+  viewId: string,
+  initial: DrawingScene,
+  handle: DrawingViewHandle,
+): { scene: DrawingScene; detach: () => void } {
+  let session = sessions.get(path);
+  if (!session) {
+    session = createSession(path, initial);
+    sessions.set(path, session);
+  }
+  session.attach(viewId, handle);
+  const attached = session;
+  return {
+    scene: attached.scene(),
+    detach: () => {
+      attached.detach(viewId);
+      // A clean session with nothing attached has nothing left to own. A dirty
+      // one is kept so quit and explicit-save boundaries can still flush it.
+      if (attached.views.size === 0 && !attached.isDirty() && sessions.get(path) === attached) {
+        sessions.delete(path);
+      }
+    },
   };
+}
+
+/** Record an edit from one view and mirror it into this path's other views. */
+export function changeDrawing(
+  path: string,
+  viewId: string,
+  elements: readonly OrderedExcalidrawElement[],
+  appState: AppState,
+  files: BinaryFiles,
+) {
+  sessions.get(path)?.change(viewId, elements, appState, files);
+}
+
+export function getDrawingSession(path: string): DrawingSession | undefined {
+  return sessions.get(path);
 }
 
 export function hasDrawingSession(path?: string): boolean {
@@ -85,13 +200,21 @@ export function hasDrawingSession(path?: string): boolean {
     : sessions.size > 0;
 }
 
+function matching(path?: string) {
+  return [...sessions.values()].filter(
+    (session) => !path || session.path === path || session.path.startsWith(`${path}/`),
+  );
+}
+
 export async function saveDrawingSessions(path?: string): Promise<void> {
-  const targets = path
-    ? [...sessions.entries()].filter(([key]) => key === path || key.startsWith(`${path}/`))
-    : [...sessions.entries()];
   const results = await Promise.allSettled(
-    targets.flatMap(([target, entries]) =>
-      [...entries].map((entry) => saveEntry(target, entries, entry)),
+    matching(path).map((session) =>
+      session.save().then(() => {
+        // A closed drawing whose write has landed can be released.
+        if (session.views.size === 0 && sessions.get(session.path) === session) {
+          sessions.delete(session.path);
+        }
+      }),
     ),
   );
   const failure = results.find((result) => result.status === "rejected");
@@ -107,11 +230,8 @@ export function reportDrawingSaveError(error: unknown) {
 
 // A deleted or moved path must never be recreated by an unmount cleanup.
 export function discardDrawingSessions(prefix: string) {
-  for (const [path, entries] of sessions) {
-    if (path === prefix || path.startsWith(`${prefix}/`)) {
-      entries.clear();
-      sessions.delete(path);
-    }
+  for (const path of [...sessions.keys()]) {
+    if (path === prefix || path.startsWith(`${prefix}/`)) sessions.delete(path);
   }
 }
 
@@ -148,14 +268,9 @@ export async function withDrawingSaveBoundary<T>(
 export async function deleteEntryAfterDrawingWrites(path: string): Promise<void> {
   const release = freezeDrawingInput();
   try {
-    const entries = [...sessions.entries()].filter(
-      ([key]) => key === path || key.startsWith(`${path}/`),
-    );
     // An earlier Cmd+S must finish before deletion. Failed writes cannot recreate
     // the file either, and must not block an explicit request to delete it.
-    await Promise.allSettled(
-      entries.flatMap(([, set]) => [...set].map((entry) => entry.settled())),
-    );
+    await Promise.allSettled(matching(path).map((session) => session.settled()));
     await deleteEntry(path);
     discardDrawingSessions(path);
   } finally {

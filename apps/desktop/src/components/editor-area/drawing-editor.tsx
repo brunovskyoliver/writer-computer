@@ -1,14 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Excalidraw } from "@excalidraw/excalidraw";
+import { CaptureUpdateAction, Excalidraw } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
-import type { AppState, BinaryFiles } from "@excalidraw/excalidraw/types";
+import type { AppState, BinaryFiles, ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import type { OrderedExcalidrawElement } from "@excalidraw/excalidraw/element/types";
 import { loadDrawing, type DrawingScene } from "@/lib/drawings";
-import {
-  createDrawingSession,
-  registerDrawingSession,
-  saveDrawingSessions,
-} from "@/lib/drawing-sessions";
+import { attachDrawingView, changeDrawing, saveDrawingSessions } from "@/lib/drawing-sessions";
 import { useSetting } from "@/hooks/use-settings";
 import { activeMode, type ThemePreference } from "@/lib/theme";
 
@@ -36,20 +32,22 @@ type LoadState =
   | { status: "ready"; scene: DrawingScene };
 
 export default function DrawingEditor({
+  tabId,
   path,
   isActive = true,
 }: {
+  tabId: string;
   path: string;
   isActive?: boolean;
 }) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const themePreference = useSetting("appearance.theme") as ThemePreference | undefined;
   const theme = activeMode(themePreference);
-  const session = useRef<ReturnType<typeof createDrawingSession> | null>(null);
+  const apiRef = useRef<ExcalidrawImperativeAPI | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    let unregister: (() => void) | undefined;
+    let detach: (() => void) | undefined;
     // A tab reopened while its previous export finishes must read that write.
     void saveDrawingSessions(path)
       .then(() => loadDrawing(path))
@@ -59,24 +57,38 @@ export default function DrawingEditor({
           setState({ status: "error", message: result.error });
           return;
         }
-        session.current = createDrawingSession(path, result.scene);
-        unregister = registerDrawingSession(path, session.current.save, session.current.settled);
-        setState({ status: "ready", scene: result.scene });
+        // The session owns the scene. If another pane already has this drawing
+        // open, `attachDrawingView` hands back the live scene rather than the
+        // one just read from disk, so the second pane joins mid-edit.
+        const attached = attachDrawingView(path, tabId, result.scene, {
+          applyScene: ({ elements, files }) => {
+            const api = apiRef.current;
+            if (!api) return;
+            if (Object.keys(files).length > 0) api.addFiles(Object.values(files));
+            // NEVER: a sibling's edit is a remote update, so it must not enter
+            // this view's own undo history.
+            api.updateScene({ elements, captureUpdate: CaptureUpdateAction.NEVER });
+          },
+        });
+        detach = attached.detach;
+        setState({ status: "ready", scene: attached.scene });
       })
       .catch((error: unknown) => {
         if (!cancelled) setState({ status: "error", message: String(error) });
       });
     return () => {
       cancelled = true;
-      unregister?.();
+      // Detaching never writes: a tab moving between panes remounts its editor,
+      // and a move must not save. Cmd+S, tab close, and quit do the writing.
+      detach?.();
     };
-  }, [path]);
+  }, [path, tabId]);
 
   const handleChange = useCallback(
     (elements: readonly OrderedExcalidrawElement[], appState: AppState, files: BinaryFiles) => {
-      session.current?.change(elements, appState, files);
+      changeDrawing(path, tabId, elements, appState, files);
     },
-    [],
+    [path, tabId],
   );
 
   if (state.status === "loading") {
@@ -98,6 +110,9 @@ export default function DrawingEditor({
 
   return (
     <Excalidraw
+      excalidrawAPI={(api) => {
+        apiRef.current = api;
+      }}
       initialData={state.scene}
       theme={theme}
       onChange={handleChange}

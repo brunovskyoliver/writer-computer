@@ -21,7 +21,7 @@ const host = document.createElement("div");
 host.style.cssText = "position:fixed;inset:0;background:white";
 document.body.append(host);
 const root = createRoot(host);
-root.render(<DrawingEditor path="/fixture.excalidraw.svg" />);
+root.render(<DrawingEditor tabId="harness" path="/fixture.excalidraw.svg" />);
 (window as any).drawingHarness = {
   fixture,
   save: saveDrawingSessions,
