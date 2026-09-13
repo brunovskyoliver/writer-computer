@@ -36,7 +36,7 @@ both branches. Do not start Phase 3 before T009 reports and the user picks a bra
 
 **Purpose**: Dependency in place so the spike can run at all
 
-- [x] T001 Run `vp install` from repo root, then `vp add @excalidraw/excalidraw@0.18.1` from `apps/desktop/` — pinned version, peer-compatible with this repo's React 19.1
+- [x] T001 Run `vp install` from repo root, then `vp install @excalidraw/excalidraw@0.18.1` from `apps/desktop/` — this CLI has no `vp add` subcommand; `vp install <pkg>` acts as add. Pinned exactly, and pnpm routes the pin into the `pnpm-workspace.yaml` catalog. Peer-compatible with this repo's React 19
 - [x] T002 Create `SPECs/Agent/worksheet-excalidraw-embed.md` following the shape of the existing worksheets in `SPECs/Agent/` (spec.md "Procedure in this repo", step 3)
 - [x] T003 [P] Move the Excalidraw task in `TODOS.md` from **Up Next** to **In Progress**, linking `SPECs/excalidraw-embed/spec.md`
 
