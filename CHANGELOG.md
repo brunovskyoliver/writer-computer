@@ -2,6 +2,7 @@
 
 ## 2026-09-13
 
+- Opening a drawing no longer takes over the tab it was opened from. Double-clicking an inline embed, the New Drawing command, and the sidebar all leave the note open in the tab bar and put the drawing in a tab of its own; a drawing that already has a tab is brought forward rather than opened twice.
 - Drawing fixes: inline drawing embeds keep their colours in dark mode (the exported SVG stays canonical light-mode, as Excalidraw's dark theme is a display filter, and the embed now gets that same filter), the Excalidraw zoom controls no longer float over other tabs when a drawing tab is in the background, and drawing autosave waits a second instead of 150 ms so a full scene export plus embed re-decode no longer fires on every pause mid-stroke.
 
 ## 2026-09-10

@@ -332,6 +332,32 @@ describe("editor-store", () => {
     });
   });
 
+  test("opening a drawing leaves the note's tab in place and reuses its own", async () => {
+    mockedInvoke.mockResolvedValueOnce({ path: "/a.md", content: "a", modified_at: 1 });
+
+    await useEditorStore.getState().openFile("/a.md");
+    await useEditorStore.getState().navigateToFile("/sketch.excalidraw.svg");
+
+    let state = useEditorStore.getState();
+    expect(state.tabs.map((tab) => tab.location)).toEqual([
+      { kind: "file", path: "/a.md" },
+      { kind: "drawing", path: "/sketch.excalidraw.svg" },
+    ]);
+    expect(state.activeTabId).toBe(state.tabs[1]!.id);
+    // A drawing is not an open *file*: it never enters `openFiles` and never
+    // becomes `activeFilePath`.
+    expect(state.activeFilePath).toBeNull();
+    expect(state.openFiles.has("/sketch.excalidraw.svg")).toBe(false);
+
+    const drawingTabId = state.tabs[1]!.id;
+    state.setActiveTab(state.tabs[0]!.id);
+    await useEditorStore.getState().openFile("/sketch.excalidraw.svg");
+
+    state = useEditorStore.getState();
+    expect(state.tabs).toHaveLength(2);
+    expect(state.activeTabId).toBe(drawingTabId);
+  });
+
   test("navigateBack and navigateForward use tab-local history", async () => {
     mockedInvoke
       .mockResolvedValueOnce({ path: "/a.md", content: "a", modified_at: 1 })

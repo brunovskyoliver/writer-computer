@@ -377,8 +377,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       return;
     }
 
-    // Reuse the active file tab by navigating in-place.
-    if (activeTab?.location.kind === "file") {
+    // Reuse the active file tab by navigating in-place. Drawings go the same
+    // way whatever the active tab is: `navigateToFile` owns the rule that they
+    // open in a tab of their own.
+    if (activeTab?.location.kind === "file" || isDrawingPath(path)) {
       await state.navigateToFile(path);
       return;
     }
@@ -678,12 +680,37 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   navigateToFile: async (path: string) => {
     const state = get();
     const activeTab = getActiveTab(state);
-    if (!activeTab) {
-      await state.openFile(path);
+    if (activeTab?.location.kind === "launcher") {
+      await state.replaceTabWithFile(activeTab.id, path);
       return;
     }
-    if (activeTab.location.kind === "launcher") {
-      await state.replaceTabWithFile(activeTab.id, path);
+
+    // A drawing is a surface of its own, not a document you navigate to, so it
+    // never takes over the tab it was opened from: the note stays in the tab
+    // bar behind it. Every route into a drawing lands here — the sidebar and
+    // the New Drawing command through `openFile`, a double-clicked inline
+    // embed directly — so this is the one place the rule lives. A drawing
+    // already open is focused rather than opened twice; `openFileInNewTab` is
+    // still the explicit "give me a second copy" action.
+    if (isDrawingPath(path)) {
+      const existing = state.tabs.find(
+        (tab) => tab.location.kind === "drawing" && tab.location.path === path,
+      );
+      if (existing) {
+        get().setActiveTab(existing.id);
+        return;
+      }
+      const drawingTab = createFileTab(path);
+      set((currentState) => ({
+        tabs: [...currentState.tabs, drawingTab],
+        activeTabId: drawingTab.id,
+        activeFilePath: locationPrimaryPath(drawingTab.location),
+      }));
+      return;
+    }
+
+    if (!activeTab) {
+      await state.openFile(path);
       return;
     }
     if (activeTab.location.kind === "file" && activeTab.location.path === path) return;
