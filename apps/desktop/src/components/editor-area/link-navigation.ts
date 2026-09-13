@@ -21,7 +21,10 @@ function scrollSameDocAnchor(view: EditorView, filePath: string, anchor: string)
   const content = file?.content ?? view.state.doc.toString();
   const heading = findHeadingBySlug(content, anchor);
   if (!heading) {
-    showEditorNotice(`Heading "#${anchor}" not found in this document`);
+    showEditorNotice(
+      `Heading "#${anchor}" not found in this document`,
+      editorApi.getTabIdForView(view),
+    );
     return;
   }
   const scroller = findOuterScroller(view.dom);
@@ -35,6 +38,9 @@ function scrollSameDocAnchor(view: EditorView, filePath: string, anchor: string)
 export async function followLink(href: string | null, view: EditorView, filePath: string) {
   if (!href) return;
 
+  // Captured before the resolve: the link belongs to this view's tab, and the
+  // navigation must land there even if focus moves to another pane meanwhile.
+  const tabId = editorApi.getTabIdForView(view);
   const target = await resolveLinkTarget(href, filePath, getWorkspaceRoot(), (path) =>
     tauri.fileExists(path),
   );
@@ -50,8 +56,8 @@ export async function followLink(href: string | null, view: EditorView, filePath
       scrollSameDocAnchor(view, filePath, target.anchor);
       return;
     }
-    if (target.anchor) setPendingAnchor(target.path, target.anchor);
-    await editorApi.navigateToFile(target.path);
+    if (target.anchor && tabId) setPendingAnchor(tabId, target.path, target.anchor);
+    await editorApi.navigateToFile(target.path, tabId ? { tabId } : undefined);
     return;
   }
 

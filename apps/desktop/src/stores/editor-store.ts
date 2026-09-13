@@ -25,6 +25,7 @@ import {
   insertTab,
   layoutTabIds,
   normalizeLayout,
+  paneOfTab,
   removeTab as removeTabFromLayout,
   removeTabs as removeTabsFromLayout,
   setFocusedPane as focusPaneInLayout,
@@ -82,6 +83,19 @@ export type FileDropOutcome =
   | { status: "stale" }
   | { status: "failed"; errors: Array<{ path: string; error: unknown }> };
 
+/**
+ * Where an open route is aimed. Routes that do async work before they reach
+ * the store (a palette create, a link resolve) capture this *before* their
+ * first await and hand it in, so a slow step cannot land the result in
+ * whichever pane happens to be focused by the time it finishes. An explicit
+ * tab wins over an explicit pane; both fall back to the focused pane when the
+ * target no longer exists.
+ */
+export interface OpenTarget {
+  paneId?: string;
+  tabId?: string;
+}
+
 interface EditorState {
   openFiles: Map<string, OpenFile>;
   /** Every open tab, ordered by pane traversal. `layout` decides which pane
@@ -94,9 +108,9 @@ interface EditorState {
   /** Derived from the focused pane's active tab — read freely, never assign. */
   activeFilePath: string | null;
 
-  openFile: (path: string) => Promise<void>;
+  openFile: (path: string, target?: OpenTarget) => Promise<void>;
   openCompactFile: (path: string, prefetched?: FileContent | null) => Promise<void>;
-  openFileInNewTab: (path: string) => Promise<void>;
+  openFileInNewTab: (path: string, target?: OpenTarget) => Promise<void>;
   openNewTab: () => void;
   ensureLauncherTab: () => void;
   openOrFocus: (match: (tab: Tab) => boolean, factory: () => Tab) => void;
@@ -109,7 +123,7 @@ interface EditorState {
   setFocusedPane: (paneId: string) => void;
   openFilesFromDrop: (drop: FileDrop, isCurrent?: () => boolean) => Promise<FileDropOutcome>;
   moveTabFromDrop: (candidate: DropCandidate) => boolean;
-  navigateToFile: (path: string) => Promise<void>;
+  navigateToFile: (path: string, target?: OpenTarget) => Promise<void>;
   navigateBack: () => Promise<void>;
   navigateForward: () => Promise<void>;
   renameOpenFile: (oldPath: string, newPath: string) => void;
@@ -121,6 +135,10 @@ interface EditorState {
     activeIndex: number | null,
     prefetchedActiveFile?: FileContent | null,
   ) => Promise<void>;
+  /** Drop every tab, document, and the layout tree: the reset a workspace
+   *  switch or close runs. A fresh tree means a pane captured before the
+   *  reset can never be found again, so in-flight opens land nowhere. */
+  resetEditorState: () => void;
   updateContent: (path: string, content: string) => void;
   updateFrontmatter: (path: string, frontmatter: string | null) => void;
   markSaved: (path: string, diskContent: string, hasNewerChanges?: boolean) => void;
@@ -305,6 +323,28 @@ function getActiveTab(state: Pick<EditorState, "tabs" | "activeTabId">) {
   return state.tabs.find((tab) => tab.id === state.activeTabId) ?? null;
 }
 
+/**
+ * The pane and tab an open route acts on. Explicit tab, then explicit pane,
+ * then the focused pane — and within the pane, its active tab plays the part
+ * the globally active tab used to play in the replace/new-tab policy.
+ */
+function resolveOpenTarget(
+  state: Pick<EditorState, "tabs" | "layout">,
+  target: OpenTarget | undefined,
+): { paneId: string; tab: Tab | null } {
+  if (target?.tabId) {
+    const pane = paneOfTab(state.layout, target.tabId);
+    const tab = state.tabs.find((candidate) => candidate.id === target.tabId);
+    if (pane && tab) return { paneId: pane.id, tab };
+  }
+  const paneId =
+    target?.paneId && findPane(state.layout, target.paneId)
+      ? target.paneId
+      : state.layout.focusedPaneId;
+  const activeTabId = findPane(state.layout, paneId)?.activeTabId ?? null;
+  return { paneId, tab: state.tabs.find((candidate) => candidate.id === activeTabId) ?? null };
+}
+
 function collectReferencedPaths(tabs: Tab[]) {
   const paths = new Set<string>();
   for (const tab of tabs) {
@@ -386,15 +426,20 @@ async function ensureFileLoaded(path: string, set: EditorStateSetter, get: () =>
     return;
   }
 
-  const existing = get().openFiles.get(path);
-  if (existing && !existing.isLoading) return;
+  const before = get().openFiles.get(path);
+  if (before && !before.isLoading) return;
 
   const pending = pendingLoads.get(path);
   if (pending) {
     await pending;
-    return;
+    // The read that was in flight can have landed in a store that was reset
+    // meanwhile, leaving this caller's placeholder still loading. Read again
+    // for it rather than returning a placeholder that never fills in.
+    const settled = get().openFiles.get(path);
+    if (!settled || !settled.isLoading) return;
   }
 
+  const existing = get().openFiles.get(path);
   if (!existing) {
     set((state) => {
       if (state.openFiles.has(path)) return state;
@@ -453,12 +498,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   activeTabId: null,
   activeFilePath: null,
 
-  openFile: async (path: string) => {
+  openFile: async (path: string, target?: OpenTarget) => {
     const state = get();
-    const activeTab = getActiveTab(state);
-    // Captured before any await: a slow read must land in the pane the user
+    // Resolved before any await: a slow read must land in the pane the user
     // opened from, not in whichever pane happens to be focused when it lands.
-    const targetPaneId = state.layout.focusedPaneId;
+    const { paneId: targetPaneId, tab: activeTab } = resolveOpenTarget(state, target);
 
     if (activeTab?.location.kind === "launcher") {
       await state.replaceTabWithFile(activeTab.id, path);
@@ -469,7 +513,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     // way whatever the active tab is: `navigateToFile` owns the rule that they
     // open in a tab of their own.
     if (activeTab?.location.kind === "file" || isDrawingPath(path)) {
-      await state.navigateToFile(path);
+      await state.navigateToFile(path, { paneId: targetPaneId, tabId: activeTab?.id });
       return;
     }
 
@@ -569,14 +613,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   // Always create a fresh tab for `path`, even if another tab already shows it.
   // Used by the sidebar context menu's "Open in new tab" action so it never
   // collapses into the existing tab the way `openFile` does.
-  openFileInNewTab: async (path: string) => {
+  openFileInNewTab: async (path: string, target?: OpenTarget) => {
     const nextTab = createFileTab(path);
+    const { paneId } = resolveOpenTarget(get(), target);
 
     set((state) => {
       const openFiles = state.openFiles.has(path)
         ? undefined
         : new Map(state.openFiles).set(path, createLoadingFile(path));
-      return { ...appendTab(state, nextTab), ...(openFiles ? { openFiles } : {}) };
+      return { ...appendTab(state, nextTab, paneId), ...(openFiles ? { openFiles } : {}) };
     });
 
     try {
@@ -818,9 +863,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     return true;
   },
 
-  navigateToFile: async (path: string) => {
+  navigateToFile: async (path: string, target?: OpenTarget) => {
     const state = get();
-    const activeTab = getActiveTab(state);
+    const { paneId, tab: activeTab } = resolveOpenTarget(state, target);
     if (activeTab?.location.kind === "launcher") {
       await state.replaceTabWithFile(activeTab.id, path);
       return;
@@ -842,12 +887,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         return;
       }
       const drawingTab = createFileTab(path);
-      set((currentState) => appendTab(currentState, drawingTab));
+      set((currentState) => appendTab(currentState, drawingTab, paneId));
       return;
     }
 
     if (!activeTab) {
-      await state.openFile(path);
+      await state.openFile(path, { paneId });
       return;
     }
     if (activeTab.location.kind === "file" && activeTab.location.path === path) return;
@@ -1242,6 +1287,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     });
 
     if (shouldEnsureLauncher) get().ensureLauncherTab();
+  },
+
+  resetEditorState: () => {
+    for (const tabId of get().tabs) pendingNavigationVersionByTabId.delete(tabId.id);
+    set((state) => ({
+      openFiles: new Map(),
+      ...publish([], createLayout([], null, state.layout.revision + 1)),
+    }));
   },
 
   updateContent: (path: string, content: string) => {

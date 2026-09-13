@@ -203,7 +203,7 @@ export function useProsemarkEditor(
         getScrollContainerRef.current,
       );
       if (scrollContainer) {
-        const pendingAnchor = consumePendingAnchor(filePath);
+        const pendingAnchor = consumePendingAnchor(tabId, filePath);
         if (pendingAnchor !== undefined) {
           const heading = findHeadingBySlug(content, pendingAnchor);
           if (heading) {
@@ -213,7 +213,10 @@ export function useProsemarkEditor(
             });
           } else {
             scrollContainer.scrollTo({ top: 0, behavior: "auto" });
-            showEditorNotice(`Heading "#${pendingAnchor}" not found in ${getFileName(filePath)}`);
+            showEditorNotice(
+              `Heading "#${pendingAnchor}" not found in ${getFileName(filePath)}`,
+              tabId,
+            );
           }
         } else {
           restoreScrollPosition(

@@ -117,12 +117,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     if (hasDrawingSession()) await withDrawingSaveBoundary(() => {});
 
     // Clear editor state before switching
-    useEditorStore.setState({
-      openFiles: new Map(),
-      tabs: [],
-      activeTabId: null,
-      activeFilePath: null,
-    });
+    useEditorStore.getState().resetEditorState();
 
     const info = await tauri.openWorkspace(path);
     // Read the directory and load the session under the canonical root that
@@ -165,12 +160,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     void saveSession(root, snapshot.tabs, snapshot.activeIndex);
     await withDrawingSaveBoundary(() => tauri.closeWorkspace(root));
     if (get().root !== root) return;
-    useEditorStore.setState({
-      openFiles: new Map(),
-      tabs: [],
-      activeTabId: null,
-      activeFilePath: null,
-    });
+    useEditorStore.getState().resetEditorState();
     set((state) =>
       withNextWorkspaceGeneration(state, {
         root: null,
@@ -188,12 +178,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   restoreFromBundle: async (bundle) => {
     // Clear editor state in case anything was hydrated by a parallel hook.
-    useEditorStore.setState({
-      openFiles: new Map(),
-      tabs: [],
-      activeTabId: null,
-      activeFilePath: null,
-    });
+    useEditorStore.getState().resetEditorState();
 
     set((state) =>
       withNextWorkspaceGeneration(state, {

@@ -4,7 +4,10 @@ const DISMISS_AFTER_MS = 4000;
 
 interface EditorNoticeState {
   message: string | null;
-  showNotice: (message: string) => void;
+  /** The tab the notice is about, so the banner can sit over that tab's
+   *  pane. `null` for window-wide notices. */
+  tabId: string | null;
+  showNotice: (message: string, tabId?: string | null) => void;
   dismissNotice: () => void;
 }
 
@@ -14,9 +17,10 @@ let dismissTimer: number | null = null;
  *  links, rejected pastes, and similar "that didn't happen, here's why" cases. */
 export const useEditorNoticeStore = create<EditorNoticeState>((set, get) => ({
   message: null,
-  showNotice: (message) => {
+  tabId: null,
+  showNotice: (message, tabId = null) => {
     if (dismissTimer !== null) window.clearTimeout(dismissTimer);
-    set({ message });
+    set({ message, tabId });
     dismissTimer = window.setTimeout(() => {
       dismissTimer = null;
       get().dismissNotice();
@@ -27,12 +31,14 @@ export const useEditorNoticeStore = create<EditorNoticeState>((set, get) => ({
       window.clearTimeout(dismissTimer);
       dismissTimer = null;
     }
-    set({ message: null });
+    set({ message: null, tabId: null });
   },
 }));
 
-export function showEditorNotice(message: string) {
-  useEditorNoticeStore.getState().showNotice(message);
+/** Show a notice. Pass the originating `tabId` when there is one so the
+ *  banner appears over the pane the user acted in. */
+export function showEditorNotice(message: string, tabId: string | null = null) {
+  useEditorNoticeStore.getState().showNotice(message, tabId);
 }
 
 export function dismissEditorNotice() {

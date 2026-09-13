@@ -48,3 +48,65 @@ describe("useFuzzySearch hook", () => {
     expect(mockedInvoke).not.toHaveBeenCalledWith("fuzzy_search", expect.anything());
   });
 });
+
+describe("palette open routes", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  test("a created note opens in the pane captured when the palette ran, not the pane focused when the write finishes", async () => {
+    const { useEditorStore } = await import("../src/stores/editor-store");
+    const { createLayout, findPane, panes, splitPaneWithTab } =
+      await import("../src/lib/editor-layout");
+    const { createAndOpenFile } = await import("../src/components/command-palette/open-routes");
+
+    useEditorStore.setState({
+      openFiles: new Map(),
+      tabs: [],
+      layout: createLayout(),
+      activeTabId: null,
+      activeFilePath: null,
+    });
+
+    let finishCreate: () => void = () => {};
+    mockedInvoke.mockImplementation(async (cmd: string, args: unknown) => {
+      const path = (args as { path?: string }).path ?? "";
+      if (cmd === "create_file") {
+        await new Promise<void>((resolve) => (finishCreate = resolve));
+        return { path, content: "", modified_at: 1 };
+      }
+      if (cmd === "read_file") return { path, content: path, modified_at: 1 };
+      return null;
+    });
+
+    // Two panes, [a] | [b], with the palette opened over the left one.
+    await useEditorStore.getState().openFile("/ws/a.md");
+    await useEditorStore.getState().openFileInNewTab("/ws/b.md");
+    const [a, b] = useEditorStore.getState().tabs;
+    const { layout } = useEditorStore.getState();
+    useEditorStore.setState({
+      layout: splitPaneWithTab(layout, layout.focusedPaneId, "x", "after", b!.id),
+    });
+    const [left, right] = panes(useEditorStore.getState().layout);
+    useEditorStore.getState().setFocusedPane(left!.id);
+
+    const pending = createAndOpenFile("/ws/new.md", { paneId: left!.id, tabId: a!.id });
+    // Focus moves while the file is being written.
+    useEditorStore.getState().setFocusedPane(right!.id);
+    finishCreate();
+    await pending;
+
+    const state = useEditorStore.getState();
+    // The left pane's file tab navigated in place per the replace policy; the
+    // right pane never saw the new file.
+    expect(state.tabs.find((tab) => tab.id === a!.id)!.location).toEqual({
+      kind: "file",
+      path: "/ws/new.md",
+    });
+    expect(findPane(state.layout, right!.id)!.tabIds).toEqual([b!.id]);
+    expect(state.tabs.find((tab) => tab.id === b!.id)!.location).toEqual({
+      kind: "file",
+      path: "/ws/b.md",
+    });
+  });
+});

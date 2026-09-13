@@ -5,6 +5,7 @@ import { useEditorStore } from "@/stores/editor-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { toggleSidebar } from "@/hooks/use-sidebar";
 import { getWorkspaceChromeMode } from "@/lib/compact-mode";
+import { findPane } from "@/lib/editor-layout";
 
 function isEditableTargetFocused(): boolean {
   const active = document.activeElement;
@@ -24,7 +25,7 @@ export function useKeyboardShortcuts() {
       const { openCommandPalette } = useUIStore.getState();
       const { root, chromeMode } = useWorkspaceStore.getState();
       const {
-        tabs,
+        layout,
         activeTabId,
         setActiveTab,
         openNewTab,
@@ -32,6 +33,9 @@ export function useKeyboardShortcuts() {
         navigateBack,
         navigateForward,
       } = useEditorStore.getState();
+      // Tab cycling and Cmd+N address the focused pane's strip, the one the
+      // user is looking at, not the window-wide tab list.
+      const tabs = findPane(layout, layout.focusedPaneId)?.tabIds ?? [];
       const isCompactFileMode = getWorkspaceChromeMode(root, chromeMode) === "compact-file";
 
       // Alt+Arrow: history navigation when no editable target is focused;
@@ -98,10 +102,10 @@ export function useKeyboardShortcuts() {
         e.preventDefault();
         if (isCompactFileMode) return;
         if (tabs.length === 0 || !activeTabId) return;
-        const idx = tabs.findIndex((tab) => tab.id === activeTabId);
+        const idx = tabs.indexOf(activeTabId);
         if (idx === -1) return;
         const next = e.shiftKey ? (idx - 1 + tabs.length) % tabs.length : (idx + 1) % tabs.length;
-        setActiveTab(tabs[next]!.id);
+        setActiveTab(tabs[next]!);
         return;
       }
 
@@ -111,7 +115,7 @@ export function useKeyboardShortcuts() {
         if (isCompactFileMode) return;
         const n = parseInt(e.key) - 1;
         if (n < tabs.length) {
-          setActiveTab(tabs[n]!.id);
+          setActiveTab(tabs[n]!);
         }
         return;
       }

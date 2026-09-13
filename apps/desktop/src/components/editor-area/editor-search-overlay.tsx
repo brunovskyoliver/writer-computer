@@ -14,6 +14,8 @@ import {
   useEditorSearchStore,
 } from "./editor-search-store";
 import { SurfaceCard } from "@/components/surface-card";
+import * as editorApi from "@/hooks/editor-api";
+import { PaneSurface } from "./pane-surface";
 
 interface MatchInfo {
   current: number;
@@ -146,91 +148,95 @@ export function EditorSearchOverlay() {
   }
 
   return (
-    <SurfaceCard
-      role="dialog"
-      aria-label="Find in document"
-      data-search-overlay
-      className="pointer-events-auto absolute bottom-2 right-3 z-40 w-[min(560px,calc(100%-1.5rem))] overflow-hidden p-2"
-    >
-      <div className="flex items-center gap-1.5">
-        <div className="relative min-w-0 flex-1">
-          <span
-            aria-hidden="true"
-            className="pointer-events-none absolute left-2.5 top-1/2 flex -translate-y-1/2 items-center justify-center text-[var(--fg-base)] opacity-[0.54]"
-          >
-            <HugeiconsIcon icon={Search01Icon} size={16} color="currentColor" strokeWidth={2} />
-          </span>
-          <input
-            ref={findInputRef}
-            type="text"
-            value={query}
-            onChange={(e) => onQueryChange(e.target.value)}
-            onKeyDown={onFindKeyDown}
-            placeholder="Find"
-            aria-label="Find"
-            className="w-full rounded-lg bg-[var(--surface-input)] pl-[34px] pr-16 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus-visible:outline-none h-[var(--chrome-control-height)]"
-          />
-          {matchInfo && query && (
+    // The overlay lives in the body of the pane whose editor it searches, so
+    // with several panes it is unambiguous which document "find" means.
+    <PaneSurface tabId={editorApi.getTabIdForView(view)}>
+      <SurfaceCard
+        role="dialog"
+        aria-label="Find in document"
+        data-search-overlay
+        className="pointer-events-auto absolute bottom-2 right-3 z-40 w-[min(560px,calc(100%-1.5rem))] overflow-hidden p-2"
+      >
+        <div className="flex items-center gap-1.5">
+          <div className="relative min-w-0 flex-1">
             <span
-              aria-live="polite"
-              className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[12px] tabular-nums text-[var(--text-muted)]"
+              aria-hidden="true"
+              className="pointer-events-none absolute left-2.5 top-1/2 flex -translate-y-1/2 items-center justify-center text-[var(--fg-base)] opacity-[0.54]"
             >
-              {matchInfo.total === 0 ? "No matches" : `${matchInfo.current}/${matchInfo.total}`}
+              <HugeiconsIcon icon={Search01Icon} size={16} color="currentColor" strokeWidth={2} />
             </span>
-          )}
-        </div>
-        <IconButton label="Previous match" onClick={actions.prev}>
-          <HugeiconsIcon icon={ArrowUp01Icon} size={14} color="currentColor" strokeWidth={2} />
-        </IconButton>
-        <IconButton label="Next match" onClick={actions.next}>
-          <HugeiconsIcon icon={ArrowDown01Icon} size={14} color="currentColor" strokeWidth={2} />
-        </IconButton>
-        <button
-          type="button"
-          onClick={() => setShowReplace((v) => !v)}
-          aria-pressed={showReplace}
-          aria-label="Toggle replace"
-          className={`shrink-0 rounded-md px-2 text-[12px] tracking-tight transition-colors h-[var(--chrome-control-height)] ${
-            showReplace
-              ? "bg-[var(--surface-selected)] text-[var(--text-primary)]"
-              : "text-[var(--text-muted)] hover:bg-[var(--surface-subtle)] hover:text-[var(--text-secondary)]"
-          }`}
-        >
-          Replace
-        </button>
-        <IconButton label="Close" onClick={actions.doClose}>
-          <HugeiconsIcon icon={Cancel01Icon} size={14} color="currentColor" strokeWidth={2} />
-        </IconButton>
-      </div>
-
-      {showReplace && (
-        <div className="mt-1.5 flex items-center gap-1.5 pl-7">
-          <input
-            type="text"
-            value={replaceText}
-            onChange={(e) => onReplaceTextChange(e.target.value)}
-            onKeyDown={onReplaceKeyDown}
-            placeholder="Replace"
-            aria-label="Replace"
-            className="min-w-0 flex-1 rounded-lg bg-[var(--surface-input)] px-2 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus-visible:outline-none h-[var(--chrome-control-height)]"
-          />
+            <input
+              ref={findInputRef}
+              type="text"
+              value={query}
+              onChange={(e) => onQueryChange(e.target.value)}
+              onKeyDown={onFindKeyDown}
+              placeholder="Find"
+              aria-label="Find"
+              className="w-full rounded-lg bg-[var(--surface-input)] pl-[34px] pr-16 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus-visible:outline-none h-[var(--chrome-control-height)]"
+            />
+            {matchInfo && query && (
+              <span
+                aria-live="polite"
+                className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[12px] tabular-nums text-[var(--text-muted)]"
+              >
+                {matchInfo.total === 0 ? "No matches" : `${matchInfo.current}/${matchInfo.total}`}
+              </span>
+            )}
+          </div>
+          <IconButton label="Previous match" onClick={actions.prev}>
+            <HugeiconsIcon icon={ArrowUp01Icon} size={14} color="currentColor" strokeWidth={2} />
+          </IconButton>
+          <IconButton label="Next match" onClick={actions.next}>
+            <HugeiconsIcon icon={ArrowDown01Icon} size={14} color="currentColor" strokeWidth={2} />
+          </IconButton>
           <button
             type="button"
-            onClick={actions.doReplace}
-            className="shrink-0 rounded-md px-2.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)] hover:text-[var(--text-primary)] h-[var(--chrome-control-height)]"
+            onClick={() => setShowReplace((v) => !v)}
+            aria-pressed={showReplace}
+            aria-label="Toggle replace"
+            className={`shrink-0 rounded-md px-2 text-[12px] tracking-tight transition-colors h-[var(--chrome-control-height)] ${
+              showReplace
+                ? "bg-[var(--surface-selected)] text-[var(--text-primary)]"
+                : "text-[var(--text-muted)] hover:bg-[var(--surface-subtle)] hover:text-[var(--text-secondary)]"
+            }`}
           >
             Replace
           </button>
-          <button
-            type="button"
-            onClick={actions.doReplaceAll}
-            className="shrink-0 rounded-md bg-[var(--accent)] px-2.5 text-[12px] font-medium text-white hover:opacity-90 h-[var(--chrome-control-height)]"
-          >
-            All
-          </button>
+          <IconButton label="Close" onClick={actions.doClose}>
+            <HugeiconsIcon icon={Cancel01Icon} size={14} color="currentColor" strokeWidth={2} />
+          </IconButton>
         </div>
-      )}
-    </SurfaceCard>
+
+        {showReplace && (
+          <div className="mt-1.5 flex items-center gap-1.5 pl-7">
+            <input
+              type="text"
+              value={replaceText}
+              onChange={(e) => onReplaceTextChange(e.target.value)}
+              onKeyDown={onReplaceKeyDown}
+              placeholder="Replace"
+              aria-label="Replace"
+              className="min-w-0 flex-1 rounded-lg bg-[var(--surface-input)] px-2 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus-visible:outline-none h-[var(--chrome-control-height)]"
+            />
+            <button
+              type="button"
+              onClick={actions.doReplace}
+              className="shrink-0 rounded-md px-2.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)] hover:text-[var(--text-primary)] h-[var(--chrome-control-height)]"
+            >
+              Replace
+            </button>
+            <button
+              type="button"
+              onClick={actions.doReplaceAll}
+              className="shrink-0 rounded-md bg-[var(--accent)] px-2.5 text-[12px] font-medium text-white hover:opacity-90 h-[var(--chrome-control-height)]"
+            >
+              All
+            </button>
+          </div>
+        )}
+      </SurfaceCard>
+    </PaneSurface>
   );
 }
 

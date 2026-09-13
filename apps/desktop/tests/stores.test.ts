@@ -1671,3 +1671,165 @@ describe("editor-store tab drops", () => {
     expect(useEditorStore.getState().layout).toBe(before.layout);
   });
 });
+
+describe("editor-store pane routing", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useEditorStore.setState({
+      openFiles: new Map(),
+      tabs: [],
+      layout: createLayout(),
+      activeTabId: null,
+      activeFilePath: null,
+    });
+    useWorkspaceStore.setState({ chromeMode: "workspace" });
+  });
+
+  /** Open a.md and b.md as two panes: [a] | [b], with b focused. */
+  async function twoPanes() {
+    mockedInvoke.mockImplementation(async (_cmd: string, args: unknown) => {
+      const path = (args as { path: string }).path;
+      return { path, content: path, modified_at: 1 };
+    });
+    await useEditorStore.getState().openFile("/a.md");
+    await useEditorStore.getState().openFileInNewTab("/b.md");
+    const [a, b] = useEditorStore.getState().tabs;
+    const { layout } = useEditorStore.getState();
+    useEditorStore.setState({
+      layout: splitPaneWithTab(layout, layout.focusedPaneId, "x", "after", b!.id),
+    });
+    const [left, right] = panes(useEditorStore.getState().layout);
+    return { a: a!, b: b!, left: left!, right: right! };
+  }
+
+  function deferRead(path: string) {
+    const read = createDeferred<{ path: string; content: string; modified_at: number }>();
+    mockedInvoke.mockImplementation(async (_cmd: string, args: unknown) => {
+      const requested = (args as { path: string }).path;
+      if (requested === path) return read.promise;
+      return { path: requested, content: requested, modified_at: 1 };
+    });
+    return read;
+  }
+
+  test("an explicit pane target overrides focus for openFile", async () => {
+    const { a, left, right } = await twoPanes();
+    expect(useEditorStore.getState().layout.focusedPaneId).toBe(right.id);
+
+    await useEditorStore.getState().openFile("/c.md", { paneId: left.id });
+
+    const state = useEditorStore.getState();
+    // The left pane's active file tab navigated in place, as the existing
+    // replace policy says; the right pane was not touched.
+    expect(findPane(state.layout, left.id)!.tabIds).toEqual([a.id]);
+    expect(state.tabs.find((tab) => tab.id === a.id)!.location).toEqual({
+      kind: "file",
+      path: "/c.md",
+    });
+    expect(findPane(state.layout, right.id)!.tabIds).toHaveLength(1);
+  });
+
+  test("an explicit tab target navigates that tab even after focus moved on", async () => {
+    const { a, b, left, right } = await twoPanes();
+    useEditorStore.getState().setFocusedPane(left.id);
+    const read = deferRead("/c.md");
+
+    const pending = useEditorStore.getState().navigateToFile("/c.md", { tabId: b.id });
+    // Focus changes while the read is in flight: the completion still belongs
+    // to the tab it was aimed at.
+    useEditorStore.getState().setFocusedPane(left.id);
+    read.resolve({ path: "/c.md", content: "c", modified_at: 1 });
+    await pending;
+
+    const state = useEditorStore.getState();
+    const tabB = state.tabs.find((tab) => tab.id === b.id)!;
+    expect(tabB.location).toEqual({ kind: "file", path: "/c.md" });
+    expect(tabB.back).toEqual([{ kind: "file", path: "/b.md" }]);
+    expect(state.tabs.find((tab) => tab.id === a.id)!.location).toEqual({
+      kind: "file",
+      path: "/a.md",
+    });
+    expect(findPane(state.layout, right.id)!.tabIds).toEqual([b.id]);
+  });
+
+  test("openFileInNewTab lands in the captured pane, not the pane focused at completion", async () => {
+    const { left, right } = await twoPanes();
+    const read = deferRead("/c.md");
+
+    const pending = useEditorStore.getState().openFileInNewTab("/c.md", { paneId: left.id });
+    useEditorStore.getState().setFocusedPane(right.id);
+    read.resolve({ path: "/c.md", content: "c", modified_at: 1 });
+    await pending;
+
+    const state = useEditorStore.getState();
+    expect(findPane(state.layout, left.id)!.tabIds).toHaveLength(2);
+    expect(findPane(state.layout, right.id)!.tabIds).toHaveLength(1);
+  });
+
+  test("a target pane that closed during the read drops the open instead of landing elsewhere", async () => {
+    const { b, left, right } = await twoPanes();
+    // Only a launcher in the right pane, so openFile takes the create-a-tab path.
+    useEditorStore.getState().closeTab(b.id);
+    expect(findPane(useEditorStore.getState().layout, right.id)).toBeNull();
+    useEditorStore.getState().openNewTab();
+    const launcherPane = paneOfTab(
+      useEditorStore.getState().layout,
+      useEditorStore.getState().activeTabId!,
+    )!;
+    expect(launcherPane.id).toBe(left.id);
+
+    // Split the launcher off so the target pane is a pane of its own.
+    const launcherId = useEditorStore.getState().activeTabId!;
+    const layout = useEditorStore.getState().layout;
+    useEditorStore.setState({
+      layout: splitPaneWithTab(layout, left.id, "x", "after", launcherId),
+    });
+    const target = paneOfTab(useEditorStore.getState().layout, launcherId)!;
+    useEditorStore.getState().closeTab(launcherId);
+    useEditorStore.getState().setFocusedPane(left.id);
+    const before = useEditorStore.getState().tabs.length;
+
+    await useEditorStore.getState().openFile("/c.md", { paneId: target.id });
+
+    // The pane is gone, so the open falls back to the focused pane's policy:
+    // the focused file tab navigates in place rather than a tab appearing
+    // somewhere the user did not aim at.
+    const state = useEditorStore.getState();
+    expect(findPane(state.layout, target.id)).toBeNull();
+    expect(state.tabs).toHaveLength(before);
+  });
+
+  test("a read that completes after the editor was reset does not land in the new layout", async () => {
+    mockedInvoke.mockResolvedValue({ path: "/a.md", content: "a", modified_at: 1 });
+    await useEditorStore.getState().openFile("/a.md");
+    useEditorStore.getState().openNewTab();
+    // A settings tab in front so openFile has to create a new tab.
+    useEditorStore.getState().openOrFocus(
+      (tab) => tab.location.kind === "settings",
+      () => ({ id: "tab-settings", location: { kind: "settings" }, back: [], forward: [] }),
+    );
+    const read = deferRead("/c.md");
+
+    const pending = useEditorStore.getState().openFile("/c.md");
+    useEditorStore.getState().resetEditorState();
+    read.resolve({ path: "/c.md", content: "c", modified_at: 1 });
+    await pending;
+
+    const state = useEditorStore.getState();
+    expect(state.tabs).toEqual([]);
+    expect(state.openFiles.size).toBe(0);
+    expect(validateLayout(state.layout)).toEqual([]);
+  });
+
+  test("resetEditorState replaces the layout so stale pane ids cannot be reused", async () => {
+    const { left } = await twoPanes();
+    useEditorStore.getState().resetEditorState();
+
+    const state = useEditorStore.getState();
+    expect(findPane(state.layout, left.id)).toBeNull();
+    expect(state.tabs).toEqual([]);
+    expect(state.activeTabId).toBeNull();
+    expect(state.activeFilePath).toBeNull();
+    expect(panes(state.layout)).toHaveLength(1);
+  });
+});

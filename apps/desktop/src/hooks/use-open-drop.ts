@@ -20,6 +20,10 @@ export async function openStandaloneFile(path: string, prefetched: FileContent |
 export async function handleOpenPayload(payload: PendingOpenPayload) {
   const workspaceState = useWorkspaceStore.getState();
   const current = workspaceState.root;
+  // A Finder drop lands in the pane that was focused when it arrived. If the
+  // payload switches workspaces first, that pane is gone and the store falls
+  // back to the fresh layout's focus.
+  const paneId = useEditorStore.getState().layout.focusedPaneId;
 
   // File-only payload: standalone compact open. A window hosting a
   // workspace never switches chrome — the file gets its own window.
@@ -53,7 +57,7 @@ export async function handleOpenPayload(payload: PendingOpenPayload) {
   }
 
   if (payload.file) {
-    await useEditorStore.getState().openFile(payload.file);
+    await useEditorStore.getState().openFile(payload.file, { paneId });
   }
 }
 

@@ -19,7 +19,10 @@ async function handleImagePaste(
   if (isDisposed()) return;
   if (buffer.byteLength > MAX_IMAGE_SIZE) {
     const sizeMb = (buffer.byteLength / (1024 * 1024)).toFixed(1);
-    showEditorNotice(`Image not pasted: ${sizeMb} MB is over the ${MAX_IMAGE_SIZE_MB} MB limit`);
+    showEditorNotice(
+      `Image not pasted: ${sizeMb} MB is over the ${MAX_IMAGE_SIZE_MB} MB limit`,
+      editorApi.getTabIdForView(view),
+    );
     return;
   }
 

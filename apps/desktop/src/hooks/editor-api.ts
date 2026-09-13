@@ -1,7 +1,7 @@
 import type { EditorView } from "@codemirror/view";
 import * as editorViews from "@/lib/editor-views";
-import { useEditorStore } from "@/stores/editor-store";
-export type { OpenFile, Tab, SessionTab } from "@/stores/editor-store";
+import { useEditorStore, type OpenTarget } from "@/stores/editor-store";
+export type { OpenFile, Tab, OpenTarget } from "@/stores/editor-store";
 
 export function getOpenFile(path: string) {
   return useEditorStore.getState().openFiles.get(path) ?? null;
@@ -13,6 +13,16 @@ export function getOpenFiles() {
 
 export function getActiveFilePath() {
   return useEditorStore.getState().activeFilePath;
+}
+
+/** The pane an open route should capture before it awaits anything. */
+export function getFocusedPaneId() {
+  return useEditorStore.getState().layout.focusedPaneId;
+}
+
+/** The tab a view belongs to, for routes that start inside an editor. */
+export function getTabIdForView(view: EditorView): string | null {
+  return editorViews.getEditorRegistrationForView(view)?.tabId ?? null;
 }
 
 export function closeFile(path: string) {
@@ -43,16 +53,20 @@ export function reloadFromDisk(path: string, rawContent: string) {
   useEditorStore.getState().reloadFromDisk(path, rawContent);
 }
 
-export function navigateToFile(path: string) {
-  return useEditorStore.getState().navigateToFile(path);
+export function openFile(path: string, target?: OpenTarget) {
+  return useEditorStore.getState().openFile(path, target);
+}
+
+export function navigateToFile(path: string, target?: OpenTarget) {
+  return useEditorStore.getState().navigateToFile(path, target);
 }
 
 export function renameOpenFile(oldPath: string, newPath: string) {
   useEditorStore.getState().renameOpenFile(oldPath, newPath);
 }
 
-export function openFileInNewTab(path: string) {
-  return useEditorStore.getState().openFileInNewTab(path);
+export function openFileInNewTab(path: string, target?: OpenTarget) {
+  return useEditorStore.getState().openFileInNewTab(path, target);
 }
 
 export function removePathReferences(path: string) {
@@ -93,21 +107,25 @@ export function getEditorViewsForPath(path: string): EditorView[] {
   return editorViews.getEditorViewsForPath(path, tabOrder);
 }
 
-/** The view an API-level insert should target: the focused tab's, if it shows
- *  this file, otherwise the first in tab traversal order. */
-function viewForPath(path: string): EditorView | null {
+/** The view an API-level insert should target: the originating tab's if the
+ *  caller captured one and it still shows this file, else the focused tab's,
+ *  else the first in tab traversal order. */
+function viewForPath(path: string, tabId: string | null): EditorView | null {
   const { activeTabId } = useEditorStore.getState();
-  const focused = activeTabId ? editorViews.getEditorRegistration(activeTabId) : null;
-  if (focused?.path === path) return focused.view;
+  for (const candidate of [tabId, activeTabId]) {
+    const registration = candidate ? editorViews.getEditorRegistration(candidate) : null;
+    if (registration?.path === path) return registration.view;
+  }
   return getEditorViewsForPath(path)[0] ?? null;
 }
 
 /** Insert at the note's caret through the view, so the edit flows through the
  *  update listener into the store, the sibling views, and the save scheduler
  *  the same way a typed character does. False when that note has no live
- *  editor. */
-export function insertAtCursor(path: string, text: string): boolean {
-  const view = viewForPath(path);
+ *  editor. Pass the originating `tabId` when the caller captured one before
+ *  async work, so the insert lands in the view the user was in. */
+export function insertAtCursor(path: string, text: string, tabId: string | null = null): boolean {
+  const view = viewForPath(path, tabId);
   if (!view) return false;
   const cursor = view.state.selection.main.head;
   const line = view.state.doc.lineAt(cursor);

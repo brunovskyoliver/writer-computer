@@ -379,6 +379,47 @@ function takeDrawingPress(event: MouseEvent): string | null {
   return press.target;
 }
 
+/**
+ * Where an in-editor open route is coming from. `tabId` is captured from the
+ * view *before* the async resolve, so the navigation lands in the tab the
+ * user clicked in even if another pane takes focus while the workspace is
+ * being searched. `isDisposed` drops a result whose editor has since gone.
+ */
+export interface EditorOpenOrigin {
+  workspaceRoot: string | null;
+  filePath: string | null;
+  tabId: string | null;
+  isDisposed: () => boolean;
+}
+
+/** Resolve a wiki target and navigate the originating tab to it. */
+export async function followWikiLink(
+  rawTarget: string,
+  origin: EditorOpenOrigin,
+  deps: {
+    fuzzySearch: typeof tauri.fuzzySearch;
+    fileExists: typeof tauri.fileExists;
+  } = tauri,
+): Promise<void> {
+  if (!origin.workspaceRoot) return;
+  const result = await resolveWikiLink(
+    rawTarget,
+    origin.workspaceRoot,
+    deps.fuzzySearch,
+    deps.fileExists,
+    origin.filePath ?? "",
+  );
+  if (origin.isDisposed() || result.kind !== "internal") return;
+  await editorApi.navigateToFile(result.path, origin.tabId ? { tabId: origin.tabId } : undefined);
+}
+
+/** Resolve an inline drawing embed and open it from the originating tab. */
+export async function openDrawingEmbed(drawing: string, origin: EditorOpenOrigin): Promise<void> {
+  const absolutePath = await resolveEmbed(drawing, origin.workspaceRoot, origin.filePath);
+  if (!absolutePath || origin.isDisposed()) return;
+  await editorApi.navigateToFile(absolutePath, origin.tabId ? { tabId: origin.tabId } : undefined);
+}
+
 function wikiLinkClickHandler(getFilePath: () => string, isDisposed: () => boolean): Extension {
   return Prec.highest(
     EditorView.domEventHandlers({
@@ -401,21 +442,21 @@ function wikiLinkClickHandler(getFilePath: () => string, isDisposed: () => boole
       // fires, neither the widget node nor the coordinates point at the
       // embed any more. So `mousedown` stashes the target while the layout
       // is still intact and `dblclick` spends it.
-      dblclick(event) {
+      dblclick(event, view) {
         const drawing = takeDrawingPress(event);
         if (!drawing) return false;
 
         event.preventDefault();
         event.stopPropagation();
 
-        void resolveEmbed(drawing, getWorkspaceRoot(), getFilePath() || null)
-          .then((absolutePath) => {
-            if (!absolutePath || isDisposed()) return;
-            void editorApi.navigateToFile(absolutePath);
-          })
-          .catch((error) => {
-            if (!isDisposed()) console.error("[editor] Failed to open drawing embed:", error);
-          });
+        void openDrawingEmbed(drawing, {
+          workspaceRoot: getWorkspaceRoot(),
+          filePath: getFilePath() || null,
+          tabId: editorApi.getTabIdForView(view),
+          isDisposed,
+        }).catch((error) => {
+          if (!isDisposed()) console.error("[editor] Failed to open drawing embed:", error);
+        });
 
         return true;
       },
@@ -429,22 +470,14 @@ function wikiLinkClickHandler(getFilePath: () => string, isDisposed: () => boole
         const workspaceRoot = getWorkspaceRoot();
         if (!workspaceRoot) return true;
 
-        void resolveWikiLink(
-          rawTarget,
+        void followWikiLink(rawTarget, {
           workspaceRoot,
-          tauri.fuzzySearch,
-          tauri.fileExists,
-          getFilePath(),
-        )
-          .then((result) => {
-            if (isDisposed()) return;
-            if (result.kind === "internal") {
-              void editorApi.navigateToFile(result.path);
-            }
-          })
-          .catch((error) => {
-            if (!isDisposed()) console.error("[editor] Failed to follow wiki link:", error);
-          });
+          filePath: getFilePath(),
+          tabId: editorApi.getTabIdForView(view),
+          isDisposed,
+        }).catch((error) => {
+          if (!isDisposed()) console.error("[editor] Failed to follow wiki link:", error);
+        });
 
         return true;
       },

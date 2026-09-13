@@ -34,15 +34,10 @@ import { useGlobalRecentFiles } from "@/hooks/use-global-recent-files";
 import { openStandaloneFile } from "@/hooks/use-open-drop";
 import { settingsKind } from "@/components/editor-area/page-kinds/settings";
 import { getFileName, getFileStem, getParentDir } from "@/lib/paths";
-import {
-  DRAWING_EXTENSION,
-  createDrawing,
-  extractDrawingTitle,
-  nextAvailableDrawingPath,
-  sanitizeDrawingStem,
-} from "@/lib/drawings";
+import { DRAWING_EXTENSION, extractDrawingTitle, sanitizeDrawingStem } from "@/lib/drawings";
 import { showEditorNotice } from "@/components/editor-area/editor-notice-store";
-import * as editorApi from "@/hooks/editor-api";
+import { useFocusedPaneId } from "@/hooks/use-editor-layout";
+import { createAndOpenDrawing, createAndOpenFile } from "./open-routes";
 import * as tauri from "@/lib/tauri";
 import type { RecentFile } from "@/lib/tauri";
 
@@ -84,6 +79,7 @@ export function CommandPalette() {
   const closeTab = useCloseTab();
   const activeTabId = useActiveTabId();
   const activeFilePath = useActiveFilePath();
+  const focusedPaneId = useFocusedPaneId();
   const tabs = useOpenTabs();
   const { toggleTheme } = useTheme();
   const openSettingsTab = useOpenSettingsTab();
@@ -109,44 +105,34 @@ export function CommandPalette() {
     close();
   }
 
+  // The pane and tab the palette was opened over. Captured at click time so
+  // the create routes, which write to disk first, open into the pane the user
+  // was in rather than whichever pane is focused when the write finishes.
+  const origin = () => ({ paneId: focusedPaneId, tabId: activeTabId });
+
   function handleCreate() {
     if (!createPath) return;
 
     close();
     void (async () => {
-      await tauri.createFile(createPath);
       if (isCompactFileMode) {
+        await tauri.createFile(createPath);
         await openStandaloneFile(createPath);
       } else {
-        await openFile(createPath);
+        await createAndOpenFile(createPath, origin());
       }
     })();
   }
 
-  // Load-bearing order: write the file, insert the embed while the note still
-  // has the cursor, then open the tab — opening it moves focus off the note.
   // With no note in front (launcher, settings, another drawing tab)
   // `activeFilePath` is null, so the drawing lands in the workspace root and
   // nothing is inserted. Drawings go in the note's own directory: Writer has
   // no attachment-folder concept and this does not add one.
-  async function handleNewDrawing(baseDir: string, notePath: string | null, rawName?: string) {
-    const title = extractDrawingTitle(rawName);
-    const stem = sanitizeDrawingStem(rawName);
-    const path = await nextAvailableDrawingPath(baseDir, tauri.fileExists, stem);
-    await createDrawing(path);
-    if (notePath) {
-      const embed = `![[${getFileName(path)}]]`;
-      const insertText = title ? `### ${title}\n${embed}` : embed;
-      editorApi.insertAtCursor(notePath, insertText);
-    }
-    await openFile(path);
-  }
-
   function handleCreateDrawing() {
     const noteDir = activeFilePath ? getParentDir(activeFilePath) : root;
     if (!noteDir) return;
     close();
-    void handleNewDrawing(noteDir, activeFilePath, trimmedSearch).catch((error) => {
+    void createAndOpenDrawing(noteDir, activeFilePath, trimmedSearch, origin()).catch((error) => {
       console.error("[command-palette] Failed to create drawing:", error);
       showEditorNotice(
         `Could not create drawing: ${error instanceof Error ? error.message : String(error)}`,

@@ -1,5 +1,18 @@
-import { describe, expect, test, vi } from "vite-plus/test";
-import { extractWikiToken, __test } from "../src/components/editor-area/wiki-link-extension";
+import { beforeEach, describe, expect, test, vi } from "vite-plus/test";
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(),
+}));
+
+import { invoke } from "@tauri-apps/api/core";
+import {
+  extractWikiToken,
+  followWikiLink,
+  openDrawingEmbed,
+  __test,
+} from "../src/components/editor-area/wiki-link-extension";
+import { useEditorStore } from "../src/stores/editor-store";
+import { createLayout, findPane, panes, splitPaneWithTab } from "../src/lib/editor-layout";
 import { isDrawingPath } from "../src/lib/drawings";
 import {
   canonicalWikiTarget,
@@ -580,5 +593,106 @@ describe("drawing embed press stash", () => {
     now.mockReturnValue(5000);
     expect(take()).toBeNull();
     now.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// In-editor open routes capture their tab before resolving
+// ---------------------------------------------------------------------------
+
+describe("in-editor open routes", () => {
+  const mockedInvoke = vi.mocked(invoke);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useEditorStore.setState({
+      openFiles: new Map(),
+      tabs: [],
+      layout: createLayout(),
+      activeTabId: null,
+      activeFilePath: null,
+    });
+  });
+
+  /** Open a.md and b.md as two panes: [a] | [b], with b focused. */
+  async function twoPanes() {
+    mockedInvoke.mockImplementation(async (cmd: string, args: unknown) => {
+      if (cmd === "read_file") {
+        const path = (args as { path: string }).path;
+        return { path, content: path, modified_at: 1 };
+      }
+      if (cmd === "file_exists") return true;
+      return null;
+    });
+    await useEditorStore.getState().openFile("/vault/a.md");
+    await useEditorStore.getState().openFileInNewTab("/vault/b.md");
+    const [a, b] = useEditorStore.getState().tabs;
+    const { layout } = useEditorStore.getState();
+    useEditorStore.setState({
+      layout: splitPaneWithTab(layout, layout.focusedPaneId, "x", "after", b!.id),
+    });
+    const [left, right] = panes(useEditorStore.getState().layout);
+    return { a: a!, b: b!, left: left!, right: right! };
+  }
+
+  test("a wiki link navigates the tab it was clicked in, not the pane focused when it resolves", async () => {
+    const { a, b, left, right } = await twoPanes();
+    useEditorStore.getState().setFocusedPane(left.id);
+
+    let release: (results: SearchResult[]) => void = () => {};
+    const fuzzySearch = vi.fn(() => new Promise<SearchResult[]>((resolve) => (release = resolve)));
+    const pending = followWikiLink(
+      "Roadmap",
+      { workspaceRoot: "/vault", filePath: "/vault/a.md", tabId: a.id, isDisposed: () => false },
+      { fuzzySearch, fileExists: vi.fn() },
+    );
+    useEditorStore.getState().setFocusedPane(right.id);
+    release([makeResult({ path: "/vault/Roadmap.md", relative_path: "Roadmap.md" })]);
+    await pending;
+
+    const state = useEditorStore.getState();
+    expect(state.tabs.find((tab) => tab.id === a.id)!.location).toEqual({
+      kind: "file",
+      path: "/vault/Roadmap.md",
+    });
+    expect(state.tabs.find((tab) => tab.id === b.id)!.location).toEqual({
+      kind: "file",
+      path: "/vault/b.md",
+    });
+    expect(findPane(state.layout, right.id)!.tabIds).toEqual([b.id]);
+  });
+
+  test("a wiki link whose editor was disposed before it resolved opens nothing", async () => {
+    const { a } = await twoPanes();
+    const fuzzySearch = vi
+      .fn()
+      .mockResolvedValue([makeResult({ path: "/vault/Roadmap.md", relative_path: "Roadmap.md" })]);
+    const before = useEditorStore.getState().tabs;
+
+    await followWikiLink(
+      "Roadmap",
+      { workspaceRoot: "/vault", filePath: "/vault/a.md", tabId: a.id, isDisposed: () => true },
+      { fuzzySearch, fileExists: vi.fn() },
+    );
+
+    expect(useEditorStore.getState().tabs).toBe(before);
+  });
+
+  test("a drawing embed opens beside the tab it was double-clicked in", async () => {
+    const { a, left, right } = await twoPanes();
+    useEditorStore.getState().setFocusedPane(right.id);
+
+    await openDrawingEmbed("sketch.excalidraw.svg", {
+      workspaceRoot: "/vault",
+      filePath: "/vault/a.md",
+      tabId: a.id,
+      isDisposed: () => false,
+    });
+
+    const state = useEditorStore.getState();
+    const drawing = state.tabs.find((tab) => tab.location.kind === "drawing");
+    expect(drawing?.location).toEqual({ kind: "drawing", path: "/vault/sketch.excalidraw.svg" });
+    expect(findPane(state.layout, left.id)!.tabIds).toContain(drawing!.id);
+    expect(findPane(state.layout, right.id)!.tabIds).not.toContain(drawing!.id);
   });
 });
