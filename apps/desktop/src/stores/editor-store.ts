@@ -8,6 +8,7 @@ import {
   type TitleSource,
 } from "@/lib/frontmatter";
 import { getDocumentStats, type DocumentStats } from "@/lib/document-stats";
+import { isDrawingPath } from "@/lib/drawings";
 import { cancelSave, scheduleSave, registerSaveStore } from "@/lib/save";
 import {
   locationBehavior,
@@ -121,13 +122,11 @@ export function createLauncherTab(id = createTabId()): Tab {
  * kind of tab a path opens in is a one-line change in one file rather than a
  * branch repeated at every call site (see SPECs/excalidraw-embed/plan.md).
  *
- * Today every path is a `file`. Drawings (`.excalidraw.svg`) dispatch to a
- * `drawing` location here once that page kind and its view exist — an
- * unregistered kind throws in `locationBehavior`, so the dispatch and the kind
- * have to land together.
+ * Drawings (`.excalidraw.svg`) dispatch to a `drawing` location; everything
+ * else is a `file`.
  */
 export function locationForPath(path: string): Location {
-  return { kind: "file", path };
+  return isDrawingPath(path) ? { kind: "drawing", path } : { kind: "file", path };
 }
 
 export function createFileTab(path: string, id = createTabId()): Tab {
@@ -287,6 +286,22 @@ function applyRewriteToTab(tab: Tab, rewrite: (loc: Location) => Location | null
 }
 
 async function ensureFileLoaded(path: string, set: EditorStateSetter, get: () => EditorState) {
+  // A drawing is not markdown and `drawing-pane` owns its own I/O. Reading one
+  // in here would park an SVG in `openFiles` with the save machinery attached,
+  // and the next autosave would overwrite the drawing with its own text.
+  // Guarding here rather than at the call sites covers all of them, including
+  // session restore, and drops the optimistic placeholder the callers insert
+  // before they await.
+  if (isDrawingPath(path)) {
+    set((state) => {
+      if (!state.openFiles.has(path)) return state;
+      const files = new Map(state.openFiles);
+      files.delete(path);
+      return { openFiles: files };
+    });
+    return;
+  }
+
   const existing = get().openFiles.get(path);
   if (existing && !existing.isLoading) return;
 
@@ -385,7 +400,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set((state) => ({
       tabs: [...state.tabs, nextTab],
       activeTabId: nextTab.id,
-      activeFilePath: path,
+      activeFilePath: locationPrimaryPath(nextTab.location),
     }));
 
     try {
@@ -437,7 +452,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       return {
         tabs,
         activeTabId: nextTab.id,
-        activeFilePath: path,
+        activeFilePath: locationPrimaryPath(nextTab.location),
         ...(prunedFiles
           ? { openFiles: prunedFiles }
           : filesWithTarget
@@ -470,7 +485,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       return {
         tabs: [...state.tabs, nextTab],
         activeTabId: nextTab.id,
-        activeFilePath: path,
+        activeFilePath: locationPrimaryPath(nextTab.location),
         ...(openFiles ? { openFiles } : {}),
       };
     });
@@ -557,7 +572,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         : new Map(state.openFiles).set(path, createLoadingFile(path));
       return {
         tabs,
-        activeFilePath: state.activeTabId === tabId ? path : state.activeFilePath,
+        activeFilePath:
+          state.activeTabId === tabId
+            ? locationPrimaryPath(nextTab.location)
+            : state.activeFilePath,
         ...(openFiles ? { openFiles } : {}),
       };
     });
@@ -692,7 +710,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       return {
         tabs,
         activeFilePath:
-          currentState.activeTabId === activeTab.id ? path : currentState.activeFilePath,
+          currentState.activeTabId === activeTab.id
+            ? locationPrimaryPath(nextLocation)
+            : currentState.activeFilePath,
         ...(openFiles ? { openFiles } : {}),
       };
     });

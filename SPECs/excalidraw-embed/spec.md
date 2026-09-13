@@ -113,7 +113,33 @@ false })`, load via `loadFromBlob` returning a parse error rather than an empty 
   `exportToSvg` **does not throw** — it silently writes a smaller file whose `@font-face`
   points at a remote URL. The bundled asset path must be in place before the first save.
   Bundling every family costs 13 MB because Xiaolai (CJK) is 12 MB of it; the other eight
-  total ~480 KB.
+  total ~480 KB. **Decided at T028: bundle the eight, exclude Xiaolai** (596 KB copied). A
+  drawing containing CJK text therefore falls back to a system font. The copy runs from
+  `apps/desktop/vite.config.ts` into `public/excalidraw-assets/` — gitignored and
+  regenerated on every dev start and build, so it cannot drift from the installed package.
+  `window.EXCALIDRAW_ASSET_PATH` is set to an absolute href resolved from
+  `window.location.href`: Excalidraw resolves a value starting with `/` or `./` against
+  `window.location.origin`, which is not the right base under Tauri's custom scheme.
+- **The lazy boundary is a module, not a component.** `views.tsx` is statically imported by
+  the tab renderer, so `drawing-pane.tsx` holds only
+  `React.lazy(() => import("./drawing-editor"))`. Everything that touches the package — the
+  `Excalidraw` component, `@excalidraw/excalidraw/index.css`, and the
+  `EXCALIDRAW_ASSET_PATH` assignment — lives in `drawing-editor.tsx`. Verified at the build:
+  the entry chunk contains no occurrence of `excalidraw`, and the 142 KB of CSS emits as its
+  own `drawing-editor-*.css`.
+- **Autosave is disarmed until the first non-empty change.** Excalidraw emits an `onChange`
+  at mount that can carry an empty element array before `initialData` is applied; saving that
+  would overwrite a real drawing with nothing, without any parse failure involved. Once
+  armed, an empty scene is a genuine "user deleted everything" and does save. The pending
+  debounced save is also flushed on unmount, or closing the tab drops the last 150 ms of
+  edits.
+- **A drawing is never an open _file_.** `drawingKind.primaryPath` returns `null`, so a
+  drawing tab publishes no `activeFilePath`, and `ensureFileLoaded` returns early on a
+  drawing path (dropping any optimistic placeholder its callers inserted). That guard sits
+  in the one shared function rather than at the six call sites, and it covers session
+  restore too. A consequence worth knowing: because drawings never enter `openFiles`, the
+  watcher's `fs:file-changed` handler returns before it can reload one, independent of
+  `watcher.rs` self-write detection.
 - **The drawing tab costs ~1.13 MB of JS** (~370 KB gzipped, 11 files) plus 144 KB of CSS
   on open, behind `React.lazy`. Excalidraw's own mermaid-to-excalidraw graph (7.7 MB
   emitted) is not fetched on open — it sits behind its text-to-diagram dialog. Nothing
@@ -136,8 +162,10 @@ full woff2>) }`, and rendering the SVG **inlined into the DOM** renders correct 
   tuple.
 - `apps/desktop/src/components/editor-area/page-kinds/views.tsx` — one view entry, no
   footer.
-- new `apps/desktop/src/components/editor-area/drawing-pane.tsx` — lazy-loaded Excalidraw
-  host, theme mirroring, debounced save, parse-error state.
+- new `apps/desktop/src/components/editor-area/drawing-pane.tsx` — the `React.lazy` shell.
+- new `apps/desktop/src/components/editor-area/drawing-editor.tsx` — the Excalidraw host
+  itself: theme mirroring, debounced save, parse-error state, asset path.
+- `apps/desktop/vite.config.ts` — copies Excalidraw's fonts into `public/excalidraw-assets/`.
 - `apps/desktop/src/components/editor-area/wiki-link-extension.ts` — `dblclick` on the
   embed widget.
 - `apps/desktop/src/components/command-palette/index.tsx` — the `new-drawing` command.

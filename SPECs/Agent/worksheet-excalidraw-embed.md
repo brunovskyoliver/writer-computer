@@ -219,6 +219,58 @@ explicit `viewBackgroundColor` — which finding 2 proves does round-trip.
 - Tests are logic-only per Principle VI: the `isDrawingPath` table. `loadDrawing`/`saveDrawing`
   need a DOM and the real bundle, so they are verified at the US1 checkpoint, not in `vp test`.
 
+## Phase 5 — the drawing tab (T022, T025–T033)
+
+- **T022 landed as four mechanisms, not one.** Dispatch inside `locationForPath` was the easy
+  part. The other three: `drawingKind.primaryPath` returns `null` so no drawing publishes as
+  `activeFilePath`; the five sites that assigned `activeFilePath: path` directly (editor-store
+  403, 455, 488, 576, 712) now derive through `locationPrimaryPath`; and `ensureFileLoaded`
+  returns early on a drawing path, deleting any optimistic `createLoadingFile` placeholder its
+  callers inserted before the await. The guard is in the shared function rather than at the six
+  call sites, so it also covers session restore's `pathsToLoad.map(ensureFileLoaded)`.
+- **Falling out of that**: drawings never enter `openFiles`, so `use-file-watcher.ts:36` returns
+  on `!file` before it can reload one. T033 holds structurally as well as through `watcher.rs`
+  self-write detection.
+- **The lazy boundary had to be a module, not a component.** `views.tsx` is statically imported
+  by the tab renderer, so a top-level `import "@excalidraw/excalidraw/index.css"` in
+  `drawing-pane.tsx` would have put 142 KB of CSS in the entry. Split: `drawing-pane.tsx` is the
+  `React.lazy` shell, `drawing-editor.tsx` holds the package, the CSS and the asset-path
+  assignment. Build output confirms it — `grep -c excalidraw dist/assets/index-*.js` → 0, and the
+  CSS emits as its own `drawing-editor-*.css`.
+- **Autosave is disarmed until the first non-empty `onChange`.** Excalidraw's mount-time
+  `onChange` can carry an empty element array before `initialData` is applied; the 150 ms
+  debounce would have written that over a real drawing with no parse failure in sight — the T031
+  catastrophe reached by a second entrance. Once armed, an empty scene saves (a real delete-all).
+  The pending save is also flushed on unmount, or tab close drops the last 150 ms of edits.
+- **`keepAlive: true`** on the drawing kind, matching `fileKind`. The default would remount
+  Excalidraw and re-read from disk on every tab switch, losing zoom and scroll.
+- **T028: eight font families bundled, Xiaolai (CJK) excluded** — 596 KB copied instead of 13 MB.
+  Copy runs from `apps/desktop/vite.config.ts` into a gitignored `public/excalidraw-assets/`, so
+  it regenerates on every dev start and build and cannot drift from the installed package.
+  `EXCALIDRAW_ASSET_PATH` is an absolute href from `window.location.href`, not `/excalidraw-assets/`:
+  a value matching `/^\.?\//` is resolved against `window.location.origin` by
+  `FontFace.normalizeBaseUrl`, which is not the right base under Tauri's custom scheme. Wrong
+  path degrades silently to esm.sh (spike Run C), so the discriminating check is the offline save
+  → grep for `url(data:font/woff2` in the written file. **To verify at the checkpoint.**
+- **Theme is the preference, not the DOM attribute** — `activeMode(useSetting("appearance.theme"))`.
+  An OS theme flip while the preference is `system` does not repaint an open drawing tab until
+  remount. Same gap the rest of the React tree has; a MutationObserver on `data-theme` would be a
+  pattern the repo does not otherwise use.
+- **Font path layout verified statically.** The URL literals Excalidraw hands `createUrls` are
+  `./fonts/<Family>/<Family>-Regular-<hash>.woff2`, resolved against the base — so
+  `public/excalidraw-assets/fonts/…` is the right target depth, and the hashed basenames in
+  `dist/excalidraw-assets/fonts/Excalifont/` match the literals in the emitted JS exactly.
+- **Fixture for the checkpoint**: the spike's export survives at
+  `/tmp/wkfont/drawing.excalidraw.svg` (6260 bytes, text + embedded image, embedded scene).
+- **Also check at the checkpoint:** `keepAlive: true` leaves an inactive drawing tab mounted and
+  hidden, and Excalidraw sizes its canvas from a resize observer — a `display: none` host
+  measures 0×0. Switch to a note tab and back and confirm the canvas repaints full size. If it
+  does not, that is a keepAlive-vs-remount tradeoff, not a bug to chase.
+- **Known rough edge, decide at the checkpoint:** `openFile` only navigates in place when the
+  active tab's kind is `file`, so clicking the _same_ drawing in the sidebar while its tab is
+  active opens a duplicate tab. Settings tabs behave identically today. T036 (Phase 6) hits this
+  path harder.
+
 ## Review
 
 _Pending._

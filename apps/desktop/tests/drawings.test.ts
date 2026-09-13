@@ -40,16 +40,17 @@ describe("isDrawingPath", () => {
 });
 
 describe("locationForPath", () => {
-  // The single path → tab-location constructor. Drawing dispatch lands here in
-  // Phase 5 alongside the `drawing` page kind; until then every path is a file
-  // tab, and this table is what catches a silent regression either way.
+  // The single path → tab-location constructor. Drawing dispatch lives here
+  // and nowhere else, so this table is what catches a silent regression.
   const cases: [path: string, expected: string][] = [
     ["/vault/notes/note.md", "file"],
     ["/vault/notes/logo.svg", "file"],
     ["/vault/notes/photo.png", "file"],
     ["/vault/notes/README", "file"],
-    ["/vault/notes/sketch.excalidraw.svg", "file"],
-    ["/vault/notes/Sketch.EXCALIDRAW.SVG", "file"],
+    ["/vault/notes/sketch.excalidraw.svg", "drawing"],
+    ["/vault/notes/Sketch.EXCALIDRAW.SVG", "drawing"],
+    // A file named only `.excalidraw.svg` has no stem — not a drawing.
+    ["/vault/notes/.excalidraw.svg", "file"],
   ];
 
   for (const [path, expected] of cases) {

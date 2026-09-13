@@ -1,5 +1,6 @@
 import type { AppState, BinaryFiles } from "@excalidraw/excalidraw/types";
 import type { NonDeletedExcalidrawElement } from "@excalidraw/excalidraw/element/types";
+import { getFileName } from "./paths";
 import { readFile, writeFile } from "./tauri";
 
 /**
@@ -80,4 +81,11 @@ export async function saveDrawing(path: string, scene: DrawingScene): Promise<vo
   } finally {
     if (writeQueue.get(path) === chained) writeQueue.delete(path);
   }
+}
+
+/** The drawing's display name — the filename with the compound extension
+ *  stripped. `notes/sketch.excalidraw.svg` → `sketch`. */
+export function drawingName(path: string): string {
+  const name = getFileName(path);
+  return name.slice(0, -DRAWING_EXTENSION.length);
 }

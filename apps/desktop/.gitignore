@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Copied out of node_modules by vite.config.ts (Excalidraw offline fonts)
+public/excalidraw-assets/

@@ -1,8 +1,10 @@
+import { DrawingPane } from "../drawing-pane";
 import { EditorPane } from "../editor-pane";
 import { DocumentFooter } from "../document-footer";
 import { NewTabPage } from "../new-tab-page";
 import { SettingsPanel } from "@/components/settings-panel";
 import type { Location } from "./index";
+import type { DrawingLocation } from "./drawing";
 import type { FileLocation } from "./file";
 import type { LauncherLocation } from "./launcher";
 import type { SettingsLocation } from "./settings";
@@ -28,6 +30,10 @@ const FileTabBody = ({ location, isActive }: { location: FileLocation; isActive:
 );
 
 const views = {
+  // No footer: a drawing has no word count, frontmatter or document date.
+  drawing: {
+    Component: DrawingPane,
+  } satisfies PageKindView<DrawingLocation>,
   file: {
     Component: FileTabBody,
     renderFooter: (l) => <DocumentFooter filePath={l.path} />,
