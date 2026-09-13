@@ -8,9 +8,14 @@ import { registerPaneBody } from "./pane-bounds";
  * each leaf contributes an empty measured rectangle, and `EditorArea`
  * positions the one stable set of tab bodies over those rectangles.
  *
- * Splits are plain flex boxes here. The resize library takes this over later
- * (see tasks T035); nothing in this phase creates a split, so the tree is
- * always a single pane and there is nothing to drag yet.
+ * The measured slots are also the drop surfaces. A drag holds pointer
+ * capture on its source, so nothing here listens for pointer events; the
+ * coordinator in `hooks/use-editor-drag.ts` hit-tests the pointer against
+ * the rectangles `pane-bounds` measured and resolves centre/edge regions
+ * from the same geometry the preview will paint.
+ *
+ * Splits are plain flex boxes with the same ratio math as `computeBounds`.
+ * The resize library takes them over later (see tasks T035).
  */
 
 function PaneSlot({ paneId }: { paneId: string }) {
