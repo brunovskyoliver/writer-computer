@@ -13,7 +13,6 @@ import {
   locationBehavior,
   serializeLocation,
   deserializeLocation,
-  type FileLocation,
   type Location,
   type SerializedLocation,
 } from "@/components/editor-area/page-kinds";
@@ -116,8 +115,23 @@ export function createLauncherTab(id = createTabId()): Tab {
   return { id, location: { kind: "launcher" }, back: [], forward: [] };
 }
 
+/**
+ * The single constructor of a tab location from a filesystem path. Every site
+ * that turns a path into a location goes through here, so deciding *which*
+ * kind of tab a path opens in is a one-line change in one file rather than a
+ * branch repeated at every call site (see SPECs/excalidraw-embed/plan.md).
+ *
+ * Today every path is a `file`. Drawings (`.excalidraw.svg`) dispatch to a
+ * `drawing` location here once that page kind and its view exist — an
+ * unregistered kind throws in `locationBehavior`, so the dispatch and the kind
+ * have to land together.
+ */
+export function locationForPath(path: string): Location {
+  return { kind: "file", path };
+}
+
 export function createFileTab(path: string, id = createTabId()): Tab {
-  return { id, location: { kind: "file", path }, back: [], forward: [] };
+  return { id, location: locationForPath(path), back: [], forward: [] };
 }
 
 export function createSettingsTab(id = createTabId()): Tab {
@@ -657,7 +671,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (activeTab.location.kind === "file" && activeTab.location.path === path) return;
 
     const previousTab = cloneTab(activeTab);
-    const nextLocation: FileLocation = { kind: "file", path };
+    const nextLocation: Location = locationForPath(path);
     const nextTab: Tab = {
       ...cloneTab(activeTab),
       location: nextLocation,

@@ -89,13 +89,13 @@ both branches. Do not start Phase 3 before T009 reports and the user picks a bra
 **Purpose**: Make path → tab-location a single write path **before** adding drawing dispatch.
 Principle III: adding the next case must touch one file; today it would touch six.
 
-- [ ] T020 Add `locationForPath(path)` to `apps/desktop/src/stores/editor-store.ts` as the single constructor of a tab location from a path
-- [ ] T021 Route all six existing construction sites in `apps/desktop/src/stores/editor-store.ts` through `locationForPath`: `createFileTab` (line 119) and its four callers (lines 370, 412, 450, 532), plus the inline `{ kind: "file", path }` in `navigateToFile` (line 660) that currently bypasses the factory
-- [ ] T022 Add drawing dispatch **inside `locationForPath` only** — `isDrawingPath(path)` → `{ kind: "drawing", path }`, else `{ kind: "file", path }`. Do not branch in `openFile`: it delegates to `replaceTabWithFile` and `navigateToFile`, and `openFileInNewTab` is a separate entry, so drawings would still open as raw text from the sidebar and from wiki-link navigation
-- [ ] T023 [P] Add `locationForPath` extension-table tests to `apps/desktop/tests/drawings.test.ts` — this is the piece that silently regresses
-- [ ] T024 Confirm `open_target::classify` in `apps/desktop/src-tauri/src/` is left untouched; it gates startup/CLI/Finder opens only and is out of scope
+- [x] T020 Add `locationForPath(path)` to `apps/desktop/src/stores/editor-store.ts` as the single constructor of a tab location from a path
+- [x] T021 Route all six existing construction sites in `apps/desktop/src/stores/editor-store.ts` through `locationForPath`: `createFileTab` (line 119) and its four callers (lines 370, 412, 450, 532), plus the inline `{ kind: "file", path }` in `navigateToFile` (line 660) that currently bypasses the factory
+- [ ] T022 **Deferred to the head of Phase 5** — `locationBehavior` throws on an unregistered kind (`page-kinds/index.ts`), and it is reached from `deriveActiveFilePath` and `serializeLocation` on every tab activation and session save. Returning `{ kind: "drawing" }` before T025/T026/T032 exist crashes the data layer, not the view. It also needs the load-path guard: the six sites pair location construction with `ensureFileLoaded`, which would read the SVG as markdown into `openFiles` with the save machinery attached — the same overwrite T031 guards against. Dispatch, kind, view, and guard land together. Original text: add drawing dispatch **inside `locationForPath` only** — `isDrawingPath(path)` → `{ kind: "drawing", path }`, else `{ kind: "file", path }`. Do not branch in `openFile`: it delegates to `replaceTabWithFile` and `navigateToFile`, and `openFileInNewTab` is a separate entry, so drawings would still open as raw text from the sidebar and from wiki-link navigation
+- [x] T023 [P] Add `locationForPath` extension-table tests to `apps/desktop/tests/drawings.test.ts` — this is the piece that silently regresses
+- [x] T024 Confirm `open_target::classify` in `apps/desktop/src-tauri/src/` is left untouched; it gates startup/CLI/Finder opens only and is out of scope
 
-**Checkpoint**: Foundation ready. Drawing paths resolve to a `drawing` location; nothing renders it yet.
+**Checkpoint**: `locationForPath` is the single path → location constructor and Phase 4 is a no-behavior-change consolidation. Drawing paths still resolve to `file`; dispatch moves to the head of Phase 5 (see T022).
 
 ---
 
