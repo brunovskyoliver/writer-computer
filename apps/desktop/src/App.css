@@ -233,6 +233,26 @@ body.tree-dragging [data-tree-path] {
   pointer-events: none;
   background: color-mix(in srgb, var(--accent) 18%, transparent);
   border-radius: 6px;
+  /* One element lives for the whole drag, so moving between targets glides
+     the box from the old rectangle to the new one instead of jumping. It
+     fades in on the first target; unmounting on cancel is immediate. */
+  transition:
+    left 180ms cubic-bezier(0.2, 0, 0, 1),
+    top 180ms cubic-bezier(0.2, 0, 0, 1),
+    width 180ms cubic-bezier(0.2, 0, 0, 1),
+    height 180ms cubic-bezier(0.2, 0, 0, 1),
+    border-radius 180ms ease,
+    background-color 120ms ease;
+  animation: drop-preview-in 140ms ease-out;
+}
+
+@keyframes drop-preview-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .drop-preview[data-drop-preview="strip"] {
