@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { Excalidraw } from "@excalidraw/excalidraw";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Excalidraw, getSceneVersion } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
 import type { AppState, BinaryFiles } from "@excalidraw/excalidraw/types";
 import type { OrderedExcalidrawElement } from "@excalidraw/excalidraw/element/types";
@@ -24,10 +24,10 @@ window.EXCALIDRAW_ASSET_PATH = new URL("excalidraw-assets/", window.location.hre
 
 // Excalidraw's `onChange` fires continuously while drawing, and a save is not
 // cheap: `exportToSvg` with `exportEmbedScene` re-renders the whole scene,
-// serializes it into the SVG and subsets fonts, and any markdown tab embedding
-// the drawing then re-decodes the new file. At 150 ms every pause to reposition
-// the pointer triggered that. A pending save is flushed on unmount, so a longer
-// window costs nothing but delay.
+// serializes it into the SVG, and any markdown tab embedding the drawing then
+// re-decodes the new file. At 150 ms every pause to reposition the pointer
+// triggered that. A pending save is flushed on unmount, so a longer window
+// costs nothing but delay.
 const SAVE_DEBOUNCE_MS = 1000;
 
 // Keeps Excalidraw's own look; restyling it to match Writer is out of scope
@@ -42,6 +42,15 @@ type LoadState =
   | { status: "error"; message: string }
   | { status: "ready"; scene: DrawingScene };
 
+type PendingChange = {
+  elements: readonly OrderedExcalidrawElement[];
+  appState: AppState;
+  files: BinaryFiles;
+  version: number;
+  bgColor?: string;
+  filesCount: number;
+};
+
 export default function DrawingEditor({ path }: { path: string }) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const themePreference = useSetting("appearance.theme") as ThemePreference | undefined;
@@ -51,8 +60,15 @@ export default function DrawingEditor({ path }: { path: string }) {
   // has (only CSS vars follow the system live).
   const theme = activeMode(themePreference);
 
+  const pathRef = useRef(path);
+  pathRef.current = path;
+
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingScene = useRef<DrawingScene | null>(null);
+  const pendingChange = useRef<PendingChange | null>(null);
+  const lastSavedVersion = useRef<number>(-1);
+  const lastSavedBg = useRef<string | undefined>(undefined);
+  const lastSavedFilesCount = useRef<number>(0);
+
   // Excalidraw emits an `onChange` at mount that can carry an empty element
   // array before `initialData` is applied. Saving that would overwrite the
   // user's real drawing with nothing — the highest-consequence failure in this
@@ -69,6 +85,9 @@ export default function DrawingEditor({ path }: { path: string }) {
         return;
       }
       armed.current = result.scene.elements.length === 0;
+      lastSavedVersion.current = getSceneVersion(result.scene.elements);
+      lastSavedBg.current = result.scene.appState.viewBackgroundColor;
+      lastSavedFilesCount.current = Object.keys(result.scene.files ?? {}).length;
       setState({ status: "ready", scene: result.scene });
     });
     return () => {
@@ -76,18 +95,63 @@ export default function DrawingEditor({ path }: { path: string }) {
     };
   }, [path]);
 
-  // Flush a pending save on unmount (tab close), or the last 150 ms of edits
-  // are dropped. `saveDrawing` serializes writes per path, so this can't race
-  // an in-flight export.
-  useEffect(
-    () => () => {
-      if (!saveTimer.current) return;
-      clearTimeout(saveTimer.current);
-      saveTimer.current = null;
-      const scene = pendingScene.current;
-      if (scene) void saveDrawing(path, scene);
+  const flushSave = useCallback(() => {
+    if (!saveTimer.current) return;
+    clearTimeout(saveTimer.current);
+    saveTimer.current = null;
+    const change = pendingChange.current;
+    if (!change) return;
+    lastSavedVersion.current = change.version;
+    lastSavedBg.current = change.bgColor;
+    lastSavedFilesCount.current = change.filesCount;
+    void saveDrawing(pathRef.current, {
+      elements: change.elements.filter((element) => !element.isDeleted),
+      appState: change.appState,
+      files: change.files,
+    });
+  }, []);
+
+  // Flush a pending save on unmount (tab close), or the last edits within the
+  // debounce window are dropped. `saveDrawing` serializes writes per path, so
+  // this can't race an in-flight export.
+  useEffect(() => () => flushSave(), [flushSave]);
+
+  const handleChange = useCallback(
+    (elements: readonly OrderedExcalidrawElement[], appState: AppState, files: BinaryFiles) => {
+      if (!armed.current) {
+        if (elements.length === 0) return;
+        armed.current = true;
+      }
+
+      const version = getSceneVersion(elements);
+      const bgColor = appState.viewBackgroundColor;
+      const filesCount = Object.keys(files ?? {}).length;
+
+      // Skip saves and allocations if scene elements/content haven't mutated
+      // (e.g. pan, zoom, selection, hover, cursor moves).
+      if (
+        version === lastSavedVersion.current &&
+        bgColor === lastSavedBg.current &&
+        filesCount === lastSavedFilesCount.current
+      ) {
+        return;
+      }
+
+      pendingChange.current = {
+        elements,
+        appState,
+        files,
+        version,
+        bgColor,
+        filesCount,
+      };
+
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      saveTimer.current = setTimeout(() => {
+        flushSave();
+      }, SAVE_DEBOUNCE_MS);
     },
-    [path],
+    [flushSave],
   );
 
   if (state.status === "loading") {
@@ -106,28 +170,6 @@ export default function DrawingEditor({ path }: { path: string }) {
       </div>
     );
   }
-
-  const handleChange = (
-    elements: readonly OrderedExcalidrawElement[],
-    appState: AppState,
-    files: BinaryFiles,
-  ) => {
-    if (!armed.current) {
-      if (elements.length === 0) return;
-      armed.current = true;
-    }
-    pendingScene.current = {
-      elements: elements.filter((element) => !element.isDeleted),
-      appState,
-      files,
-    };
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
-      saveTimer.current = null;
-      const scene = pendingScene.current;
-      if (scene) void saveDrawing(path, scene);
-    }, SAVE_DEBOUNCE_MS);
-  };
 
   return (
     <Excalidraw

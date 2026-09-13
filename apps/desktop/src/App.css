@@ -525,7 +525,10 @@ body.tree-dragging [data-tree-path] {
  * therefore always canonical light-mode (so it also opens right in Obsidian,
  * GitHub, or a light Writer window), and an inline embed in a dark UI has to
  * apply the same filter Excalidraw applies to its own canvas. Value copied
- * from the package's THEME_FILTER. */
+ * from the package's THEME_FILTER. Promoted to an isolated compositing layer
+ * to avoid re-rasterizing vector SVGs on scroll in WebKit. */
 [data-theme="dark"] img[src$=".excalidraw.svg"] {
   filter: invert(93%) hue-rotate(180deg);
+  transform: translateZ(0);
+  will-change: transform;
 }

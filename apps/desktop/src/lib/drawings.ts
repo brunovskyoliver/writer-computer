@@ -66,11 +66,20 @@ const writeQueue = new Map<string, Promise<unknown>>();
 export async function saveDrawing(path: string, scene: DrawingScene): Promise<void> {
   const run = async () => {
     const { exportToSvg } = await import("@excalidraw/excalidraw");
-    const svg = await exportToSvg({
-      elements: scene.elements,
-      appState: { ...scene.appState, exportEmbedScene: true, exportBackground: false },
-      files: scene.files,
-    });
+    const svg = await exportToSvg(
+      {
+        elements: scene.elements,
+        appState: { ...scene.appState, exportEmbedScene: true, exportBackground: false },
+        files: scene.files,
+      },
+      {
+        // WebKit rejects the subset woff2 font Excalidraw attempts to inline into
+        // exported SVGs ("Excalifont: error"), falling back to serif. Skipping font
+        // inlining saves significant CPU time spent parsing, subsetting, and base64-
+        // encoding fonts on every save.
+        skipInliningFonts: true,
+      },
+    );
     await writeFile(path, new XMLSerializer().serializeToString(svg));
   };
 
