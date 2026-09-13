@@ -1,5 +1,8 @@
+import { useMemo } from "react";
 import { createSettingsTab, useEditorStore } from "@/stores/editor-store";
+import { usePaneTabIds } from "@/hooks/use-editor-layout";
 import type { DocumentStats } from "@/lib/document-stats";
+import type { Tab } from "@/stores/editor-store";
 
 export type { OpenFile, Tab, Location, FileLocation, SessionTab } from "@/stores/editor-store";
 
@@ -7,6 +10,23 @@ const EMPTY_STATS: DocumentStats = { words: 0, characters: 0, paragraphs: 0 };
 
 export function useOpenTabs() {
   return useEditorStore((s) => s.tabs);
+}
+
+/**
+ * The tabs owned by one pane, in strip order. Composed from the two stable
+ * slices rather than selected as a derived array, so it does not re-render
+ * every strip whenever an unrelated pane changes.
+ */
+export function usePaneTabs(paneId: string): Tab[] {
+  const tabs = useOpenTabs();
+  const tabIds = usePaneTabIds(paneId);
+  return useMemo(() => {
+    const byId = new Map(tabs.map((tab) => [tab.id, tab]));
+    return (tabIds ?? []).flatMap((tabId) => {
+      const tab = byId.get(tabId);
+      return tab ? [tab] : [];
+    });
+  }, [tabs, tabIds]);
 }
 
 export function useOpenFiles() {
