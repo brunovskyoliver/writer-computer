@@ -36,15 +36,17 @@
 }
 
 /* Vim Normal/Visual block caret, drawn by @replit/codemirror-vim over the
-   character under the cursor. Its theme paints a salmon block (and a salmon
-   outline when unfocused) from a scoped class; out-specify it with the layer. */
+   character under the cursor. Its theme paints a salmon block from a scoped
+   class; out-specify it with the layer. When the editor loses focus (the `:`
+   or `/` prompt in the footer, the sidebar) the library switches to a salmon
+   outline at half height; CodeMirror's own caret simply hides then, so the
+   block caret does the same. */
 .cm-editor .cm-vimCursorLayer .cm-fat-cursor {
   background: var(--accent);
   color: var(--bg-base);
 }
 .cm-editor:not(.cm-focused) .cm-vimCursorLayer .cm-fat-cursor {
-  background: none;
-  outline-color: var(--accent);
+  display: none;
 }
 
 /* Vim `:` / `/` prompts and messages are library-built nodes moved into the
