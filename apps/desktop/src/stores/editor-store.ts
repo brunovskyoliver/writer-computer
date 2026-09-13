@@ -28,6 +28,7 @@ import {
   removeTab as removeTabFromLayout,
   removeTabs as removeTabsFromLayout,
   setFocusedPane as focusPaneInLayout,
+  type DropCandidate,
   type Layout,
 } from "@/lib/editor-layout";
 import {
@@ -68,6 +69,19 @@ export interface SessionTab {
   forward: SerializedLocation[];
 }
 
+/** A sidebar drop, resolved: the candidate layout plus the tabs it minted for
+ *  files the target pane did not already show. */
+export interface FileDrop {
+  candidate: DropCandidate;
+  newTabs: Tab[];
+}
+
+export type FileDropOutcome =
+  | { status: "committed" }
+  /** The layout or workspace moved on while the files were loading. */
+  | { status: "stale" }
+  | { status: "failed"; errors: Array<{ path: string; error: unknown }> };
+
 interface EditorState {
   openFiles: Map<string, OpenFile>;
   /** Every open tab, ordered by pane traversal. `layout` decides which pane
@@ -93,6 +107,7 @@ interface EditorState {
   setActiveFile: (path: string) => void;
   setActiveTab: (tabId: string) => void;
   setFocusedPane: (paneId: string) => void;
+  openFilesFromDrop: (drop: FileDrop, isCurrent?: () => boolean) => Promise<FileDropOutcome>;
   navigateToFile: (path: string) => Promise<void>;
   navigateBack: () => Promise<void>;
   navigateForward: () => Promise<void>;
@@ -732,6 +747,47 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   // pane is therefore the same kind of state change as selecting a tab.
   setFocusedPane: (paneId: string) => {
     set((state) => publish(state.tabs, focusPaneInLayout(state.layout, paneId)));
+  },
+
+  /**
+   * Commit a sidebar drop. Every file is loaded first, all or nothing: one
+   * failed read leaves the layout untouched and reports the failure instead
+   * of opening the survivors. The candidate is only applied if the layout is
+   * still at the revision it was resolved against and `isCurrent` (the
+   * caller's workspace check) still holds — a slow read must not land a split
+   * in a window that has moved on.
+   */
+  openFilesFromDrop: async ({ candidate, newTabs }, isCurrent = () => true) => {
+    const paths = [...new Set(newTabs.flatMap((tab) => locationPaths(tab.location)))];
+    const results = await Promise.allSettled(
+      paths.map((path) => ensureFileLoaded(path, set as EditorStateSetter, get)),
+    );
+
+    // Files that loaded but will not be shown: release them, unless some other
+    // tab already references them (then they were open before the drop).
+    const prune = () => {
+      set((state) => {
+        const files = maybePruneFiles(state, state.tabs, paths);
+        return files ? { openFiles: files } : state;
+      });
+    };
+
+    const errors = results.flatMap((result, index) =>
+      result.status === "rejected" ? [{ path: paths[index]!, error: result.reason }] : [],
+    );
+    if (errors.length > 0) {
+      prune();
+      return { status: "failed", errors };
+    }
+    if (!isCurrent() || get().layout.revision !== candidate.expectedRevision) {
+      prune();
+      return { status: "stale" };
+    }
+
+    // The candidate already carries focus: the new pane for a split, the
+    // target for a centre drop. One publish applies tabs, tree, and focus.
+    set((state) => publish([...state.tabs, ...newTabs], candidate.layout));
+    return { status: "committed" };
   },
 
   navigateToFile: async (path: string) => {

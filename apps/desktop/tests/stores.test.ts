@@ -11,7 +11,7 @@ vi.mock("@/lib/theme", () => ({
 }));
 
 import { invoke } from "@tauri-apps/api/core";
-import { useEditorStore } from "../src/stores/editor-store";
+import { createFileTab, useEditorStore } from "../src/stores/editor-store";
 import { useSettingsStore } from "../src/stores/settings-store";
 import { useUIStore } from "../src/stores/ui-store";
 import { useWorkspaceStore } from "../src/stores/workspace-store";
@@ -20,11 +20,16 @@ import { toggleTheme } from "../src/hooks/use-theme";
 import { createPendingOpenDrainer, handleOpenPayload } from "../src/hooks/use-open-drop";
 import { getEditorSessionSnapshot } from "../src/stores/editor-store";
 import {
+  buildFileDropCandidate,
   createLayout,
+  findPane,
   layoutTabIds,
+  paneOfTab,
   panes,
   splitPaneWithTab,
   validateLayout,
+  type DropRegion,
+  type Rect,
 } from "../src/lib/editor-layout";
 // Side-effect: registers the subscription that re-points the standalone
 // single-file watcher whenever the active file changes in a compact window.
@@ -1339,5 +1344,194 @@ describe("editor-store layout", () => {
     const after = useEditorStore.getState().layout;
     expect(after.revision).toBe(before.revision);
     expect(after).toBe(before);
+  });
+});
+
+describe("editor-store sidebar drops", () => {
+  const area: Rect = { x: 0, y: 0, width: 1000, height: 600 };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useEditorStore.setState({
+      openFiles: new Map(),
+      tabs: [],
+      layout: createLayout(),
+      activeTabId: null,
+      activeFilePath: null,
+    });
+    useWorkspaceStore.setState({ chromeMode: "workspace" });
+  });
+
+  /** What the drag coordinator hands the store: the candidate resolved from
+   *  the live layout plus the tabs it minted for the dropped paths. */
+  function planDrop(paths: string[], region: DropRegion) {
+    const { layout, tabs } = useEditorStore.getState();
+    const pane = findPane(layout, layout.focusedPaneId)!;
+    const newTabs = paths.map((path) => createFileTab(path));
+    const items = newTabs.map((tab, index) => {
+      const path = paths[index]!;
+      const existing =
+        region === "center"
+          ? (tabs.find(
+              (candidate) =>
+                pane.tabIds.includes(candidate.id) &&
+                candidate.location.kind === "file" &&
+                candidate.location.path === path,
+            ) ?? null)
+          : null;
+      return { tabId: tab.id, existingTabId: existing?.id ?? null };
+    });
+    const candidate = buildFileDropCandidate(layout, pane.id, region, area, items)!;
+    return {
+      candidate,
+      newTabs: newTabs.filter((_, index) => items[index]!.existingTabId === null),
+    };
+  }
+
+  function readAll() {
+    mockedInvoke.mockImplementation(async (cmd: string, args: unknown) => {
+      if (cmd !== "read_file") return null;
+      const { path } = args as { path: string };
+      return { path, content: `body of ${path}`, modified_at: 1 };
+    });
+  }
+
+  test("a centre drop opens the selection in order, activates its first file, and moves nothing on disk", async () => {
+    readAll();
+    await useEditorStore.getState().openFile("/a.md");
+
+    const outcome = await useEditorStore
+      .getState()
+      .openFilesFromDrop(planDrop(["/b.md", "/c.md"], "center"));
+
+    expect(outcome).toEqual({ status: "committed" });
+    const state = useEditorStore.getState();
+    expect(panes(state.layout)).toHaveLength(1);
+    expect(tabPaths()).toEqual(["/a.md", "/b.md", "/c.md"]);
+    expect(state.activeFilePath).toBe("/b.md");
+    expect(state.openFiles.get("/c.md")?.content).toBe("body of /c.md");
+    expect(mockedInvoke.mock.calls.map(([cmd]) => cmd)).not.toContain("rename_entry");
+    expect(validateLayout(state.layout)).toEqual([]);
+  });
+
+  test("an edge drop creates an equal split, focuses the new pane, and activates the first file", async () => {
+    readAll();
+    await useEditorStore.getState().openFile("/a.md");
+    const before = useEditorStore.getState().layout;
+
+    const drop = planDrop(["/b.md", "/c.md"], "right");
+    const outcome = await useEditorStore.getState().openFilesFromDrop(drop);
+
+    expect(outcome).toEqual({ status: "committed" });
+    const state = useEditorStore.getState();
+    const [left, right] = panes(state.layout);
+    expect(state.layout.root.kind).toBe("split");
+    expect(state.layout.root.kind === "split" && state.layout.root.ratio).toBe(0.5);
+    expect(left!.tabIds).toHaveLength(1);
+    expect(right!.tabIds).toEqual(drop.newTabs.map((tab) => tab.id));
+    expect(state.layout.focusedPaneId).toBe(right!.id);
+    expect(state.activeFilePath).toBe("/b.md");
+    expect(state.layout.revision).toBe(before.revision + 1);
+    expect(validateLayout(state.layout)).toEqual([]);
+  });
+
+  test("a centre drop of an already-open file focuses that tab instead of duplicating it", async () => {
+    readAll();
+    await useEditorStore.getState().openFile("/a.md");
+    await useEditorStore.getState().openFileInNewTab("/z.md");
+    const aTab = useEditorStore.getState().tabs[0]!;
+
+    const drop = planDrop(["/a.md", "/b.md"], "center");
+    expect(drop.newTabs).toHaveLength(1);
+    await useEditorStore.getState().openFilesFromDrop(drop);
+
+    const state = useEditorStore.getState();
+    expect(tabPaths()).toEqual(["/a.md", "/z.md", "/b.md"]);
+    expect(state.activeTabId).toBe(aTab.id);
+  });
+
+  test("an edge drop of an already-open file deliberately opens a second view", async () => {
+    readAll();
+    await useEditorStore.getState().openFile("/a.md");
+
+    await useEditorStore.getState().openFilesFromDrop(planDrop(["/a.md"], "bottom"));
+
+    const state = useEditorStore.getState();
+    expect(tabPaths()).toEqual(["/a.md", "/a.md"]);
+    expect(panes(state.layout)).toHaveLength(2);
+    expect(state.openFiles.size).toBe(1);
+  });
+
+  test("a failed read leaves the layout untouched and prunes whatever did load", async () => {
+    readAll();
+    await useEditorStore.getState().openFile("/a.md");
+    const before = useEditorStore.getState().layout;
+    mockedInvoke.mockImplementation(async (cmd: string, args: unknown) => {
+      if (cmd !== "read_file") return null;
+      const { path } = args as { path: string };
+      if (path === "/missing.md") throw new Error("ENOENT");
+      return { path, content: `body of ${path}`, modified_at: 1 };
+    });
+
+    const outcome = await useEditorStore
+      .getState()
+      .openFilesFromDrop(planDrop(["/b.md", "/missing.md"], "right"));
+
+    expect(outcome.status).toBe("failed");
+    expect(outcome.status === "failed" && outcome.errors.map((e) => e.path)).toEqual([
+      "/missing.md",
+    ]);
+    const state = useEditorStore.getState();
+    expect(state.layout).toBe(before);
+    expect(tabPaths()).toEqual(["/a.md"]);
+    expect(state.openFiles.has("/b.md")).toBe(false);
+    expect(state.openFiles.has("/missing.md")).toBe(false);
+  });
+
+  test("a candidate whose layout revision went stale during preflight is discarded", async () => {
+    readAll();
+    await useEditorStore.getState().openFile("/a.md");
+    const drop = planDrop(["/b.md"], "right");
+
+    const read = createDeferred<{ path: string; content: string; modified_at: number }>();
+    mockedInvoke.mockImplementation(async (cmd: string) =>
+      cmd === "read_file" ? read.promise : null,
+    );
+    const pending = useEditorStore.getState().openFilesFromDrop(drop);
+    // The user opens something else while the read is in flight.
+    useEditorStore.getState().openNewTab();
+    read.resolve({ path: "/b.md", content: "b", modified_at: 1 });
+
+    expect(await pending).toEqual({ status: "stale" });
+    const state = useEditorStore.getState();
+    expect(panes(state.layout)).toHaveLength(1);
+    expect(tabPaths()).toEqual(["/a.md"]);
+    expect(state.openFiles.has("/b.md")).toBe(false);
+  });
+
+  test("a workspace change during preflight discards the drop", async () => {
+    readAll();
+    await useEditorStore.getState().openFile("/a.md");
+    const drop = planDrop(["/b.md"], "right");
+
+    let current = true;
+    const pending = useEditorStore.getState().openFilesFromDrop(drop, () => current);
+    current = false;
+
+    expect(await pending).toEqual({ status: "stale" });
+    expect(panes(useEditorStore.getState().layout)).toHaveLength(1);
+    expect(tabPaths()).toEqual(["/a.md"]);
+  });
+
+  test("a committed split keeps every new tab in the pane the candidate put it in", async () => {
+    readAll();
+    await useEditorStore.getState().openFile("/a.md");
+    const drop = planDrop(["/b.md"], "left");
+    await useEditorStore.getState().openFilesFromDrop(drop);
+
+    const state = useEditorStore.getState();
+    const created = paneOfTab(state.layout, drop.newTabs[0]!.id)!;
+    expect(panes(state.layout)[0]!.id).toBe(created.id);
+    expect(layoutTabIds(state.layout)).toEqual(state.tabs.map((tab) => tab.id));
   });
 });

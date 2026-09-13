@@ -61,6 +61,11 @@ export interface Size {
   height: number;
 }
 
+export interface Point {
+  x: number;
+  y: number;
+}
+
 /** Where inside a pane body a drop lands. Strip insertions use an index instead. */
 export type DropRegion = "center" | "left" | "right" | "top" | "bottom";
 
@@ -471,14 +476,13 @@ export function fitsWithin(size: Size, available: Size): boolean {
   return size.width <= available.width && size.height <= available.height;
 }
 
-/** Pane ID → rectangle, for a tree drawn into `rect`. */
+/** Node ID → rectangle, for a tree drawn into `rect`. Splits are included so
+ *  a subtree's allocation can be read off as easily as a pane's. */
 export function computeBounds(node: LayoutNode, rect: Rect): Map<string, Rect> {
   const bounds = new Map<string, Rect>();
   const walk = (current: LayoutNode, area: Rect) => {
-    if (current.kind === "pane") {
-      bounds.set(current.id, area);
-      return;
-    }
+    bounds.set(current.id, area);
+    if (current.kind === "pane") return;
     if (current.axis === "x") {
       const usable = Math.max(0, area.width - SEPARATOR_SIZE);
       const first = usable * current.ratio;
@@ -508,4 +512,153 @@ export function computeBounds(node: LayoutNode, rect: Rect): Map<string, Rect> {
  *  collapsed the drag's source pane. */
 export function candidateBounds(layout: Layout, rect: Rect, paneId: string): Rect | null {
   return computeBounds(layout.root, rect).get(paneId) ?? null;
+}
+
+// --- drop targets ----------------------------------------------------------
+
+export type EdgeRegion = Exclude<DropRegion, "center">;
+
+/** An edge band is a quarter of the body along its axis, but never more than
+ *  this many pixels, so a centre target always remains reachable. */
+export const EDGE_BAND_FRACTION = 0.25;
+export const EDGE_BAND_MAX = 80;
+
+/**
+ * The one table that says what each edge means: which axis the split runs
+ * along and which side of the target the new pane lands on. Hit-testing,
+ * preview, and commit all read it; nothing else encodes an edge.
+ */
+export const EDGES: Record<EdgeRegion, { axis: "x" | "y"; placement: "before" | "after" }> = {
+  left: { axis: "x", placement: "before" },
+  right: { axis: "x", placement: "after" },
+  top: { axis: "y", placement: "before" },
+  bottom: { axis: "y", placement: "after" },
+};
+
+export function containsPoint(rect: Rect, point: Point): boolean {
+  return (
+    point.x >= rect.x &&
+    point.x <= rect.x + rect.width &&
+    point.y >= rect.y &&
+    point.y <= rect.y + rect.height
+  );
+}
+
+/**
+ * Which region of a pane body `point` is in, or `null` when it is outside.
+ * At a corner the nearest edge in normalized band units wins; exact ties go
+ * left, right, top, bottom — the order of the table below.
+ */
+export function resolveDropRegion(rect: Rect, point: Point): DropRegion | null {
+  if (!containsPoint(rect, point)) return null;
+  const bandX = Math.min(rect.width * EDGE_BAND_FRACTION, EDGE_BAND_MAX);
+  const bandY = Math.min(rect.height * EDGE_BAND_FRACTION, EDGE_BAND_MAX);
+  const normalized = (distance: number, band: number) =>
+    band > 0 ? distance / band : Number.POSITIVE_INFINITY;
+  const edges: Array<[EdgeRegion, number]> = [
+    ["left", normalized(point.x - rect.x, bandX)],
+    ["right", normalized(rect.x + rect.width - point.x, bandX)],
+    ["top", normalized(point.y - rect.y, bandY)],
+    ["bottom", normalized(rect.y + rect.height - point.y, bandY)],
+  ];
+  let best: EdgeRegion | null = null;
+  let bestDistance = 1;
+  for (const [region, distance] of edges) {
+    if (distance < bestDistance) {
+      best = region;
+      bestDistance = distance;
+    }
+  }
+  return best ?? "center";
+}
+
+function parentSplit(node: LayoutNode, childId: string): Split | null {
+  if (node.kind === "pane") return null;
+  if (node.children.some((child) => child.id === childId)) return node;
+  return parentSplit(node.children[0], childId) ?? parentSplit(node.children[1], childId);
+}
+
+/**
+ * Turn a transitioned layout into a candidate, or `null` when the drop must
+ * not be offered. `previewPaneId` is the pane whose final rectangle the
+ * preview paints. For a split, both children of the split that now holds that
+ * pane must fit their minima inside the allocation the tree actually gives
+ * them — the whole window fitting is not enough, since ratios elsewhere can
+ * starve the target.
+ */
+function finalizeCandidate(
+  layout: Layout,
+  next: Layout,
+  targetPaneId: string,
+  region: DropRegion,
+  area: Rect,
+  previewPaneId: string,
+): DropCandidate | null {
+  if (next === layout && region !== "center") return null;
+  const bounds = computeBounds(next.root, area);
+  const previewRect = bounds.get(previewPaneId);
+  if (!previewRect) return null;
+
+  if (region !== "center") {
+    const split = parentSplit(next.root, previewPaneId);
+    if (!split) return null;
+    for (const child of split.children) {
+      const allocation = bounds.get(child.id);
+      if (!allocation || !fitsWithin(minimumSize(child), allocation)) return null;
+    }
+  }
+
+  return {
+    targetPaneId,
+    region,
+    insertionIndex: null,
+    expectedRevision: layout.revision,
+    layout: next,
+    previewRect,
+  };
+}
+
+export interface FileDropItem {
+  /** The tab minted for this file, used when the pane does not already show it. */
+  tabId: string;
+  /** A tab in the target pane that already shows this file. Only honoured at
+   *  the centre: an edge drop is a deliberate second view. */
+  existingTabId: string | null;
+}
+
+/**
+ * The sidebar's drop: open `items` in `targetPaneId` at the centre, or in a
+ * new pane split off its `region` edge. The first item ends up active either
+ * way. Returns `null` when the drop must not be offered — the pane is gone,
+ * or the split would leave a pane below its minimum.
+ */
+export function buildFileDropCandidate(
+  layout: Layout,
+  targetPaneId: string,
+  region: DropRegion,
+  area: Rect,
+  items: FileDropItem[],
+): DropCandidate | null {
+  if (!findPane(layout, targetPaneId) || items.length === 0) return null;
+  const first = items[0]!;
+
+  if (region === "center") {
+    let next = layout;
+    for (const item of items) {
+      if (item.existingTabId) continue;
+      next = insertTab(next, targetPaneId, item.tabId, Number.POSITIVE_INFINITY, {
+        activate: false,
+      });
+    }
+    next = activateTab(next, first.existingTabId ?? first.tabId);
+    if (paneOfTab(next, first.existingTabId ?? first.tabId)?.id !== targetPaneId) return null;
+    return finalizeCandidate(layout, next, targetPaneId, region, area, targetPaneId);
+  }
+
+  const edge = EDGES[region];
+  const tabIds = items.map((item) => item.tabId);
+  const next = splitPaneWithTabs(layout, targetPaneId, edge.axis, edge.placement, tabIds);
+  const created = paneOfTab(next, first.tabId);
+  if (next === layout || !created) return null;
+  return finalizeCandidate(layout, next, targetPaneId, region, area, created.id);
 }
