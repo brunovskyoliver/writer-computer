@@ -102,7 +102,7 @@ Frontend only. All app paths are under `apps/desktop/`; docs under `docs/`; spec
 
 - [x] T025 [US3] **Verified 2026-09-13: no app or library rule for `.cm-searchMatch`; both use `@codemirror/search`'s base theme.** Verify in `apps/desktop/src/components/editor-area/prosemark-theme.css` and `editor-search-extensions.ts` that Vim search decorations (`.cm-searchMatch`, set via `@codemirror/search`'s `setSearchQuery` with `forVim`) pick up the app's existing find-match colour with no new rule; add a rule only if the highlight is visibly missing
 - [x] T026 [US3] **Confirmed 2026-09-13: the `c` prompt carries an `<input>`, notifications are `<div>`-wrapped, both pass the recording-dialog filter into the host. The library emits no substitution count (recorded in spec Assumptions).** Confirm the `:s///c` confirm prompt and the substitution-count notification both route through the dialog host from T022 (they are library `openDialog`/`openNotification` calls); fix relocation in `vim-mode.ts` if any prompt still appears inside the editor
-- [ ] T027 [US3] **Handed to the user 2026-09-13** (code paths verified by reading the library; no automated coverage possible). Manual validation per quickstart.md "Story 3" and the coexistence case "Cmd+F find overlay and Vim `/` search do not break each other"; on `big.md`, `:%s/lorem/LOREM/g` under 1 s and one `u` reverts (SC-005)
+- [x] T027 [US3] **Validated by the user 2026-09-13.** Manual validation per quickstart.md "Story 3" and the coexistence case "Cmd+F find overlay and Vim `/` search do not break each other"; on `big.md`, `:%s/lorem/LOREM/g` under 1 s and one `u` reverts (SC-005)
 
 **Checkpoint**: search and bulk edit are usable
 
