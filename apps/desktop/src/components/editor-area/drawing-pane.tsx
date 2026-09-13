@@ -23,11 +23,13 @@ const CHROME_OFFSET = "var(--chrome-drag-height)";
 export function DrawingPane({
   location,
   tabId,
-  isActive,
+  isVisible,
+  isFocused,
 }: {
   location: DrawingLocation;
   tabId: string;
-  isActive: boolean;
+  isVisible: boolean;
+  isFocused: boolean;
 }) {
   return (
     // The drawing kind is `keepAlive`, so an inactive tab stays mounted — but
@@ -38,7 +40,7 @@ export function DrawingPane({
     // tab is in the background.
     <div
       className={
-        isActive ? "absolute inset-0 z-10" : "pointer-events-none hidden absolute inset-0 z-10"
+        isVisible ? "absolute inset-0 z-10" : "pointer-events-none hidden absolute inset-0 z-10"
       }
       style={{ top: CHROME_OFFSET }}
     >
@@ -47,7 +49,12 @@ export function DrawingPane({
       >
         {/* Keyed by path so navigating a tab to another drawing remounts with
             fresh state rather than reusing the previous scene. */}
-        <DrawingEditor key={location.path} tabId={tabId} path={location.path} isActive={isActive} />
+        <DrawingEditor
+          key={location.path}
+          tabId={tabId}
+          path={location.path}
+          isActive={isFocused}
+        />
       </Suspense>
     </div>
   );

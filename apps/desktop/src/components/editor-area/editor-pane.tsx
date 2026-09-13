@@ -22,14 +22,24 @@ function AsciiSpinner() {
 interface EditorPaneProps {
   tabId: string;
   path: string;
-  isActive: boolean;
+  /** This tab is its pane's active one. Several panes can have one at a time. */
+  isVisible: boolean;
+  /** This is the one tab global commands and keyboard focus act on. */
+  isFocused: boolean;
 }
 
-export const EditorPane = memo(function EditorPane({ tabId, path, isActive }: EditorPaneProps) {
+export const EditorPane = memo(function EditorPane({
+  tabId,
+  path,
+  isVisible,
+  isFocused,
+}: EditorPaneProps) {
   const isLoading = useIsFileLoading(path);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const [editorView, setEditorView] = useState<EditorView | null>(null);
-  useCloseEditorSearchWhenInactive(isActive);
+  // The find overlay belongs to the focused editor, so losing focus closes it
+  // exactly as switching tabs already did.
+  useCloseEditorSearchWhenInactive(isFocused);
 
   const getScrollContainer = useCallback(() => scrollContainerRef.current, []);
 
@@ -37,7 +47,7 @@ export const EditorPane = memo(function EditorPane({ tabId, path, isActive }: Ed
     return (
       <div
         className={
-          isActive ? "relative z-10 h-full" : "absolute inset-0 invisible pointer-events-none"
+          isVisible ? "relative z-10 h-full" : "absolute inset-0 invisible pointer-events-none"
         }
       >
         <div className="flex h-full items-center justify-center text-[13px] text-[var(--text-muted)]">
@@ -51,7 +61,7 @@ export const EditorPane = memo(function EditorPane({ tabId, path, isActive }: Ed
     <div
       data-pane
       className={
-        isActive ? "relative z-10 h-full" : "absolute inset-0 invisible pointer-events-none"
+        isVisible ? "relative z-10 h-full" : "absolute inset-0 invisible pointer-events-none"
       }
     >
       <EditorScrollContainer ref={scrollContainerRef}>
@@ -70,12 +80,12 @@ export const EditorPane = memo(function EditorPane({ tabId, path, isActive }: Ed
           tabId={tabId}
           filePath={path}
           getScrollContainer={getScrollContainer}
-          autoFocus={isActive}
+          autoFocus={isFocused}
           onViewChange={setEditorView}
         />
       </EditorScrollContainer>
       <SectionRail filePath={path} view={editorView} scrollContainerRef={scrollContainerRef} />
-      {isActive && <EditorSearchOverview scrollContainerRef={scrollContainerRef} />}
+      {isFocused && <EditorSearchOverview scrollContainerRef={scrollContainerRef} />}
     </div>
   );
 });

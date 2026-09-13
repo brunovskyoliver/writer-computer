@@ -28,12 +28,14 @@ import type { PageKindView } from "./types";
 const FileTabBody = ({
   location,
   tabId,
-  isActive,
+  isVisible,
+  isFocused,
 }: {
   location: FileLocation;
   tabId: string;
-  isActive: boolean;
-}) => <EditorPane tabId={tabId} path={location.path} isActive={isActive} />;
+  isVisible: boolean;
+  isFocused: boolean;
+}) => <EditorPane tabId={tabId} path={location.path} isVisible={isVisible} isFocused={isFocused} />;
 
 const views = {
   // No footer: a drawing has no word count, frontmatter or document date.
