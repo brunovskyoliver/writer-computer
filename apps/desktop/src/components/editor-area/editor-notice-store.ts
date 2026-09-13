@@ -11,7 +11,7 @@ interface EditorNoticeState {
   dismissNotice: () => void;
 }
 
-let dismissTimer: number | null = null;
+let dismissTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** Transient, self-dismissing notices shown over the editor: unresolved anchor
  *  links, rejected pastes, and similar "that didn't happen, here's why" cases. */
@@ -19,16 +19,16 @@ export const useEditorNoticeStore = create<EditorNoticeState>((set, get) => ({
   message: null,
   tabId: null,
   showNotice: (message, tabId = null) => {
-    if (dismissTimer !== null) window.clearTimeout(dismissTimer);
+    if (dismissTimer !== null) clearTimeout(dismissTimer);
     set({ message, tabId });
-    dismissTimer = window.setTimeout(() => {
+    dismissTimer = setTimeout(() => {
       dismissTimer = null;
       get().dismissNotice();
     }, DISMISS_AFTER_MS);
   },
   dismissNotice: () => {
     if (dismissTimer !== null) {
-      window.clearTimeout(dismissTimer);
+      clearTimeout(dismissTimer);
       dismissTimer = null;
     }
     set({ message: null, tabId: null });

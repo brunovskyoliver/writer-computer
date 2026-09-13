@@ -1,0 +1,20 @@
+{
+  "description": "A v2 record without a layout is malformed even though it has tabs.",
+  "input": {
+    "version": 2,
+    "tabs": [
+      {
+        "id": "tab-1",
+        "location": {
+          "kind": "file",
+          "path": "/vault/a.md"
+        },
+        "back": [],
+        "forward": []
+      }
+    ]
+  },
+  "expected": {
+    "status": "malformed"
+  }
+}

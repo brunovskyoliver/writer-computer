@@ -124,7 +124,7 @@ pub async fn get_startup_state(
     if let Some(pending) = startup_open {
         if pending.workspace.is_some() {
             if let Some(ref mut bundle) = restore_bundle {
-                bundle.session = None;
+                bundle.session = crate::session::SessionRecord::Missing;
                 bundle.active_file = None;
                 bundle.open_file = pending.file;
             }

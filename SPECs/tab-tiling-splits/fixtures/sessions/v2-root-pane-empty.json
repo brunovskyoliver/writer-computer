@@ -1,0 +1,21 @@
+{
+  "description": "A v2 record with an empty root pane is valid and restores as nothing.",
+  "input": {
+    "version": 2,
+    "tabs": [],
+    "layout": {
+      "root": {
+        "kind": "pane",
+        "id": "pane-1",
+        "tab_ids": [],
+        "active_tab_id": null
+      },
+      "focused_pane_id": "pane-1"
+    }
+  },
+  "expected": {
+    "status": "ready",
+    "session": null,
+    "focused_file": null
+  }
+}

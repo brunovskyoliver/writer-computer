@@ -1,0 +1,60 @@
+{
+  "description": "A legacy active index past the end selects the first tab rather than failing.",
+  "input": {
+    "tabs": [
+      {
+        "location": {
+          "kind": "file",
+          "path": "/vault/a.md"
+        },
+        "back": [],
+        "forward": []
+      },
+      {
+        "location": {
+          "kind": "file",
+          "path": "/vault/b.md"
+        },
+        "back": [],
+        "forward": []
+      }
+    ],
+    "active_index": 7
+  },
+  "expected": {
+    "status": "ready",
+    "session": {
+      "version": 2,
+      "tabs": [
+        {
+          "id": "tab-1",
+          "location": {
+            "kind": "file",
+            "path": "/vault/a.md"
+          },
+          "back": [],
+          "forward": []
+        },
+        {
+          "id": "tab-2",
+          "location": {
+            "kind": "file",
+            "path": "/vault/b.md"
+          },
+          "back": [],
+          "forward": []
+        }
+      ],
+      "layout": {
+        "root": {
+          "kind": "pane",
+          "id": "pane-1",
+          "tab_ids": ["tab-1", "tab-2"],
+          "active_tab_id": "tab-1"
+        },
+        "focused_pane_id": "pane-1"
+      }
+    },
+    "focused_file": "/vault/a.md"
+  }
+}

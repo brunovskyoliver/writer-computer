@@ -1,0 +1,81 @@
+{
+  "description": "Removing a pane's active tab activates the tab that slides into its slot, else the previous one.",
+  "input": {
+    "version": 2,
+    "tabs": [
+      {
+        "id": "tab-1",
+        "location": {
+          "kind": "file",
+          "path": "/vault/a.md"
+        },
+        "back": [],
+        "forward": []
+      },
+      {
+        "id": "tab-2",
+        "location": {
+          "kind": "file",
+          "path": "/vault/b.md"
+        },
+        "back": [],
+        "forward": []
+      },
+      {
+        "id": "tab-3",
+        "location": {
+          "kind": "file",
+          "path": "/vault/c.md"
+        },
+        "back": [],
+        "forward": []
+      }
+    ],
+    "layout": {
+      "root": {
+        "kind": "pane",
+        "id": "pane-1",
+        "tab_ids": ["tab-1", "tab-2", "tab-3"],
+        "active_tab_id": "tab-2"
+      },
+      "focused_pane_id": "pane-1"
+    }
+  },
+  "missing_files": ["/vault/b.md"],
+  "expected": {
+    "status": "ready",
+    "session": {
+      "version": 2,
+      "tabs": [
+        {
+          "id": "tab-1",
+          "location": {
+            "kind": "file",
+            "path": "/vault/a.md"
+          },
+          "back": [],
+          "forward": []
+        },
+        {
+          "id": "tab-3",
+          "location": {
+            "kind": "file",
+            "path": "/vault/c.md"
+          },
+          "back": [],
+          "forward": []
+        }
+      ],
+      "layout": {
+        "root": {
+          "kind": "pane",
+          "id": "pane-1",
+          "tab_ids": ["tab-1", "tab-3"],
+          "active_tab_id": "tab-3"
+        },
+        "focused_pane_id": "pane-1"
+      }
+    },
+    "focused_file": "/vault/c.md"
+  }
+}

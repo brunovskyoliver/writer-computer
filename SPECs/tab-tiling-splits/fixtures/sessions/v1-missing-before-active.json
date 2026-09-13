@@ -1,0 +1,69 @@
+{
+  "description": "A legacy flat session whose active tab sits after a file that no longer exists. The active tab keeps its identity; the old index is not clamped against the filtered list.",
+  "input": {
+    "tabs": [
+      {
+        "location": {
+          "kind": "file",
+          "path": "/vault/a.md"
+        },
+        "back": [],
+        "forward": []
+      },
+      {
+        "location": {
+          "kind": "file",
+          "path": "/vault/b.md"
+        },
+        "back": [],
+        "forward": []
+      },
+      {
+        "location": {
+          "kind": "file",
+          "path": "/vault/c.md"
+        },
+        "back": [],
+        "forward": []
+      }
+    ],
+    "active_index": 2
+  },
+  "missing_files": ["/vault/a.md"],
+  "expected": {
+    "status": "ready",
+    "session": {
+      "version": 2,
+      "tabs": [
+        {
+          "id": "tab-2",
+          "location": {
+            "kind": "file",
+            "path": "/vault/b.md"
+          },
+          "back": [],
+          "forward": []
+        },
+        {
+          "id": "tab-3",
+          "location": {
+            "kind": "file",
+            "path": "/vault/c.md"
+          },
+          "back": [],
+          "forward": []
+        }
+      ],
+      "layout": {
+        "root": {
+          "kind": "pane",
+          "id": "pane-1",
+          "tab_ids": ["tab-2", "tab-3"],
+          "active_tab_id": "tab-3"
+        },
+        "focused_pane_id": "pane-1"
+      }
+    },
+    "focused_file": "/vault/c.md"
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "description": "The focused pane does not exist.",
+  "input": {
+    "version": 2,
+    "tabs": [
+      {
+        "id": "tab-1",
+        "location": {
+          "kind": "file",
+          "path": "/vault/a.md"
+        },
+        "back": [],
+        "forward": []
+      },
+      {
+        "id": "tab-2",
+        "location": {
+          "kind": "file",
+          "path": "/vault/b.md"
+        },
+        "back": [],
+        "forward": []
+      }
+    ],
+    "layout": {
+      "root": {
+        "kind": "pane",
+        "id": "pane-1",
+        "tab_ids": ["tab-1", "tab-2"],
+        "active_tab_id": "tab-1"
+      },
+      "focused_pane_id": "pane-9"
+    }
+  },
+  "expected": {
+    "status": "malformed"
+  }
+}

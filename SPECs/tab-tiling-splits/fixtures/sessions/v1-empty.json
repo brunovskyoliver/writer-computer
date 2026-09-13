@@ -1,0 +1,12 @@
+{
+  "description": "A legacy session with no tabs restores the launcher and is persisted as nothing.",
+  "input": {
+    "tabs": [],
+    "active_index": null
+  },
+  "expected": {
+    "status": "ready",
+    "session": null,
+    "focused_file": null
+  }
+}

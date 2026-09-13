@@ -33,13 +33,7 @@ import {
   type DropCandidate,
   type Layout,
 } from "@/lib/editor-layout";
-import {
-  locationBehavior,
-  serializeLocation,
-  deserializeLocation,
-  type Location,
-  type SerializedLocation,
-} from "@/components/editor-area/page-kinds";
+import { locationBehavior, type Location } from "@/components/editor-area/page-kinds";
 
 export interface OpenFile {
   path: string;
@@ -65,10 +59,11 @@ export interface Tab {
 
 export type { Location, FileLocation } from "@/components/editor-area/page-kinds";
 
-export interface SessionTab {
-  location: SerializedLocation;
-  back: SerializedLocation[];
-  forward: SerializedLocation[];
+/** A validated, decoded session (see `lib/session.ts`): runtime tabs and a
+ *  layout whose ids were minted by this window's allocators. */
+export interface RestorableSession {
+  tabs: Tab[];
+  layout: Layout;
 }
 
 /** A sidebar drop, resolved: the candidate layout plus the tabs it minted for
@@ -134,9 +129,11 @@ interface EditorState {
   removePathReferences: (path: string) => void;
   removePathsWithPrefix: (prefix: string) => void;
   rewritePathPrefix: (oldPrefix: string, newPrefix: string) => void;
+  /** Publish a decoded session through the same normalization path as a
+   *  runtime layout change, then load its documents and prune the tabs whose
+   *  files fail to read. */
   restoreSession: (
-    tabs: SessionTab[],
-    activeIndex: number | null,
+    session: RestorableSession,
     prefetchedActiveFile?: FileContent | null,
   ) => Promise<void>;
   /** Drop every tab, document, and the layout tree: the reset a workspace
@@ -168,7 +165,7 @@ const OPEN_FILE_GRACE_MS = 40;
 
 let tabSequence = 0;
 
-function createTabId() {
+export function createTabId() {
   tabSequence += 1;
   return `tab-${tabSequence}`;
 }
@@ -1172,33 +1169,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   restoreSession: async (
-    tabs: SessionTab[],
-    activeIndex: number | null,
-    prefetchedActiveFile: FileContent | null = null,
+    { tabs: restoredTabs, layout: restoredLayout },
+    prefetchedActiveFile = null,
   ) => {
-    const restoredTabs: Tab[] = [];
-    for (const sessionTab of tabs) {
-      const location = deserializeLocation(sessionTab.location);
-      if (!location) continue;
-      const back = sessionTab.back
-        .map((l) => deserializeLocation(l))
-        .filter((l): l is Location => l !== null);
-      const forward = sessionTab.forward
-        .map((l) => deserializeLocation(l))
-        .filter((l): l is Location => l !== null);
-      restoredTabs.push({
-        id: createTabId(),
-        location,
-        back,
-        forward,
-      });
-    }
-
     if (restoredTabs.length === 0) {
-      set((state) => ({
-        openFiles: new Map(),
-        ...publish([], createLayout([], null, state.layout.revision + 1)),
-      }));
+      get().resetEditorState();
       get().ensureLauncherTab();
       return;
     }
@@ -1212,11 +1187,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         ]),
       ),
     ];
-    const activeTabIndex = activeIndex ?? 0;
-    const activeTab = restoredTabs[activeTabIndex] ?? restoredTabs[0] ?? null;
+    const activeTabId = focusedTabId(restoredLayout);
+    const activeTab = restoredTabs.find((tab) => tab.id === activeTabId) ?? null;
     const activePath = activeTab ? locationPrimaryPath(activeTab.location) : null;
 
-    // If the bundled `restore_workspace` IPC pre-fetched the active file, seed
+    // If the bundled `restore_workspace` IPC pre-fetched the focused file, seed
     // it directly so the editor can mount with content already in place — no
     // round-trip back to Rust for the most-visible tab.
     const seededActive =
@@ -1245,18 +1220,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         files.set(activePath, seededActive);
       }
 
-      // A v1 session is a flat tab list, which restores as one pane. The
-      // same normalization path runs for it as for a runtime change.
+      // The decoded tree goes through the same normalization as a runtime
+      // change; only the revision is this window's.
       return {
         openFiles: files,
-        ...publish(
-          restoredTabs,
-          createLayout(
-            restoredTabs.map((tab) => tab.id),
-            activeTab?.id ?? null,
-            state.layout.revision + 1,
-          ),
-        ),
+        ...publish(restoredTabs, { ...restoredLayout, revision: state.layout.revision + 1 }),
       };
     });
 
@@ -1415,24 +1383,3 @@ registerSaveStore({
     useEditorStore.getState().markSaved(path, diskContent, hasNewerChanges),
   setSaveError: (path, error) => useEditorStore.getState().setSaveError(path, error),
 });
-
-export function getEditorSessionSnapshot(state: Pick<EditorState, "tabs" | "activeTabId">) {
-  const tabs: SessionTab[] = [];
-  let activeIndex: number | null = null;
-  state.tabs.forEach((tab) => {
-    const location = serializeLocation(tab.location);
-    if (!location) return;
-    const back = tab.back
-      .map((l) => serializeLocation(l))
-      .filter((l): l is SerializedLocation => l !== null);
-    const forward = tab.forward
-      .map((l) => serializeLocation(l))
-      .filter((l): l is SerializedLocation => l !== null);
-    const index = tabs.length;
-    tabs.push({ location, back, forward });
-    if (state.activeTabId && tab.id === state.activeTabId) {
-      activeIndex = index;
-    }
-  });
-  return { tabs, activeIndex };
-}

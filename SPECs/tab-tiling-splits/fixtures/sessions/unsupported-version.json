@@ -1,0 +1,11 @@
+{
+  "description": "A newer version is rejected rather than read as v1.",
+  "input": {
+    "version": 3,
+    "tabs": [],
+    "layout": {}
+  },
+  "expected": {
+    "status": "malformed"
+  }
+}

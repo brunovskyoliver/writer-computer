@@ -1,0 +1,7 @@
+{
+  "description": "No record for the workspace is normal.",
+  "input": null,
+  "expected": {
+    "status": "missing"
+  }
+}

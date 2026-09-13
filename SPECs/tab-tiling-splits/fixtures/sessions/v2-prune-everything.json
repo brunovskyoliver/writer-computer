@@ -1,0 +1,32 @@
+{
+  "description": "When every file is gone nothing remains: the launcher is restored and the snapshot becomes null.",
+  "input": {
+    "version": 2,
+    "tabs": [
+      {
+        "id": "tab-1",
+        "location": {
+          "kind": "file",
+          "path": "/vault/a.md"
+        },
+        "back": [],
+        "forward": []
+      }
+    ],
+    "layout": {
+      "root": {
+        "kind": "pane",
+        "id": "pane-1",
+        "tab_ids": ["tab-1"],
+        "active_tab_id": "tab-1"
+      },
+      "focused_pane_id": "pane-1"
+    }
+  },
+  "missing_files": ["/vault/a.md"],
+  "expected": {
+    "status": "ready",
+    "session": null,
+    "focused_file": null
+  }
+}

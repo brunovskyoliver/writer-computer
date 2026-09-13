@@ -7,6 +7,7 @@ mod ignore;
 #[cfg(target_os = "macos")]
 mod macos;
 pub mod open_target;
+mod session;
 mod shutdown;
 mod state;
 mod telemetry;

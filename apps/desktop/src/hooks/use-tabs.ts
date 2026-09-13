@@ -5,7 +5,7 @@ import { findPane } from "@/lib/editor-layout";
 import type { DocumentStats } from "@/lib/document-stats";
 import type { Tab } from "@/stores/editor-store";
 
-export type { OpenFile, Tab, Location, FileLocation, SessionTab } from "@/stores/editor-store";
+export type { OpenFile, Tab, Location, FileLocation } from "@/stores/editor-store";
 
 const EMPTY_STATS: DocumentStats = { words: 0, characters: 0, paragraphs: 0 };
 

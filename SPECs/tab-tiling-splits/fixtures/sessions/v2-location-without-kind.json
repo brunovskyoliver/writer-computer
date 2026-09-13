@@ -1,0 +1,28 @@
+{
+  "description": "A location payload with no kind tag.",
+  "input": {
+    "version": 2,
+    "tabs": [
+      {
+        "id": "tab-1",
+        "location": {
+          "path": "/vault/a.md"
+        },
+        "back": [],
+        "forward": []
+      }
+    ],
+    "layout": {
+      "root": {
+        "kind": "pane",
+        "id": "pane-1",
+        "tab_ids": ["tab-1"],
+        "active_tab_id": "tab-1"
+      },
+      "focused_pane_id": "pane-1"
+    }
+  },
+  "expected": {
+    "status": "malformed"
+  }
+}

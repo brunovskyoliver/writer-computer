@@ -1,0 +1,25 @@
+{
+  "description": "A tab missing its location.",
+  "input": {
+    "version": 2,
+    "tabs": [
+      {
+        "id": "tab-1",
+        "back": [],
+        "forward": []
+      }
+    ],
+    "layout": {
+      "root": {
+        "kind": "pane",
+        "id": "pane-1",
+        "tab_ids": ["tab-1"],
+        "active_tab_id": "tab-1"
+      },
+      "focused_pane_id": "pane-1"
+    }
+  },
+  "expected": {
+    "status": "malformed"
+  }
+}

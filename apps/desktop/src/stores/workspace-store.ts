@@ -4,8 +4,18 @@ import type { DirEntry } from "@/types/fs";
 import type { RestoreWorkspaceResponse } from "@/lib/tauri";
 import * as tauri from "@/lib/tauri";
 import { getPreference, setPreference } from "@/lib/preferences";
-import { saveSession, loadSession } from "@/lib/session";
-import { getEditorSessionSnapshot, useEditorStore } from "@/stores/editor-store";
+import {
+  classifyRecord,
+  createSessionPersister,
+  decodeSession,
+  encodeSession,
+  loadSession,
+  saveSession,
+  type SessionRecord,
+} from "@/lib/session";
+import { createTabId, useEditorStore } from "@/stores/editor-store";
+import { showEditorNotice } from "@/components/editor-area/editor-notice-store";
+import type { FileContent } from "@/types/fs";
 
 export type WorkspaceChromeMode = "workspace" | "compact-file";
 
@@ -116,7 +126,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
     if (hasDrawingSession()) await withDrawingSaveBoundary(() => {});
 
-    // Clear editor state before switching
+    // Clear editor state before switching. Nothing queued for the previous
+    // (empty) window may land under the new root.
+    sessionPersister.cancel();
     useEditorStore.getState().resetEditorState();
 
     const info = await tauri.openWorkspace(path);
@@ -144,22 +156,24 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     );
     void get().hydratePinnedFiles(info.root);
 
-    const session = await loadSession(info.root);
-    if (session && session.tabs.length > 0) {
-      await useEditorStore.getState().restoreSession(session.tabs, session.activeIndex);
-      return;
-    }
-
-    useEditorStore.getState().ensureLauncherTab();
+    const record = await loadSession(info.root);
+    // The read raced a later switch: this workspace is no longer the one
+    // being shown, so its session must not land in the current layout.
+    if (get().root !== info.root) return;
+    await applySessionRecord(info.root, record, null, { background: false });
   },
 
   closeWorkspace: async () => {
     const root = get().root;
     if (!root) return;
-    const snapshot = getEditorSessionSnapshot(useEditorStore.getState());
-    void saveSession(root, snapshot.tabs, snapshot.activeIndex);
+    // Flush the snapshot as it stands now; it must be on disk before the
+    // state it describes is cleared.
+    scheduleSessionSave(root);
+    const flushed = sessionPersister.flush();
     await withDrawingSaveBoundary(() => tauri.closeWorkspace(root));
+    await flushed;
     if (get().root !== root) return;
+    sessionPersister.cancel();
     useEditorStore.getState().resetEditorState();
     set((state) =>
       withNextWorkspaceGeneration(state, {
@@ -178,6 +192,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   restoreFromBundle: async (bundle) => {
     // Clear editor state in case anything was hydrated by a parallel hook.
+    sessionPersister.cancel();
     useEditorStore.getState().resetEditorState();
 
     set((state) =>
@@ -196,22 +211,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     );
     void get().hydratePinnedFiles(bundle.workspace.root);
 
-    if (bundle.session && bundle.session.tabs && bundle.session.tabs.length > 0) {
-      // Fire-and-forget: `restoreSession` populates the active tab
-      // synchronously (via prefetchedActiveFile) before it starts awaiting
-      // background tab reads. We intentionally don't await the whole thing
-      // so the startup flow doesn't block on tabs the user isn't looking at
-      // yet — they load in the background and fill in on their own.
-      void useEditorStore
-        .getState()
-        .restoreSession(
-          bundle.session.tabs,
-          bundle.session.active_index ?? null,
-          bundle.active_file,
-        )
-        .catch((error) => {
-          console.error("Failed to load background tabs from restored session", error);
-        });
+    const record = classifyRecord(bundle.session);
+    if (record.status !== "missing") {
+      await applySessionRecord(bundle.workspace.root, record, bundle.active_file, {
+        background: true,
+      });
       return;
     }
 
@@ -400,28 +404,109 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
 // Recent workspaces are hydrated by resolveStartup() via get_startup_state before the first render.
 
-// Save session whenever tabs change (debounced) and on window close
-if (typeof window !== "undefined") {
-  let sessionSaveTimer: ReturnType<typeof setTimeout> | null = null;
+// --- session restore and persistence ----------------------------------------
+//
+// One writer per window, fed from the editor store's committed state. The
+// editor store owns layout mutations; this boundary only observes what it
+// published and writes it after the debounce (see contracts/session.md).
 
-  useEditorStore.subscribe((state, prev) => {
-    if (state.tabs === prev.tabs && state.activeTabId === prev.activeTabId) return;
-    if (sessionSaveTimer) clearTimeout(sessionSaveTimer);
-    sessionSaveTimer = setTimeout(() => {
-      // Standalone compact windows have no root, so they never persist a
-      // session — the root check covers both cases.
-      const root = useWorkspaceStore.getState().root;
-      if (!root) return;
-      const snapshot = getEditorSessionSnapshot(useEditorStore.getState());
-      void saveSession(root, snapshot.tabs, snapshot.activeIndex);
-    }, 500);
+const sessionPersister = createSessionPersister(saveSession);
+
+/**
+ * A workspace whose stored record could not be read. Its record is left
+ * exactly as it is until the user makes a real layout change in that
+ * workspace: an empty snapshot (the launcher we fell back to) must not
+ * overwrite what might still be recoverable by hand.
+ */
+let heldRoot: string | null = null;
+
+function reportSessionDiagnostics(problems: string[], notice: string) {
+  for (const problem of problems) console.warn(`[session] ${problem}`);
+  showEditorNotice(notice);
+}
+
+/**
+ * Apply a classified session record for `root`. `background` is the startup
+ * path: the focused file is seeded synchronously from the bundle and the
+ * rest loads without blocking startup.
+ */
+async function applySessionRecord(
+  root: string,
+  record: SessionRecord,
+  prefetched: FileContent | null,
+  { background }: { background: boolean },
+) {
+  const editor = useEditorStore.getState();
+  if (record.status === "malformed") {
+    heldRoot = root;
+    reportSessionDiagnostics(
+      record.problems,
+      "The saved window layout for this workspace could not be read, so it was not restored. It is kept on disk until you change the layout.",
+    );
+    editor.ensureLauncherTab();
+    return;
+  }
+  if (record.status === "missing") {
+    editor.ensureLauncherTab();
+    return;
+  }
+
+  const decoded = decodeSession(record.session, createTabId);
+  if (decoded.pruned.length > 0) {
+    reportSessionDiagnostics(
+      decoded.pruned,
+      `${decoded.pruned.length} saved tab${decoded.pruned.length === 1 ? "" : "s"} could not be restored by this version.`,
+    );
+  }
+  const restore = editor.restoreSession(decoded, prefetched);
+  if (!background) {
+    await restore;
+    return;
+  }
+  // Startup: `restoreSession` publishes the layout and the prefetched file
+  // synchronously before it awaits background reads, so the window can show
+  // the focused tab while the rest fills in.
+  void restore.catch((error) => {
+    console.error("Failed to load background tabs from restored session", error);
   });
+}
 
+/** Queue the current editor state for `root`, unless that workspace's record
+ *  is held and the snapshot would erase it. */
+function scheduleSessionSave(root: string) {
+  const { tabs, layout } = useEditorStore.getState();
+  const snapshot = encodeSession(tabs, layout);
+  if (heldRoot === root) {
+    if (!snapshot) return;
+    // A deliberate, valid layout in this workspace replaces the bad record.
+    heldRoot = null;
+  }
+  sessionPersister.schedule(root, snapshot);
+}
+
+useEditorStore.subscribe((state, prev) => {
+  // Layout identity moves for every committed tree, focus, or ratio
+  // change; tab identity for every navigation. Document edits touch
+  // neither, so typing never serializes the layout.
+  if (state.layout === prev.layout && state.tabs === prev.tabs) return;
+  // No tabs at all is the transient state a reset leaves behind; a window
+  // in use always has at least a launcher. Persisting it would erase the
+  // record of the workspace being torn down.
+  if (state.tabs.length === 0) return;
+  // Standalone compact windows have no root, so they never persist a
+  // session — the root check covers both cases.
+  const root = useWorkspaceStore.getState().root;
+  if (!root) return;
+  scheduleSessionSave(root);
+});
+
+if (typeof window !== "undefined") {
   window.addEventListener("beforeunload", () => {
-    if (sessionSaveTimer) clearTimeout(sessionSaveTimer);
+    // Last best-effort flush; an asynchronous write here is not guaranteed
+    // to finish, which is why explicit close flushes first.
     const root = useWorkspaceStore.getState().root;
     if (!root) return;
-    const snapshot = getEditorSessionSnapshot(useEditorStore.getState());
-    void saveSession(root, snapshot.tabs, snapshot.activeIndex);
+    scheduleSessionSave(root);
+    void sessionPersister.flush();
   });
 }

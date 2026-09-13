@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import sidebarEntryKinds from "@shared/sidebar-entry-kinds.json";
+import type { SessionV2 } from "@/lib/session";
 import type {
   DirEntry,
   FileContent,
@@ -102,7 +103,7 @@ export interface RestoreWorkspaceResponse {
   workspace: WorkspaceInfo;
   entries: DirEntry[];
   recent_workspaces: string[];
-  session: SessionData | null;
+  session: SessionRecordData;
   active_file: FileContent | null;
   open_file: string | null;
 }
@@ -173,32 +174,22 @@ export function getRecentFilesGlobal(limit?: number): Promise<RecentFile[]> {
   return invoke("get_recent_files_global", { limit: limit ?? null });
 }
 
-// Session commands
-export interface SessionData {
-  tabs?: SessionTabData[];
-  active_index?: number | null;
+// Session commands. The payload shape is owned by `lib/session.ts`; Rust
+// mirrors it and both are held to the shared fixtures.
+
+/** How Rust classified the stored record. `session` is the versioned payload
+ *  (v1 already migrated); the frontend codec re-validates it. */
+export type SessionRecordData =
+  | { status: "missing" }
+  | { status: "ready"; session: unknown }
+  | { status: "malformed"; problems: string[] };
+
+/** Persist a validated v2 payload, or remove the record with `null`. */
+export function saveSession(workspaceRoot: string, session: SessionV2 | null): Promise<void> {
+  return invoke("save_session", { workspaceRoot, session });
 }
 
-export interface SerializedLocationData {
-  kind: string;
-  [key: string]: unknown;
-}
-
-export interface SessionTabData {
-  location: SerializedLocationData;
-  back: SerializedLocationData[];
-  forward: SerializedLocationData[];
-}
-
-export function saveSession(
-  workspaceRoot: string,
-  tabs: SessionTabData[],
-  activeIndex: number | null,
-): Promise<void> {
-  return invoke("save_session", { workspaceRoot, tabs, activeIndex });
-}
-
-export function loadSession(workspaceRoot: string): Promise<SessionData | null> {
+export function loadSession(workspaceRoot: string): Promise<SessionRecordData> {
   return invoke("load_session", { workspaceRoot });
 }
 

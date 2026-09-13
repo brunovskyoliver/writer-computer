@@ -1,0 +1,7 @@
+{
+  "description": "A record that is not an object is malformed, not legacy.",
+  "input": "tabs",
+  "expected": {
+    "status": "malformed"
+  }
+}

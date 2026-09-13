@@ -3,10 +3,12 @@ use crate::commands::search::index_workspace_impl;
 use crate::commands::settings::get_global_string_setting;
 use crate::error::AppError;
 use crate::ignore::WorkspaceIgnore;
+use crate::session::{self, SessionRecord, SessionV2};
 use crate::state::{AppState, WorkspaceRuntimeDrop, WorkspaceState};
 use crate::watcher::drop_watcher_off_thread;
 use crate::PendingOpenPayload;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
+use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -590,7 +592,7 @@ pub struct RestoreWorkspaceResponse {
     pub workspace: WorkspaceInfo,
     pub entries: Vec<DirEntry>,
     pub recent_workspaces: Vec<String>,
-    pub session: Option<SessionData>,
+    pub session: SessionRecord,
     pub active_file: Option<FileContent>,
     pub open_file: Option<String>,
 }
@@ -650,10 +652,10 @@ pub(crate) async fn build_restore_bundle(
         .await
         .map_err(|e| AppError::Io(e.to_string()))??;
 
-    // If the session has an active tab, pre-fetch its content so the editor
-    // can mount with the file already loaded — saves another sequential IPC
-    // and the 40 ms `OPEN_FILE_GRACE_MS` wait on the frontend side.
-    let active_file = if let Some(active_path) = active_session_path(session.as_ref()) {
+    // If the session has a focused file tab, pre-fetch its content so the
+    // editor can mount with the file already loaded — saves another
+    // sequential IPC and the 40 ms `OPEN_FILE_GRACE_MS` wait on the frontend.
+    let active_file = if let Some(active_path) = active_session_path(&session) {
         tauri::async_runtime::spawn_blocking(move || read_file_impl(&active_path).ok())
             .await
             .map_err(|e| AppError::Io(e.to_string()))?
@@ -681,18 +683,11 @@ pub async fn restore_workspace(
     build_restore_bundle(&app, &label, &path).await
 }
 
-fn active_session_path(session: Option<&SessionData>) -> Option<String> {
-    let session = session?;
-    let idx = session.active_index?;
-    let tab = session.tabs.get(idx)?;
-    if tab.location.kind != "file" {
-        return None;
+fn active_session_path(record: &SessionRecord) -> Option<String> {
+    match record {
+        SessionRecord::Ready { session } => session::focused_session_file(session),
+        _ => None,
     }
-    tab.location
-        .payload
-        .get("path")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
 }
 
 #[tauri::command]
@@ -821,32 +816,12 @@ pub fn watch_standalone_file(
 }
 
 // --- Session persistence (stored in app data dir) ---
-
-/// Session-persisted location. The `kind` tag plus a free-form payload lets
-/// unknown kinds (from a newer client) round-trip without data loss.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SerializedLocation {
-    pub kind: String,
-    #[serde(flatten)]
-    pub payload: serde_json::Map<String, serde_json::Value>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionTab {
-    pub location: SerializedLocation,
-    #[serde(default)]
-    pub back: Vec<SerializedLocation>,
-    #[serde(default)]
-    pub forward: Vec<SerializedLocation>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionData {
-    #[serde(default)]
-    pub tabs: Vec<SessionTab>,
-    #[serde(default)]
-    pub active_index: Option<usize>,
-}
+//
+// `sessions.json` maps workspace roots to records. Records are kept as raw
+// JSON so a malformed entry for one workspace neither breaks the others nor
+// gets rewritten behind the user's back: `save_session` replaces exactly the
+// key it was asked to, and only with a payload that passed validation. The
+// codec itself lives in `crate::session`.
 
 fn sessions_path(app: &tauri::AppHandle) -> Result<PathBuf, AppError> {
     let dir = app
@@ -857,24 +832,22 @@ fn sessions_path(app: &tauri::AppHandle) -> Result<PathBuf, AppError> {
     Ok(dir.join("sessions.json"))
 }
 
-fn load_all_sessions(app: &tauri::AppHandle) -> HashMap<String, SessionData> {
-    let path = match sessions_path(app) {
-        Ok(p) => p,
-        Err(_) => return HashMap::new(),
-    };
+/// Every stored record, untouched. A missing file is an empty map; a file
+/// that cannot be read or parsed is an error, not an empty map — silently
+/// treating it as empty would let the next save erase every workspace.
+fn load_all_sessions(app: &tauri::AppHandle) -> Result<HashMap<String, Value>, AppError> {
+    let path = sessions_path(app)?;
     if !path.exists() {
-        return HashMap::new();
+        return Ok(HashMap::new());
     }
-    let data = match std::fs::read_to_string(&path) {
-        Ok(d) => d,
-        Err(_) => return HashMap::new(),
-    };
-    serde_json::from_str(&data).unwrap_or_default()
+    let data = std::fs::read_to_string(&path)?;
+    serde_json::from_str(&data)
+        .map_err(|e| AppError::Io(format!("{} is not valid JSON: {e}", path.display())))
 }
 
 fn save_all_sessions(
     app: &tauri::AppHandle,
-    sessions: &HashMap<String, SessionData>,
+    sessions: &HashMap<String, Value>,
 ) -> Result<(), AppError> {
     let path = sessions_path(app)?;
     let data = serde_json::to_string_pretty(sessions).map_err(|e| AppError::Io(e.to_string()))?;
@@ -882,43 +855,77 @@ fn save_all_sessions(
     Ok(())
 }
 
+fn session_key(workspace_root: &str) -> String {
+    workspace_root.trim_end_matches('/').to_string()
+}
+
+/// The modify step of save: replace exactly one workspace's record with a
+/// validated payload, or remove it. Every other record — including one this
+/// build considers malformed — is left byte-for-byte as it was.
+fn apply_session_update(
+    sessions: &mut HashMap<String, Value>,
+    workspace_root: &str,
+    session: Option<SessionV2>,
+) -> Result<(), AppError> {
+    let key = session_key(workspace_root);
+    match session {
+        None => {
+            sessions.remove(&key);
+        }
+        Some(session) => {
+            let problems = session::validate(&session);
+            if !problems.is_empty() {
+                return Err(AppError::InvalidSession(problems.join("; ")));
+            }
+            let value = serde_json::to_value(&session).map_err(|e| AppError::Io(e.to_string()))?;
+            sessions.insert(key, value);
+        }
+    }
+    Ok(())
+}
+
+/// Persist a validated v2 payload, or remove the record with `None`.
 #[tauri::command]
 pub fn save_session(
     workspace_root: String,
-    tabs: Vec<SessionTab>,
-    active_index: Option<usize>,
+    session: Option<SessionV2>,
     app: tauri::AppHandle,
 ) -> Result<(), AppError> {
-    let key = workspace_root.trim_end_matches('/').to_string();
     // Hold the cross-window file lock for the full read-modify-write so two
     // windows saving sessions simultaneously don't drop each other's updates.
     let state = app.state::<AppState>();
     let _guard = state.sessions_file_lock.lock();
-    let mut sessions = load_all_sessions(&app);
-
-    if tabs.is_empty() && active_index.is_none() {
-        sessions.remove(&key);
-    } else {
-        sessions.insert(key, SessionData { tabs, active_index });
-    }
-
+    let mut sessions = load_all_sessions(&app)?;
+    apply_session_update(&mut sessions, &workspace_root, session)?;
     save_all_sessions(&app, &sessions)
 }
 
+/// Classify the workspace's record and prune tabs whose files are gone, so
+/// the prefetch and the frontend both see the repaired layout. A record
+/// pruned down to nothing reads as missing; the frontend then persists an
+/// empty snapshot through its normal path.
 pub(crate) fn load_session_impl(
     app: &tauri::AppHandle,
     workspace_root: &str,
-) -> Result<Option<SessionData>, AppError> {
-    let key = workspace_root.trim_end_matches('/').to_string();
-    let sessions = load_all_sessions(app);
-    Ok(sessions.get(&key).cloned())
+) -> Result<SessionRecord, AppError> {
+    let sessions = load_all_sessions(app)?;
+    let record = session::parse_session(sessions.get(&session_key(workspace_root)));
+    Ok(match record {
+        SessionRecord::Ready { session } => {
+            match session::prune_session(&session, |path| !Path::new(path).exists()) {
+                Some(session) => SessionRecord::Ready { session },
+                None => SessionRecord::Missing,
+            }
+        }
+        other => other,
+    })
 }
 
 #[tauri::command]
 pub fn load_session(
     workspace_root: String,
     app: tauri::AppHandle,
-) -> Result<Option<SessionData>, AppError> {
+) -> Result<SessionRecord, AppError> {
     load_session_impl(&app, &workspace_root)
 }
 
@@ -926,6 +933,64 @@ pub fn load_session(
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    fn valid_session(path: &str) -> SessionV2 {
+        serde_json::from_value(serde_json::json!({
+            "version": 2,
+            "tabs": [{ "id": "t", "location": { "kind": "file", "path": path }, "back": [], "forward": [] }],
+            "layout": {
+                "root": { "kind": "pane", "id": "p", "tab_ids": ["t"], "active_tab_id": "t" },
+                "focused_pane_id": "p"
+            }
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn save_replaces_only_its_own_record_and_keeps_malformed_neighbours() {
+        let mut sessions: HashMap<String, Value> = HashMap::new();
+        sessions.insert(
+            "/other".into(),
+            serde_json::json!({ "version": 9, "junk": true }),
+        );
+        sessions.insert(
+            "/ws".into(),
+            serde_json::json!({ "tabs": [], "active_index": null }),
+        );
+
+        apply_session_update(&mut sessions, "/ws/", Some(valid_session("/ws/a.md"))).unwrap();
+
+        assert_eq!(sessions["/ws"]["version"], 2);
+        assert_eq!(sessions["/ws"]["tabs"][0]["id"], "t");
+        assert_eq!(
+            sessions["/other"],
+            serde_json::json!({ "version": 9, "junk": true })
+        );
+    }
+
+    #[test]
+    fn a_null_snapshot_removes_the_record() {
+        let mut sessions: HashMap<String, Value> = HashMap::new();
+        sessions.insert(
+            "/ws".into(),
+            serde_json::to_value(valid_session("/ws/a.md")).unwrap(),
+        );
+        apply_session_update(&mut sessions, "/ws", None).unwrap();
+        assert!(sessions.is_empty());
+    }
+
+    #[test]
+    fn an_invalid_payload_is_rejected_without_touching_the_record() {
+        let mut sessions: HashMap<String, Value> = HashMap::new();
+        let before = serde_json::json!({ "version": 2, "tabs": [], "layout": { "broken": true } });
+        sessions.insert("/ws".into(), before.clone());
+        let mut invalid = valid_session("/ws/a.md");
+        invalid.layout.focused_pane_id = "nope".into();
+
+        let err = apply_session_update(&mut sessions, "/ws", Some(invalid)).unwrap_err();
+        assert!(matches!(err, AppError::InvalidSession(_)));
+        assert_eq!(sessions["/ws"], before);
+    }
 
     #[test]
     fn canonicalize_rejects_missing_path() {

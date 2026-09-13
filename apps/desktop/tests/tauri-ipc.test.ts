@@ -184,3 +184,38 @@ describe("workspace IPC wrappers", () => {
     expect(mockedInvoke).toHaveBeenCalledWith("take_pending_open");
   });
 });
+
+describe("session IPC wrappers", () => {
+  const session = {
+    version: 2 as const,
+    tabs: [{ id: "tab-1", location: { kind: "file", path: "/ws/a.md" }, back: [], forward: [] }],
+    layout: {
+      root: { kind: "pane" as const, id: "pane-1", tab_ids: ["tab-1"], active_tab_id: "tab-1" },
+      focused_pane_id: "pane-1",
+    },
+  };
+
+  test("saveSession sends the versioned payload under the workspace root", async () => {
+    mockedInvoke.mockResolvedValue(undefined);
+    await ipc.saveSession("/ws", session);
+    expect(mockedInvoke).toHaveBeenCalledWith("save_session", { workspaceRoot: "/ws", session });
+  });
+
+  test("saveSession sends null to remove an empty snapshot", async () => {
+    mockedInvoke.mockResolvedValue(undefined);
+    await ipc.saveSession("/ws", null);
+    expect(mockedInvoke).toHaveBeenCalledWith("save_session", {
+      workspaceRoot: "/ws",
+      session: null,
+    });
+  });
+
+  test("loadSession returns the classified record as Rust sent it", async () => {
+    mockedInvoke.mockResolvedValue({ status: "malformed", problems: ["duplicate tab id tab-1"] });
+    await expect(ipc.loadSession("/ws")).resolves.toEqual({
+      status: "malformed",
+      problems: ["duplicate tab id tab-1"],
+    });
+    expect(mockedInvoke).toHaveBeenCalledWith("load_session", { workspaceRoot: "/ws" });
+  });
+});

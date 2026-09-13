@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test, vi } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vite-plus/test";
 
 // Mock the tauri API before importing stores
 vi.mock("@tauri-apps/api/core", () => ({
@@ -18,7 +18,7 @@ import { useWorkspaceStore } from "../src/stores/workspace-store";
 import { toggleSidebar } from "../src/hooks/use-sidebar";
 import { toggleTheme } from "../src/hooks/use-theme";
 import { createPendingOpenDrainer, handleOpenPayload } from "../src/hooks/use-open-drop";
-import { getEditorSessionSnapshot } from "../src/stores/editor-store";
+import { encodeSession } from "../src/lib/session";
 import {
   buildFileDropCandidate,
   buildTabDropCandidate,
@@ -486,11 +486,19 @@ describe("editor-store", () => {
     await useEditorStore.getState().openFile("/a.md");
     useEditorStore.getState().openNewTab();
 
-    const snapshot = getEditorSessionSnapshot(useEditorStore.getState());
-    expect(snapshot.tabs).toEqual([
-      { location: { kind: "file", path: "/a.md" }, back: [], forward: [] },
+    const { tabs, layout } = useEditorStore.getState();
+    const snapshot = encodeSession(tabs, layout);
+    expect(snapshot!.tabs).toEqual([
+      { id: tabs[0]!.id, location: { kind: "file", path: "/a.md" }, back: [], forward: [] },
     ]);
-    expect(snapshot.activeIndex).toBeNull();
+    // The launcher was the focused pane's active tab; without it the file
+    // tab is the pane's only member and therefore its active one.
+    expect(snapshot!.layout.root).toEqual({
+      kind: "pane",
+      id: layout.root.id,
+      tab_ids: [tabs[0]!.id],
+      active_tab_id: tabs[0]!.id,
+    });
   });
 
   test("openFileInNewTab always creates a fresh tab even when the file is already open", async () => {
@@ -894,7 +902,7 @@ describe("workspace-store restoreFromBundle", () => {
       workspace: { root: "/ws", name: "ws", file_count: 1 },
       entries: [],
       recent_workspaces: ["/ws"],
-      session: null,
+      session: { status: "missing" },
       active_file: null,
       open_file: "/ws/a.md",
     });
@@ -1856,5 +1864,235 @@ describe("editor-store pane routing", () => {
     expect(state.activeTabId).toBeNull();
     expect(state.activeFilePath).toBeNull();
     expect(panes(state.layout)).toHaveLength(1);
+  });
+});
+
+describe("workspace-store session persistence", () => {
+  const v2 = (path: string, tabId = "tab-1", paneId = "pane-1") => ({
+    version: 2,
+    tabs: [{ id: tabId, location: { kind: "file", path }, back: [], forward: [] }],
+    layout: {
+      root: { kind: "pane", id: paneId, tab_ids: [tabId], active_tab_id: tabId },
+      focused_pane_id: paneId,
+    },
+  });
+
+  function savedSessions() {
+    return mockedInvoke.mock.calls
+      .filter(([cmd]) => cmd === "save_session")
+      .map(([, args]) => args as { workspaceRoot: string; session: unknown });
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    useSettingsStore.setState({
+      settings: { "workspace.restore-open-files": true },
+      isLoaded: true,
+    });
+    useWorkspaceStore.setState({
+      root: null,
+      workspaceGeneration: 0,
+      chromeMode: "workspace",
+      directoryCache: new Map(),
+      expandedDirs: new Set(),
+      pinnedFiles: [],
+      sidebarMetadataVersion: 0,
+      recentWorkspaces: [],
+      fileCount: 0,
+    });
+    useEditorStore.getState().resetEditorState();
+    mockedInvoke.mockImplementation(async (cmd: string, args: unknown) => {
+      if (cmd === "read_file") {
+        const path = (args as { path: string }).path;
+        return { path, content: path, modified_at: 1 };
+      }
+      if (cmd === "load_session") return { status: "missing" };
+      return null;
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  test("a v2 bundle restores its layout and seeds the prefetched focused file", async () => {
+    await useWorkspaceStore.getState().restoreFromBundle({
+      workspace: { root: "/ws", name: "ws", file_count: 1 },
+      entries: [],
+      recent_workspaces: [],
+      session: { status: "ready", session: v2("/ws/a.md") },
+      active_file: { path: "/ws/a.md", content: "prefetched", modified_at: 1 },
+      open_file: null,
+    });
+
+    const state = useEditorStore.getState();
+    expect(tabPaths()).toEqual(["/ws/a.md"]);
+    expect(state.openFiles.get("/ws/a.md")?.content).toBe("prefetched");
+    expect(state.openFiles.get("/ws/a.md")?.isLoading).toBe(false);
+    // Restored ids come from this window's allocators, not the record.
+    expect(state.tabs[0]!.id).not.toBe("tab-1");
+    expect(state.layout.root.id).not.toBe("pane-1");
+    expect(validateLayout(state.layout)).toEqual([]);
+  });
+
+  test("a malformed record shows the launcher and is not overwritten until a real layout change", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await useWorkspaceStore.getState().restoreFromBundle({
+      workspace: { root: "/ws", name: "ws", file_count: 1 },
+      entries: [],
+      recent_workspaces: [],
+      session: { status: "malformed", problems: ["duplicate tab id tab-1"] },
+      active_file: null,
+      open_file: null,
+    });
+    expect(useEditorStore.getState().tabs.map((tab) => tab.location.kind)).toEqual(["launcher"]);
+    expect(warn).toHaveBeenCalledWith("[session] duplicate tab id tab-1");
+
+    // The launcher fallback publishes a layout, but an empty snapshot must
+    // not remove the record the user might still want to inspect.
+    await vi.advanceTimersByTimeAsync(600);
+    expect(savedSessions()).toEqual([]);
+
+    // A deliberate layout change replaces it.
+    await useEditorStore.getState().openFile("/ws/b.md");
+    await vi.advanceTimersByTimeAsync(600);
+    expect(savedSessions()).toHaveLength(1);
+    expect(savedSessions()[0]!.workspaceRoot).toBe("/ws");
+    expect((savedSessions()[0]!.session as { version: number }).version).toBe(2);
+    warn.mockRestore();
+  });
+
+  test("layout, focus, and ratio changes persist; typing does not", async () => {
+    useWorkspaceStore.setState({ root: "/ws" });
+    await useEditorStore.getState().openFile("/ws/a.md");
+    await useEditorStore.getState().openFileInNewTab("/ws/b.md");
+    await vi.advanceTimersByTimeAsync(600);
+    const before = savedSessions().length;
+    expect(before).toBeGreaterThan(0);
+
+    useEditorStore.getState().updateContent("/ws/a.md", "typed");
+    await vi.advanceTimersByTimeAsync(600);
+    expect(savedSessions()).toHaveLength(before);
+
+    const [a, b] = useEditorStore.getState().tabs;
+    const { layout } = useEditorStore.getState();
+    useEditorStore.setState({
+      layout: splitPaneWithTab(layout, layout.focusedPaneId, "x", "after", b!.id),
+    });
+    await vi.advanceTimersByTimeAsync(600);
+    expect(savedSessions()).toHaveLength(before + 1);
+
+    const root = useEditorStore.getState().layout.root;
+    useEditorStore.getState().setSplitRatio(root.id, 0.25);
+    await vi.advanceTimersByTimeAsync(600);
+    const withRatio = savedSessions().at(-1)!.session as {
+      layout: { root: { ratio: number }; focused_pane_id: string };
+    };
+    expect(withRatio.layout.root.ratio).toBe(0.25);
+
+    useEditorStore
+      .getState()
+      .setFocusedPane(paneOfTab(useEditorStore.getState().layout, a!.id)!.id);
+    await vi.advanceTimersByTimeAsync(600);
+    const withFocus = savedSessions().at(-1)!.session as { layout: { focused_pane_id: string } };
+    expect(withFocus.layout.focused_pane_id).not.toBe(withRatio.layout.focused_pane_id);
+  });
+
+  test("a burst of changes coalesces into one write", async () => {
+    useWorkspaceStore.setState({ root: "/ws" });
+    await useEditorStore.getState().openFile("/ws/a.md");
+    await useEditorStore.getState().openFileInNewTab("/ws/b.md");
+    await useEditorStore.getState().openFileInNewTab("/ws/c.md");
+    await vi.advanceTimersByTimeAsync(600);
+    expect(savedSessions()).toHaveLength(1);
+  });
+
+  test("restore disabled: nothing is loaded and nothing is written", async () => {
+    useSettingsStore.setState({ settings: { "workspace.restore-open-files": false } });
+    mockedInvoke.mockImplementation(async (cmd: string, args: unknown) => {
+      if (cmd === "open_workspace") return { root: "/ws", name: "ws", file_count: 0 };
+      if (cmd === "read_directory") return [];
+      if (cmd === "get_recent_workspaces") return [];
+      if (cmd === "load_session") return { status: "ready", session: v2("/ws/a.md") };
+      if (cmd === "read_file") {
+        const path = (args as { path: string }).path;
+        return { path, content: path, modified_at: 1 };
+      }
+      return null;
+    });
+
+    await useWorkspaceStore.getState().openWorkspace("/ws");
+    expect(useEditorStore.getState().tabs.map((tab) => tab.location.kind)).toEqual(["launcher"]);
+
+    await useEditorStore.getState().openFile("/ws/b.md");
+    await vi.advanceTimersByTimeAsync(600);
+    expect(savedSessions()).toEqual([]);
+  });
+
+  test("a compact window persists nothing", async () => {
+    useWorkspaceStore.setState({ root: null, chromeMode: "compact-file" });
+    await useEditorStore.getState().openCompactFile("/elsewhere/a.md");
+    await vi.advanceTimersByTimeAsync(600);
+    expect(savedSessions()).toEqual([]);
+  });
+
+  test("switching workspaces never writes an empty snapshot for the one being torn down", async () => {
+    useWorkspaceStore.setState({ root: "/old" });
+    await useEditorStore.getState().openFile("/old/a.md");
+    await vi.advanceTimersByTimeAsync(600);
+    expect(savedSessions().map((s) => s.workspaceRoot)).toEqual(["/old"]);
+
+    await useWorkspaceStore.getState().restoreFromBundle({
+      workspace: { root: "/new", name: "new", file_count: 0 },
+      entries: [],
+      recent_workspaces: [],
+      session: { status: "missing" },
+      active_file: null,
+      open_file: null,
+    });
+    await vi.advanceTimersByTimeAsync(600);
+
+    // The reset published an empty tab list under `/old`; that transient
+    // must not have erased its record.
+    expect(savedSessions().filter((s) => s.workspaceRoot === "/old")).toHaveLength(1);
+  });
+
+  test("closing the workspace flushes the current snapshot before clearing state", async () => {
+    useWorkspaceStore.setState({ root: "/ws" });
+    await useEditorStore.getState().openFile("/ws/a.md");
+    await useWorkspaceStore.getState().closeWorkspace();
+
+    const writes = savedSessions();
+    expect(writes).toHaveLength(1);
+    expect(writes[0]!.workspaceRoot).toBe("/ws");
+    expect((writes[0]!.session as { tabs: unknown[] }).tabs).toHaveLength(1);
+    expect(useEditorStore.getState().tabs).toEqual([]);
+    // The reset itself did not queue a null snapshot for the closed root.
+    await vi.advanceTimersByTimeAsync(600);
+    expect(savedSessions()).toHaveLength(1);
+  });
+
+  test("a session read that resolves after a workspace switch does not land", async () => {
+    const stale = createDeferred<unknown>();
+    mockedInvoke.mockImplementation(async (cmd: string, args: unknown) => {
+      if (cmd === "open_workspace") {
+        const path = (args as { path: string }).path;
+        return { root: path, name: path, file_count: 0 };
+      }
+      if (cmd === "read_directory") return [];
+      if (cmd === "get_recent_workspaces") return [];
+      if (cmd === "load_session") return stale.promise;
+      return null;
+    });
+
+    const opening = useWorkspaceStore.getState().openWorkspace("/first");
+    await vi.advanceTimersByTimeAsync(0);
+    // Simulate this window being re-pointed before the session read lands.
+    useWorkspaceStore.setState({ root: "/second" });
+    stale.resolve({ status: "ready", session: v2("/first/a.md") });
+    await opening;
+
+    expect(tabPaths()).toEqual([]);
   });
 });

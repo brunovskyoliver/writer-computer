@@ -1,0 +1,90 @@
+{
+  "description": "Two legacy tabs on the same document keep separate histories; restore does not deduplicate.",
+  "input": {
+    "tabs": [
+      {
+        "location": {
+          "kind": "file",
+          "path": "/vault/a.md"
+        },
+        "back": [
+          {
+            "kind": "file",
+            "path": "/vault/x.md"
+          }
+        ],
+        "forward": []
+      },
+      {
+        "location": {
+          "kind": "file",
+          "path": "/vault/a.md"
+        },
+        "back": [
+          {
+            "kind": "file",
+            "path": "/vault/y.md"
+          }
+        ],
+        "forward": [
+          {
+            "kind": "file",
+            "path": "/vault/z.md"
+          }
+        ]
+      }
+    ],
+    "active_index": 1
+  },
+  "expected": {
+    "status": "ready",
+    "session": {
+      "version": 2,
+      "tabs": [
+        {
+          "id": "tab-1",
+          "location": {
+            "kind": "file",
+            "path": "/vault/a.md"
+          },
+          "back": [
+            {
+              "kind": "file",
+              "path": "/vault/x.md"
+            }
+          ],
+          "forward": []
+        },
+        {
+          "id": "tab-2",
+          "location": {
+            "kind": "file",
+            "path": "/vault/a.md"
+          },
+          "back": [
+            {
+              "kind": "file",
+              "path": "/vault/y.md"
+            }
+          ],
+          "forward": [
+            {
+              "kind": "file",
+              "path": "/vault/z.md"
+            }
+          ]
+        }
+      ],
+      "layout": {
+        "root": {
+          "kind": "pane",
+          "id": "pane-1",
+          "tab_ids": ["tab-1", "tab-2"],
+          "active_tab_id": "tab-2"
+        },
+        "focused_pane_id": "pane-1"
+      }
+    },
+    "focused_file": "/vault/a.md"
+  }
+}

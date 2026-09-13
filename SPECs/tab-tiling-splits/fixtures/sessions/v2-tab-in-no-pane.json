@@ -1,0 +1,38 @@
+{
+  "description": "A tab in the list that no pane owns.",
+  "input": {
+    "version": 2,
+    "tabs": [
+      {
+        "id": "tab-1",
+        "location": {
+          "kind": "file",
+          "path": "/vault/a.md"
+        },
+        "back": [],
+        "forward": []
+      },
+      {
+        "id": "tab-2",
+        "location": {
+          "kind": "file",
+          "path": "/vault/b.md"
+        },
+        "back": [],
+        "forward": []
+      }
+    ],
+    "layout": {
+      "root": {
+        "kind": "pane",
+        "id": "pane-1",
+        "tab_ids": ["tab-1"],
+        "active_tab_id": "tab-1"
+      },
+      "focused_pane_id": "pane-1"
+    }
+  },
+  "expected": {
+    "status": "malformed"
+  }
+}
