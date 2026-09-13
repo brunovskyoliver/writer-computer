@@ -17,7 +17,7 @@ All sources use pointer events. Keep the shipped sidebar activation threshold. T
 
 ## Target regions and orange preview
 
-Use a single edge-definition table for axis, placement, hit-test, and preview. Edge bands are at most 25% of the pane body along each axis, capped at 80 CSS px. At corners choose the nearest normalized edge, breaking ties left, right, top, bottom. Remaining area is centre. Tab strip insertion takes precedence over body regions. Invalid edge targets are absent, not silently converted to centre actions.
+Use a single edge-definition table for axis, placement, hit-test, and preview. Edge bands are at most 35% of the pane body along each axis, capped at 200 CSS px (raised from 25%/80 px after hand testing: the thin bands needed aiming). At corners choose the nearest normalized edge, breaking ties left, right, top, bottom. Remaining area is centre. Tab strip insertion takes precedence over body regions. Invalid edge targets are absent, not silently converted to centre actions.
 
 For a split, simulate the final layout including source collapse and draw the new pane's final allocation. For centre drops fill the final destination body; for insertion draw the final gap. Use the existing accent color at 18% opacity with `pointer-events: none`, clipped to editor bounds. Remove immediately on cancellation or completion. Preview and commit consume the same candidate; if its revision or geometry changes, recompute and repaint before accepting release, otherwise cancel that release.
 

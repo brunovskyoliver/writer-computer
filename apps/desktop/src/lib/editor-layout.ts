@@ -518,10 +518,12 @@ export function candidateBounds(layout: Layout, rect: Rect, paneId: string): Rec
 
 export type EdgeRegion = Exclude<DropRegion, "center">;
 
-/** An edge band is a quarter of the body along its axis, but never more than
- *  this many pixels, so a centre target always remains reachable. */
-export const EDGE_BAND_FRACTION = 0.25;
-export const EDGE_BAND_MAX = 80;
+/** An edge band is just over a third of the body along its axis, but never
+ *  more than this many pixels, so a centre target always remains reachable.
+ *  Wide on purpose: a split is the common intent, and hunting for a thin
+ *  strip at the very edge made the gesture feel like it needed aim. */
+export const EDGE_BAND_FRACTION = 0.35;
+export const EDGE_BAND_MAX = 200;
 
 /**
  * The one table that says what each edge means: which axis the split runs
