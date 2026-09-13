@@ -147,7 +147,9 @@
   width: 100%;
   max-width: var(--writer-editor-outer-width, calc(734px + 4rem + 4rem));
   margin: 0 auto;
-  padding: 0 var(--writer-editor-side-padding, 4rem) 40vh;
+  /* Trailing room is relative to the scroll container (a size container),
+     so it scales with the pane rather than the window. */
+  padding: 0 var(--writer-editor-side-padding, 4rem) 40cqh;
   font-family: var(
     --writer-editor-font-family,
     -apple-system-body,

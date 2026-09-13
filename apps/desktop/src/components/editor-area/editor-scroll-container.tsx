@@ -39,7 +39,11 @@ export function EditorScrollContainer({ ref, children }: EditorScrollContainerPr
     <div className="relative h-full">
       <div
         ref={ref}
-        className="h-full overflow-y-auto [scrollbar-gutter:stable_both-edges]"
+        // A size container so the document's trailing scroll room
+        // (`.cm-content` padding, in `cqh`) is a share of *this* scroller,
+        // not of the window: in a stacked split the pane is half the window
+        // and `vh` would let a four-line note scroll almost off the top.
+        className="h-full overflow-y-auto [scrollbar-gutter:stable_both-edges] [container-type:size]"
         style={{
           maskImage: FADE_MASK,
           WebkitMaskImage: FADE_MASK,
