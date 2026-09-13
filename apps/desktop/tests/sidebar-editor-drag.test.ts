@@ -5,7 +5,6 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 import {
-  EDGE_BAND_MAX,
   buildFileDropCandidate,
   createLayout,
   createPane,
@@ -53,17 +52,15 @@ describe("resolveDropRegion", () => {
     expect(resolveDropRegion(rect, { x: 500, y: 300 })).toBe("center");
   });
 
-  it("caps the edge band at EDGE_BAND_MAX so the centre stays reachable", () => {
-    // 35% of 1000 is 350, but the band stops at EDGE_BAND_MAX.
-    expect(resolveDropRegion(rect, { x: EDGE_BAND_MAX + 1, y: 300 })).toBe("center");
-    expect(resolveDropRegion(rect, { x: EDGE_BAND_MAX - 1, y: 300 })).toBe("left");
-  });
-
-  it("uses the fraction of a small body when that is less than the cap", () => {
-    // 35% of 200 is 70, under the cap.
+  it("scales the edge bands with the body, leaving the middle 40% as centre", () => {
+    // 30% of 1000 is 300 on the x axis, 30% of 600 is 180 on the y axis.
+    expect(resolveDropRegion(rect, { x: 299, y: 300 })).toBe("left");
+    expect(resolveDropRegion(rect, { x: 301, y: 300 })).toBe("center");
+    expect(resolveDropRegion(rect, { x: 500, y: 179 })).toBe("top");
+    expect(resolveDropRegion(rect, { x: 500, y: 181 })).toBe("center");
     const small: Rect = { x: 0, y: 0, width: 200, height: 200 };
-    expect(resolveDropRegion(small, { x: 69, y: 100 })).toBe("left");
-    expect(resolveDropRegion(small, { x: 71, y: 100 })).toBe("center");
+    expect(resolveDropRegion(small, { x: 59, y: 100 })).toBe("left");
+    expect(resolveDropRegion(small, { x: 61, y: 100 })).toBe("center");
   });
 
   it("breaks corner ties in the order left, right, top, bottom", () => {

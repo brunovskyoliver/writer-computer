@@ -518,12 +518,14 @@ export function candidateBounds(layout: Layout, rect: Rect, paneId: string): Rec
 
 export type EdgeRegion = Exclude<DropRegion, "center">;
 
-/** An edge band is just over a third of the body along its axis, but never
- *  more than this many pixels, so a centre target always remains reachable.
- *  Wide on purpose: a split is the common intent, and hunting for a thin
- *  strip at the very edge made the gesture feel like it needed aim. */
-export const EDGE_BAND_FRACTION = 0.35;
-export const EDGE_BAND_MAX = 200;
+/**
+ * Each edge band is this share of the body along its axis, so the centre is
+ * the middle 40% both ways. Proportional, with no pixel cap: a cap made the
+ * centre of a wide pane hundreds of pixels across, and a split then needed a
+ * long drag from wherever the tab was picked up. The centre is always
+ * reachable because the bands never meet.
+ */
+export const EDGE_BAND_FRACTION = 0.3;
 
 /**
  * The one table that says what each edge means: which axis the split runs
@@ -553,8 +555,8 @@ export function containsPoint(rect: Rect, point: Point): boolean {
  */
 export function resolveDropRegion(rect: Rect, point: Point): DropRegion | null {
   if (!containsPoint(rect, point)) return null;
-  const bandX = Math.min(rect.width * EDGE_BAND_FRACTION, EDGE_BAND_MAX);
-  const bandY = Math.min(rect.height * EDGE_BAND_FRACTION, EDGE_BAND_MAX);
+  const bandX = rect.width * EDGE_BAND_FRACTION;
+  const bandY = rect.height * EDGE_BAND_FRACTION;
   const normalized = (distance: number, band: number) =>
     band > 0 ? distance / band : Number.POSITIVE_INFINITY;
   const edges: Array<[EdgeRegion, number]> = [
