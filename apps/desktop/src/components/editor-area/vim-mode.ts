@@ -1,7 +1,10 @@
 import { Compartment, type Extension } from "@codemirror/state";
 import { EditorView, ViewPlugin, type PluginValue } from "@codemirror/view";
 import type { CodeMirror } from "@replit/codemirror-vim";
+import * as editorApi from "@/hooks/editor-api";
+import { saveNow } from "@/lib/save";
 import { useSettingsStore } from "@/stores/settings-store";
+import { registerVimExCommands } from "./vim-ex-commands";
 import {
   createTab,
   deleteTab,
@@ -27,7 +30,27 @@ type VimModule = typeof import("@replit/codemirror-vim");
 
 let vimModule: Promise<VimModule> | null = null;
 function loadVim(): Promise<VimModule> {
-  vimModule ??= import("@replit/codemirror-vim");
+  vimModule ??= import("@replit/codemirror-vim").then((mod) => {
+    registerVimExCommands(mod.Vim, {
+      resolve: (view) => {
+        const registration = editorApi.getEditorRegistrationForView(view);
+        return registration ? { tabId: registration.tabId, path: registration.path } : null;
+      },
+      getOpenFile: (path) => editorApi.getOpenFile(path) ?? undefined,
+      saveNow,
+      closeTab: editorApi.closeTab,
+      reloadFromDisk: editorApi.reloadFromDisk,
+      notify: (view, message) => {
+        const cm = mod.getCM(view);
+        if (!cm) throw new Error("[vim-mode] notify on a view without the vim plugin");
+        const node = document.createElement("div");
+        node.className = "cm-vim-message";
+        node.textContent = message;
+        cm.openNotification(node, { bottom: true, duration: 5000 });
+      },
+    });
+    return mod;
+  });
   return vimModule;
 }
 

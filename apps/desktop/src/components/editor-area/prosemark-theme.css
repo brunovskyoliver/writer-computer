@@ -47,6 +47,26 @@
   outline-color: var(--accent);
 }
 
+/* Vim `:` / `/` prompts and messages are library-built nodes moved into the
+   footer's host (see vim-mode.ts). They arrive with inline `color: red` and
+   `font-family: monospace`, so `!important` is what it takes to give them the
+   footer's own type. */
+[data-vim-dialog-host] .cm-vim-message {
+  color: inherit !important;
+}
+[data-vim-dialog-host] span {
+  font-family: inherit !important;
+}
+[data-vim-dialog-host] input {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  outline: none;
+  padding: 0;
+  min-width: 0;
+}
+
 /* Selection — dimmed accent. CodeMirror's drawSelection extension paints
    `.cm-selectionBackground` rectangles; the native `::selection` is the
    fallback for text the drawn layer doesn't cover. Override both, and bump

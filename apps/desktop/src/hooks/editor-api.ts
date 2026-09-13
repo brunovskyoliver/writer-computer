@@ -23,6 +23,10 @@ export function closeActiveTab() {
   useEditorStore.getState().closeActiveTab();
 }
 
+export function closeTab(tabId: string) {
+  useEditorStore.getState().closeTab(tabId);
+}
+
 export function markSaved(path: string, diskContent: string) {
   useEditorStore.getState().markSaved(path, diskContent);
 }
@@ -71,6 +75,7 @@ export function rewritePathPrefix(oldPrefix: string, newPrefix: string) {
  * here because call sites in components already speak `editorApi`.
  */
 export {
+  getEditorRegistrationForView,
   getEditorView,
   getTabViewState,
   registerEditorView,
