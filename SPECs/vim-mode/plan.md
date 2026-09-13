@@ -1,114 +1,130 @@
-# Implementation Plan: [FEATURE]
+# Implementation Plan: Vim Mode
 
-**Branch**: `[###-feature-name]` | **Date**: [DATE] | **Spec**: [link]
+**Branch**: `vim-mode` (intended; planning done on `excalidraw-embed`) | **Date**: 2026-09-13 | **Spec**: [spec.md](./spec.md)
 
-**Input**: Feature specification from `/specs/[###-feature-name]/spec.md`
-
-**Note**: This template is filled in by the `/speckit-plan` command; its definition describes the execution workflow.
+**Input**: Feature specification from `SPECs/vim-mode/spec.md`
 
 ## Summary
 
-[Extract from feature spec: primary requirement + technical approach from research]
+Add an opt-in Vim editing mode to every markdown editor. The emulation itself comes from
+`@replit/codemirror-vim` (the maintained CodeMirror 6 port of the CM5 Vim keymap, with
+`@replit/codemirror-vim-core` as its engine). Writer contributes:
+
+1. one new boolean setting (`editor.vim-mode`) in the JSON contract and a command-palette
+   toggle;
+2. a `vimModeExtension` in the editor extension list — a `Compartment` that holds `vim()`
+   or nothing, flipped live by a settings-store subscription, with the library loaded
+   lazily on first enable so the off path costs nothing;
+3. Ex-command overrides (`:w`, `:q`, `:q!`, `:wq`, `:x`) wired to the app's own save
+   engine and tab-close path;
+4. a small Zustand store mirroring per-tab mode/pending-key/recording state, which the
+   existing `DocumentFooter` renders in its own typography, plus a footer-owned "dialog
+   host" element the library's `:` / `/` prompts and notifications are moved into;
+5. clipboard bridging so the unnamed register and the system clipboard agree.
+
+No Rust changes. No new floating UI.
 
 ## Technical Context
 
-<!--
-  ACTION REQUIRED: Replace the content in this section with the technical details
-  for the project. The structure here is presented in advisory capacity to guide
-  the iteration process.
--->
+**Language/Version**: TypeScript ~5.8, React 19, CodeMirror 6 (`@codemirror/*` 6.x)
 
-**Language/Version**: [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION]
+**Primary Dependencies**: `@replit/codemirror-vim` 6.4.0 (new; MIT; peer-deps
+`@codemirror/{commands,language,search,state,view}` 6.x — all already installed),
+Zustand (existing), `@tauri-apps/plugin-clipboard-manager` (existing)
 
-**Primary Dependencies**: [e.g., FastAPI, UIKit, LLVM or NEEDS CLARIFICATION]
+**Storage**: settings persist through the existing `settings.schema.json` → Rust config →
+`settings-store` path. Registers/marks/macros are library-global, in-memory, session-only.
 
-**Storage**: [if applicable, e.g., PostgreSQL, CoreData, files or N/A]
+**Testing**: `vp test` (Vitest, `environment: "node"`; existing tests build `EditorState`
+and dispatch transactions without a DOM). Library behaviour is covered by the library's
+own suite and is not re-tested here (constitution VI).
 
-**Testing**: [e.g., pytest, XCTest, cargo test or NEEDS CLARIFICATION]
+**Target Platform**: macOS desktop (Tauri v2 WKWebView)
 
-**Target Platform**: [e.g., Linux server, iOS 15+, WASM or NEEDS CLARIFICATION]
+**Project Type**: desktop-app (React frontend + Rust backend; frontend-only change)
 
-**Project Type**: [e.g., library/cli/web-service/mobile-app/compiler/desktop-app or NEEDS CLARIFICATION]
+**Performance Goals**: no measurable typing/scroll cost with Vim on (SC-003); zero work on
+the typing path and no bundle growth on the startup path with Vim off (SC-004, FR-032).
 
-**Performance Goals**: [domain-specific, e.g., 1000 req/s, 10k lines/sec, 60 fps or NEEDS CLARIFICATION]
+**Constraints**: the dialog node must be attached to the DOM synchronously when the
+library signals `dialog` (it calls `input.focus()` immediately); `vim()` must precede all
+other keymaps in the extension list; the `Vim` API object is a module singleton so
+`defineEx` registration must be idempotent.
 
-**Constraints**: [domain-specific, e.g., <200ms p95, <100MB memory, offline-capable or NEEDS CLARIFICATION]
-
-**Scale/Scope**: [domain-specific, e.g., 10k users, 1M LOC, 50 screens or NEEDS CLARIFICATION]
+**Scale/Scope**: ~6 new/changed frontend files, one JSON entry, one doc section, one
+changelog entry. 10k-line notes are the reference workload.
 
 ## Constitution Check
 
 _GATE: Must pass before Phase 0 research. Re-check after Phase 1 design._
 
-[Gates determined based on constitution file]
+| Principle                            | Status | Notes                                                                                                                                                                                                             |
+| ------------------------------------ | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| I. Local-first plain text            | PASS   | No network, no new store. Files stay Markdown.                                                                                                                                                                    |
+| II. Smallest correct change          | PASS   | One compartment, one store, one host element. No abstraction over the library; ex commands registered directly. The lazy import is justified by SC-004, not speculation.                                          |
+| III. One place per concern           | PASS   | Setting declared once in `settings.schema.json`. Ex commands live in one registry call site (`vim-ex-commands.ts`). Mode labels come from one map. Extension list still assembled only in `editor-extensions.ts`. |
+| IV. Explicit failure and owned state | PASS   | `:w` surfaces save errors through the existing `setSaveError` path; unknown ex commands surface the library's message. The vim store is written only by the extension (single writer); the footer only reads.     |
+| V. Specs and docs move with the code | PASS   | Spec exists. `docs/keyboard-shortcuts.md` gains a Vim section; `CHANGELOG.md` entry; `docs/editor.md` file map updated; TODOS link.                                                                               |
+| VI. Don't reinvent the wheel         | PASS   | Emulation is entirely the library's. Writer writes no motion/operator code. UI tests kept to the store + ex-command logic.                                                                                        |
+| Quality gates                        | PASS   | Non-trivial logic (ex command dispatch, mode-label mapping, clipboard bridge decision) gets unit tests via injected dependencies; `vp check`/`vp test` run at each task.                                          |
+
+No violations; Complexity Tracking left empty.
+
+**Post-design re-check (Phase 1)**: unchanged. The design adds one accepted deviation from
+"pure library": the `.cm-vim-panel` CodeMirror panel the library creates for prompts is
+hidden via theme CSS and its content moved to the footer host. This is a two-line CSS rule
+plus one `appendChild`, not a reimplementation — recorded in research.md R3.
 
 ## Project Structure
 
 ### Documentation (this feature)
 
 ```text
-specs/[###-feature]/
-├── plan.md              # This file (/speckit-plan command output)
-├── research.md          # Phase 0 output (/speckit-plan command)
-├── data-model.md        # Phase 1 output (/speckit-plan command)
-├── quickstart.md        # Phase 1 output (/speckit-plan command)
-├── contracts/           # Phase 1 output (/speckit-plan command)
-└── tasks.md             # Phase 2 output (/speckit-tasks command - NOT created by /speckit-plan)
+SPECs/vim-mode/
+├── spec.md              # Feature spec (done)
+├── plan.md              # This file
+├── research.md          # Phase 0: library choice, integration decisions
+├── data-model.md        # Phase 1: setting, per-tab mode state, session state
+├── quickstart.md        # Phase 1: manual + automated validation
+├── contracts/
+│   └── vim-mode.md      # Phase 1: setting key, store shape, ex commands, DOM/CSS hooks
+├── checklists/
+│   └── requirements.md  # Spec quality checklist (done)
+└── tasks.md             # Phase 2 (/speckit-tasks — not created here)
 ```
 
 ### Source Code (repository root)
 
-<!--
-  ACTION REQUIRED: Replace the placeholder tree below with the concrete layout
-  for this feature. Delete unused options and expand the chosen structure with
-  real paths (e.g., apps/admin, packages/something). The delivered plan must
-  not include Option labels.
--->
-
 ```text
-# [REMOVE IF UNUSED] Option 1: Single project (DEFAULT)
-src/
-├── models/
-├── services/
-├── cli/
-└── lib/
-
-tests/
-├── contract/
-├── integration/
-└── unit/
-
-# [REMOVE IF UNUSED] Option 2: Web application (when "frontend" + "backend" detected)
-backend/
+apps/desktop/
+├── package.json                                   # + @replit/codemirror-vim (catalog)
+├── shared/settings.schema.json                    # + editor.vim-mode (boolean, default false)
 ├── src/
-│   ├── models/
-│   ├── services/
-│   └── api/
-└── tests/
-
-frontend/
-├── src/
-│   ├── components/
-│   ├── pages/
-│   └── services/
-└── tests/
-
-# [REMOVE IF UNUSED] Option 3: Mobile + API (when "iOS/Android" detected)
-api/
-└── [same as backend above]
-
-ios/ or android/
-└── [platform-specific structure: feature modules, UI flows, platform tests]
+│   ├── components/editor-area/
+│   │   ├── editor-extensions.ts                   # + vimModeExtension() first in the list
+│   │   ├── vim-mode.ts                            # NEW: compartment, lazy load, settings
+│   │   │                                          #   subscription, event → store mirror,
+│   │   │                                          #   dialog relocation, clipboard bridge
+│   │   ├── vim-ex-commands.ts                     # NEW: :w :q :q! :wq :x → save/close
+│   │   ├── vim-store.ts                           # NEW: per-tab mode state + dialog host
+│   │   ├── document-footer.tsx                    # + mode indicator + dialog host slot
+│   │   └── prosemark-theme.css                    # + fat-cursor / footer prompt styling
+│   ├── components/command-palette/index.tsx       # + "Toggle Vim mode"
+│   └── lib/editor-views.ts                        # + registration lookup by EditorView
+├── tests/
+│   ├── vim-store.test.ts                          # NEW
+│   └── vim-ex-commands.test.ts                    # NEW
+docs/keyboard-shortcuts.md                         # + Vim mode section
+docs/editor.md                                     # + file-map entries
+CHANGELOG.md, TODOS.md
 ```
 
-**Structure Decision**: [Document the selected structure and reference the real
-directories captured above]
+**Structure Decision**: everything lives beside the other editor extensions in
+`components/editor-area/`, following the existing pattern (`editor-search-*`,
+`editor-clipboard.ts`). The only `lib/` touch is a lookup helper on the existing view
+registry so ex-command callbacks can resolve `EditorView → tabId/path` without importing
+the store from `lib/`.
 
 ## Complexity Tracking
 
-> **Fill ONLY if Constitution Check has violations that must be justified**
-
-| Violation                  | Why Needed         | Simpler Alternative Rejected Because |
-| -------------------------- | ------------------ | ------------------------------------ |
-| [e.g., 4th project]        | [current need]     | [why 3 projects insufficient]        |
-| [e.g., Repository pattern] | [specific problem] | [why direct DB access insufficient]  |
+> No constitution violations to justify.

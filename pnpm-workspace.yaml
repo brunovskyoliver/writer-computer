@@ -21,6 +21,7 @@ catalog:
   "@lezer/highlight": ^1.2.3
   "@lezer/markdown": ^1.6.1
   "@lezer/yaml": ^1.0.4
+  "@replit/codemirror-vim": ^6.4.0
   "@tailwindcss/vite": ^4.2.2
   "@tanstack/devtools-vite": ^0.7.0
   "@tauri-apps/plugin-clipboard-manager": ^2.3.2

@@ -35,9 +35,19 @@ function requireStore(): SaveStoreAccess {
 interface SaveController {
   lastSaveTime: number;
   timer: ReturnType<typeof setTimeout> | null;
-  inFlight: boolean;
+  /** Resolves when the current write has settled (follow-up queued or
+   *  controller cleaned up). Null while idle. */
+  inFlight: Promise<void> | null;
   pending: boolean;
 }
+
+/**
+ * `saved`: the write landed and the file is clean. `clean`: nothing to write.
+ * `superseded`: the write landed but newer edits arrived meanwhile (a follow-up
+ * is queued). `failed`: the write threw and the error is on the file. `busy`:
+ * another write owns the controller.
+ */
+type SaveOutcome = "saved" | "clean" | "superseded" | "failed" | "busy";
 
 const saveControllers = new Map<string, SaveController>();
 
@@ -47,7 +57,7 @@ function getSaveController(path: string): SaveController {
     controller = {
       lastSaveTime: 0,
       timer: null,
-      inFlight: false,
+      inFlight: null,
       pending: false,
     };
     saveControllers.set(path, controller);
@@ -73,7 +83,28 @@ export function scheduleSave(path: string) {
 }
 
 export function isSaveInFlight(path: string) {
-  return saveControllers.get(path)?.inFlight === true;
+  return saveControllers.get(path)?.inFlight != null;
+}
+
+/**
+ * Write `path` now, ignoring the throttle. Waits for a write already in
+ * flight, then writes again so the latest content lands. Resolves `true` when
+ * the file is clean afterwards and `false` when the write threw — the error is
+ * already recorded on the file through `setSaveError`, so callers must not
+ * surface it a second time.
+ */
+export async function saveNow(path: string): Promise<boolean> {
+  const controller = getSaveController(path);
+  for (;;) {
+    if (controller.inFlight) {
+      await controller.inFlight;
+      continue;
+    }
+    clearSaveTimer(controller);
+    const outcome = await performSave(path, controller);
+    if (outcome === "superseded" || outcome === "busy") continue;
+    return outcome !== "failed";
+  }
 }
 
 export function cancelSave(path: string) {
@@ -126,38 +157,47 @@ function serializeForSave(file: OpenFile) {
   return applyFileProcessing(serializeDocument(file.frontmatter, file.content));
 }
 
-async function performSave(path: string, controller = getSaveController(path)) {
-  if (controller.inFlight) return;
+async function performSave(
+  path: string,
+  controller = getSaveController(path),
+): Promise<SaveOutcome> {
+  if (controller.inFlight) return "busy";
 
   const store = requireStore();
   const file = store.getOpenFile(path);
   if (!file || !file.isDirty) {
     controller.pending = false;
     cleanupSaveController(path, controller);
-    return;
+    return "clean";
   }
 
-  controller.inFlight = true;
+  let settle!: () => void;
+  controller.inFlight = new Promise<void>((resolve) => {
+    settle = resolve;
+  });
   controller.pending = false;
   controller.lastSaveTime = Date.now();
 
   const full = serializeForSave(file);
   let shouldReschedule = false;
+  let outcome: SaveOutcome = "saved";
 
   try {
     await tauri.writeFile(path, full);
 
     const latestFile = store.getOpenFile(path);
-    if (!latestFile) return;
+    if (!latestFile) return "clean";
 
     shouldReschedule = serializeForSave(latestFile) !== full;
+    if (shouldReschedule) outcome = "superseded";
     store.markSaved(path, full, shouldReschedule);
   } catch (err) {
     console.error(`[save] Failed to save ${path}:`, err);
     const message = err instanceof Error ? err.message : String(err);
     store.setSaveError(path, message);
+    outcome = "failed";
   } finally {
-    controller.inFlight = false;
+    controller.inFlight = null;
 
     const needsFollowUpSave = controller.pending || shouldReschedule;
     if (needsFollowUpSave) {
@@ -165,5 +205,7 @@ async function performSave(path: string, controller = getSaveController(path)) {
     } else {
       cleanupSaveController(path, controller);
     }
+    settle();
   }
+  return outcome;
 }

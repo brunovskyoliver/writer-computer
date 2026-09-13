@@ -26,6 +26,7 @@
     "@lezer/highlight": "catalog:",
     "@lezer/markdown": "catalog:",
     "@lezer/yaml": "catalog:",
+    "@replit/codemirror-vim": "catalog:",
     "@tailwindcss/vite": "catalog:",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-clipboard-manager": "catalog:",

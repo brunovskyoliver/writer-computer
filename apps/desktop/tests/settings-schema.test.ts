@@ -3,6 +3,7 @@ import {
   getPrimaryDefs,
   SETTINGS_SCHEMA,
   suffixOf,
+  type SettingsMap,
   type ThemeMode,
 } from "../src/lib/settings-schema";
 
@@ -65,6 +66,26 @@ describe("typography settings", () => {
     expect(defaults["fonts.ui"]).toBe(`"SF Pro", ${proseFallback}`);
     expect(defaults["fonts.editor"]).toBe(`"SF Pro", ${proseFallback}`);
     expect(defaults["fonts.mono"]).toBe(`"SF Mono", ${monoFallback}`);
+  });
+});
+
+describe("vim mode setting", () => {
+  test("is an off-by-default Editor boolean", () => {
+    const definition = SETTINGS_SCHEMA.find((def) => def.key === "editor.vim-mode");
+    expect(definition).toMatchObject({
+      label: "Vim Mode",
+      category: "Editor",
+      type: "boolean",
+      default: false,
+    });
+    expect(definition?.type).toBe("boolean");
+    expect(definition?.default).toBe(false);
+  });
+
+  test("types the generated SettingsMap entry as boolean", () => {
+    const settings: Partial<SettingsMap> = { "editor.vim-mode": true };
+    const value: boolean | undefined = settings["editor.vim-mode"];
+    expect(value).toBe(true);
   });
 });
 

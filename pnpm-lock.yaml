@@ -54,6 +54,9 @@ catalogs:
     '@lezer/yaml':
       specifier: ^1.0.4
       version: 1.0.4
+    '@replit/codemirror-vim':
+      specifier: ^6.4.0
+      version: 6.4.0
     '@tailwindcss/vite':
       specifier: ^4.2.2
       version: 4.2.2
@@ -185,6 +188,9 @@ importers:
       '@lezer/yaml':
         specifier: 'catalog:'
         version: 1.0.4
+      '@replit/codemirror-vim':
+        specifier: 'catalog:'
+        version: 6.4.0(@codemirror/commands@6.10.3)(@codemirror/language@6.12.2)(@codemirror/search@6.7.0)(@codemirror/state@6.6.0)(@codemirror/view@6.40.0)
       '@tailwindcss/vite':
         specifier: 'catalog:'
         version: 4.2.2(@voidzero-dev/vite-plus-core@0.1.13(@types/node@25.5.0)(esbuild@0.27.4)(jiti@2.7.0)(tsx@4.21.0)(typescript@5.8.3)(yaml@2.8.3))
@@ -1929,6 +1935,18 @@ packages:
 
   '@radix-ui/rect@1.1.0':
     resolution: {integrity: sha512-A9+lCBZoaMJlVKcRBz2YByCG+Cp2t6nAnMnNba+XiWxnj6r4JUFqfsgwocMBZU9LPtdxC6wB56ySYpc7LQIoJg==}
+
+  '@replit/codemirror-vim-core@0.1.0':
+    resolution: {integrity: sha512-1i6EBKpcNfDKvTmTh6N6g9lL6udD5t+uFNh4JCqozRnVlvUGOps7h/QzS2ne4zcvPUjvApKpmcP7Grc3fNbZiQ==}
+
+  '@replit/codemirror-vim@6.4.0':
+    resolution: {integrity: sha512-t9UMDNhkmeAkl0uRbiJVotv97bGD6mf4GyJJoEbrjUqa/Pov0s9eL+4AaI0Xto3OGri17i9qwIpT0JbVlVXt8A==}
+    peerDependencies:
+      '@codemirror/commands': 6.x.x
+      '@codemirror/language': 6.x.x
+      '@codemirror/search': 6.x.x
+      '@codemirror/state': 6.x.x
+      '@codemirror/view': 6.x.x
 
   '@rolldown/binding-android-arm64@1.0.2':
     resolution: {integrity: sha512-ZS4D1JPGn/MYQN/SYDWftIE/nVsM8j/AFOYEzAoOE2O3NktQOZru+/vYXGbR/qtdLdIfGCP0lcoJiYVzsEz+iQ==}
@@ -6944,6 +6962,17 @@ snapshots:
       '@types/react': 19.2.14
 
   '@radix-ui/rect@1.1.0': {}
+
+  '@replit/codemirror-vim-core@0.1.0': {}
+
+  '@replit/codemirror-vim@6.4.0(@codemirror/commands@6.10.3)(@codemirror/language@6.12.2)(@codemirror/search@6.7.0)(@codemirror/state@6.6.0)(@codemirror/view@6.40.0)':
+    dependencies:
+      '@codemirror/commands': 6.10.3
+      '@codemirror/language': 6.12.2
+      '@codemirror/search': 6.7.0
+      '@codemirror/state': 6.6.0
+      '@codemirror/view': 6.40.0
+      '@replit/codemirror-vim-core': 0.1.0
 
   '@rolldown/binding-android-arm64@1.0.2':
     optional: true

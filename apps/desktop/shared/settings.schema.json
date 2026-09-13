@@ -42,6 +42,14 @@
       "default": 2
     },
     {
+      "key": "editor.vim-mode",
+      "label": "Vim Mode",
+      "description": "Modal Vim editing: Normal, Insert, Visual, Ex commands",
+      "category": "Editor",
+      "type": "boolean",
+      "default": false
+    },
+    {
       "key": "statusbar.show-words",
       "label": "Words",
       "description": "Show the word count in the status bar",

@@ -63,6 +63,15 @@ export function getEditorView(tabId: string): EditorView | null {
   return registrations.get(tabId)?.view ?? null;
 }
 
+/** Reverse lookup for callbacks that only hold the view (Vim ex commands).
+ *  Linear scan; the tab count is small. */
+export function getEditorRegistrationForView(view: EditorView): EditorRegistration | null {
+  for (const registration of registrations.values()) {
+    if (registration.view === view) return registration;
+  }
+  return null;
+}
+
 /** Every live view showing `path`, ordered by `tabOrder` first and then by
  *  registration order for anything the caller did not rank. */
 export function getEditorViewsForPath(path: string, tabOrder: string[] = []): EditorView[] {

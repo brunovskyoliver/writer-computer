@@ -8,7 +8,12 @@ vi.mock("@tauri-apps/api/core", () => ({
 import type { EditorView } from "@codemirror/view";
 import { useEditorStore } from "../src/stores/editor-store";
 import * as editorApi from "../src/hooks/editor-api";
-import { clearTabViewState, resetEditorViews, rewriteEditorPaths } from "../src/lib/editor-views";
+import {
+  clearTabViewState,
+  getEditorRegistrationForView,
+  resetEditorViews,
+  rewriteEditorPaths,
+} from "../src/lib/editor-views";
 import { createLayout } from "../src/lib/editor-layout";
 
 /** A view stub: `insertAtCursor` and the registry only read `state` and call
@@ -194,6 +199,13 @@ describe("editorApi", () => {
 
     expect(editorApi.getEditorViewsForPath("/a.md")).toEqual([first]);
     expect(editorApi.getEditorViewsForPath("/b.md")).toEqual([second]);
+  });
+
+  test("getEditorRegistrationForView resolves a registered view and null otherwise", () => {
+    const view = fakeView(0, "x");
+    editorApi.registerEditorView("tab-1", "/a.md", view);
+    expect(getEditorRegistrationForView(view)).toMatchObject({ tabId: "tab-1", path: "/a.md" });
+    expect(getEditorRegistrationForView(fakeView(0, "y"))).toBeNull();
   });
 
   test("an unregister from a superseded mount leaves the live view alone", () => {
