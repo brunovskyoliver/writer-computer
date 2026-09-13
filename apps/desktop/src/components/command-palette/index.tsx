@@ -28,6 +28,7 @@ import {
   useOpenTabs,
 } from "@/hooks/use-tabs";
 import { useTheme } from "@/hooks/use-theme";
+import { useBooleanSetting, useSetSetting } from "@/hooks/use-settings";
 import { useFuzzySearch } from "./use-fuzzy-search";
 import { useGlobalRecentFiles } from "@/hooks/use-global-recent-files";
 import { openStandaloneFile } from "@/hooks/use-open-drop";
@@ -87,6 +88,8 @@ export function CommandPalette() {
   const { toggleTheme } = useTheme();
   const openSettingsTab = useOpenSettingsTab();
   const isCompactFileMode = useIsCompactFileMode();
+  const isVimMode = useBooleanSetting("editor.vim-mode", false);
+  const setSetting = useSetSetting();
 
   const isCreateIntent = intent === "create-file";
   const isDrawingIntent = intent === "create-drawing";
@@ -241,6 +244,15 @@ export function CommandPalette() {
       description: "Command",
       run: () => {
         toggleTheme();
+        close();
+      },
+    },
+    {
+      id: "toggle-vim-mode",
+      label: "Toggle Vim Mode",
+      description: "Command",
+      run: () => {
+        void setSetting("editor.vim-mode", !isVimMode);
         close();
       },
     },

@@ -11,10 +11,6 @@ import { setPaneContainer, usePaneRect } from "./pane-bounds";
 import { EditorSearchOverlay } from "./editor-search-overlay";
 import { EditorNoticeBanner } from "./editor-notice-banner";
 
-interface EditorAreaProps {
-  showFooter?: boolean;
-}
-
 /**
  * One tab body, kept at a stable place in the React tree for the whole life of
  * its tab, and positioned over whichever pane currently owns it.
@@ -71,7 +67,7 @@ function TabHost({ tab }: { tab: Tab }) {
   );
 }
 
-function EditorArea({ showFooter = true }: EditorAreaProps) {
+function EditorArea() {
   const activeTab = useActiveTab();
   const tabs = useOpenTabs();
 
@@ -89,9 +85,7 @@ function EditorArea({ showFooter = true }: EditorAreaProps) {
           <TabHost key={tab.id} tab={tab} />
         ))}
       </div>
-      {showFooter && activeTab
-        ? pageKindView(activeTab.location).renderFooter?.(activeTab.location)
-        : null}
+      {activeTab ? pageKindView(activeTab.location).renderFooter?.(activeTab.location) : null}
       <EditorSearchOverlay />
       <EditorNoticeBanner />
     </div>

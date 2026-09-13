@@ -33,6 +33,7 @@ import { mathDecorations } from "./math-decorations";
 import { mermaidDecorations } from "./mermaid-decorations";
 import { tableDecorations } from "./table-decorations";
 import { viewportParsePlugin } from "./viewport-parse";
+import { vimModeExtension } from "./vim-mode";
 import { wikiLinkExtension } from "./wiki-link-extension";
 
 // Focus the editor when its pane is revealed (tab switch). Panes hide via an
@@ -130,6 +131,9 @@ export function createEditorExtensions(
   historyCompartment: Compartment,
 ): Extension[] {
   return [
+    // Vim must precede every other keymap so its Normal-mode bindings win;
+    // the compartment is empty until the setting turns it on.
+    vimModeExtension(getTabId),
     markdown({
       codeLanguages: languages,
       extensions: [GFM, prosemarkMarkdownSyntaxExtensions, htmlBlockParserExtension],

@@ -35,6 +35,18 @@
   border-left-color: var(--text-primary);
 }
 
+/* Vim Normal/Visual block caret, drawn by @replit/codemirror-vim over the
+   character under the cursor. Its theme paints a salmon block (and a salmon
+   outline when unfocused) from a scoped class; out-specify it with the layer. */
+.cm-editor .cm-vimCursorLayer .cm-fat-cursor {
+  background: var(--accent);
+  color: var(--bg-base);
+}
+.cm-editor:not(.cm-focused) .cm-vimCursorLayer .cm-fat-cursor {
+  background: none;
+  outline-color: var(--accent);
+}
+
 /* Selection — dimmed accent. CodeMirror's drawSelection extension paints
    `.cm-selectionBackground` rectangles; the native `::selection` is the
    fallback for text the drawn layer doesn't cover. Override both, and bump

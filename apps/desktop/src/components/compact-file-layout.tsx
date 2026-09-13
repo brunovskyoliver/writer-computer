@@ -437,7 +437,7 @@ export function CompactFileLayout() {
       </div>
 
       <div className="relative h-full min-w-0 bg-bg">
-        <EditorArea showFooter={false} />
+        <EditorArea />
       </div>
     </div>
   );
