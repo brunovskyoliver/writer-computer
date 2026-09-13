@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-09-13
+
+- Drawing fixes: inline drawing embeds keep their colours in dark mode (the exported SVG stays canonical light-mode, as Excalidraw's dark theme is a display filter, and the embed now gets that same filter), the Excalidraw zoom controls no longer float over other tabs when a drawing tab is in the background, and drawing autosave waits a second instead of 150 ms so a full scene export plus embed re-decode no longer fires on every pause mid-stroke.
+
 ## 2026-09-10
 
 - Move writer.computer's analytics from a self-hosted Umami instance to PostHog, so the website and the app report to one place. The site records four things and nothing else: a page view, the Updates link, the GitHub link, and the macOS download (which carries the advertised version). Autocapture, session replay, surveys, heatmaps, and exception capture are all switched off, and visitors stay anonymous. The project key is supplied at build time, so a build made from a clone of this repo initializes nothing and sends nothing. One change to be aware of: PostHog stores a cookie where Umami did not. See [docs/website-analytics.md](./docs/website-analytics.md).

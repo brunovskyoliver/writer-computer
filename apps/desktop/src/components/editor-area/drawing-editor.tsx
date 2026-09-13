@@ -22,9 +22,13 @@ declare global {
 }
 window.EXCALIDRAW_ASSET_PATH = new URL("excalidraw-assets/", window.location.href).href;
 
-// Excalidraw's `onChange` fires continuously while drawing. Matches
-// SOURCE_CHANGE_DEBOUNCE_MS in mermaid-canvas.ts.
-const SAVE_DEBOUNCE_MS = 150;
+// Excalidraw's `onChange` fires continuously while drawing, and a save is not
+// cheap: `exportToSvg` with `exportEmbedScene` re-renders the whole scene,
+// serializes it into the SVG and subsets fonts, and any markdown tab embedding
+// the drawing then re-decodes the new file. At 150 ms every pause to reposition
+// the pointer triggered that. A pending save is flushed on unmount, so a longer
+// window costs nothing but delay.
+const SAVE_DEBOUNCE_MS = 1000;
 
 // Keeps Excalidraw's own look; restyling it to match Writer is out of scope
 // and would break on every upgrade. The two disabled actions are load/save

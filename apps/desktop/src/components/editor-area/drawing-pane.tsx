@@ -28,11 +28,15 @@ export function DrawingPane({
   isActive: boolean;
 }) {
   return (
-    // The drawing kind is `keepAlive`, so an inactive tab stays mounted —
-    // hidden the same way `EditorPane` hides itself rather than unmounting.
+    // The drawing kind is `keepAlive`, so an inactive tab stays mounted — but
+    // `visibility: hidden` is not enough to hide it: Excalidraw's own CSS puts
+    // `visibility: visible` on the footer islands (`.zen-mode-visibility`), so
+    // the zoom controls kept showing over other tabs. `display: none` can't be
+    // overridden by a descendant, and also stops the canvas painting while the
+    // tab is in the background.
     <div
       className={
-        isActive ? "absolute inset-0 z-10" : "pointer-events-none invisible absolute inset-0 z-10"
+        isActive ? "absolute inset-0 z-10" : "pointer-events-none hidden absolute inset-0 z-10"
       }
       style={{ top: CHROME_OFFSET }}
     >
