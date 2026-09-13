@@ -6,6 +6,7 @@ import {
   type MouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { createPortal } from "react-dom";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import {
   useCloseTab,
@@ -28,6 +29,41 @@ import { getRelativePath } from "@/lib/paths";
 import { pageKind } from "./page-kinds";
 import { buildTabMenuItemsSpec, showNativeContextMenu } from "./editor-context-menu";
 import { registerPaneStrip } from "./pane-bounds";
+import { FileIcon } from "@/components/sidebar/file-tree-icons";
+
+/** What the tab ghost needs, captured at press time: the tab, its box, and
+ *  where inside it the pointer was, so the ghost lifts off in place. */
+interface TabDragGhost {
+  tab: Tab;
+  width: number;
+  grabOffsetX: number;
+  grabOffsetY: number;
+}
+
+/**
+ * The element that follows the cursor while a tab is dragged — the same
+ * treatment the sidebar gives a dragged file: an icon and the tab's title in
+ * a pill the size of the tab it left, portaled to the body so no strip's
+ * overflow clips it. Positioned imperatively from the drag's frame callback,
+ * not through state, so it never re-renders while it moves.
+ */
+function TabDragGhostView({ ghost }: { ghost: TabDragGhost }) {
+  const kind = pageKind(ghost.tab.location);
+  const filePath = kind.primaryPath(ghost.tab.location);
+  const documentTitle = useResolvedDocumentTitle(filePath);
+  const title = documentTitle || kind.title(ghost.tab.location);
+  return (
+    <div
+      className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap rounded-[8px] bg-[var(--surface-selected)] px-3.5 text-[13px] leading-[1.15] text-[var(--fg-base)] shadow-lg h-[var(--chrome-control-height)]"
+      style={{ width: ghost.width }}
+    >
+      <span className="flex w-5 shrink-0 items-center justify-center opacity-60">
+        <FileIcon />
+      </span>
+      <span className="min-w-0 truncate">{title}</span>
+    </div>
+  );
+}
 import { useWorkspaceRoot } from "@/hooks/use-workspace";
 import { revealPathInSidebar } from "@/lib/reveal-in-sidebar";
 
@@ -143,6 +179,8 @@ export function EditorTabs({
   const workspaceRoot = useWorkspaceRoot();
   const [, startTransition] = useTransition();
   const [draggingTabId, setDraggingTabId] = useState<string | null>(null);
+  const [dragGhost, setDragGhost] = useState<TabDragGhost | null>(null);
+  const ghostRef = useRef<HTMLDivElement | null>(null);
   const stripRef = useRef<HTMLDivElement | null>(null);
   const unregisterStrip = useRef<() => void>(() => {});
   useScrollActiveTabIntoView(paneId, stripRef);
@@ -162,6 +200,13 @@ export function EditorTabs({
     // The close control is a button of its own; a press there must not
     // start a drag. Only the primary button drags.
     if (event.button !== 0 || (event.target as Element).closest("button")) return;
+    const box = event.currentTarget.getBoundingClientRect();
+    const ghost: TabDragGhost = {
+      tab,
+      width: box.width,
+      grabOffsetX: event.clientX - box.left,
+      grabOffsetY: event.clientY - box.top,
+    };
     editorDrag().arm(
       {
         pointerId: event.pointerId,
@@ -171,8 +216,20 @@ export function EditorTabs({
       },
       { kind: "tab", tabId: tab.id },
       {
-        onActivate: () => setDraggingTabId(tab.id),
-        onEnd: () => setDraggingTabId(null),
+        onActivate: () => {
+          setDraggingTabId(tab.id);
+          setDragGhost(ghost);
+        },
+        onFrame: (point) => {
+          const element = ghostRef.current;
+          if (!element) return;
+          element.style.transform = `translate(${point.x - ghost.grabOffsetX}px, ${point.y - ghost.grabOffsetY}px)`;
+          element.style.opacity = "1";
+        },
+        onEnd: () => {
+          setDraggingTabId(null);
+          setDragGhost(null);
+        },
       },
     );
   }, []);
@@ -290,6 +347,20 @@ export function EditorTabs({
           +
         </button>
       </div>
+      {dragGhost &&
+        createPortal(
+          <div
+            ref={ghostRef}
+            aria-hidden="true"
+            className="pointer-events-none fixed left-0 top-0 z-50"
+            // Invisible until the first frame places it, so it never flashes
+            // at the corner of the window.
+            style={{ opacity: 0 }}
+          >
+            <TabDragGhostView ghost={dragGhost} />
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
