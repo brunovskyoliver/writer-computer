@@ -17,11 +17,14 @@ function ProgressiveBlur({ position }: { position: "top" | "bottom" }) {
   const topFade = `linear-gradient(to bottom, black 40%, transparent 80%)`;
   const bottomFade = `linear-gradient(to top, black 20%, transparent 60%)`;
   // Static styles below mirror FADE_DISTANCE (120) and SCROLLBAR_GUTTER (18px).
+  // The overlay stops a blur radius short of the pane's edge: WebKit samples
+  // the backdrop a few pixels past the element, so an overlay flush with the
+  // edge smears whatever sits beyond it — a pane divider — into a glow.
   return (
     <div
       className="pointer-events-none absolute z-10 h-[120px] left-[18px] right-[18px] [backdrop-filter:blur(3px)] [-webkit-backdrop-filter:blur(3px)]"
       style={{
-        [isTop ? "top" : "bottom"]: 0,
+        [isTop ? "top" : "bottom"]: 3,
         maskImage: isTop ? topFade : bottomFade,
         WebkitMaskImage: isTop ? topFade : bottomFade,
       }}

@@ -265,10 +265,12 @@ body.tree-dragging [data-tree-path] {
   transition: opacity 120ms ease;
 }
 
+/* Keyboard focus only: a divider keeps DOM focus after a pointer drag, and
+   lighting it up for good would leave a permanent line. */
 [data-pane-separator]:hover::after,
 [data-pane-separator][data-separator="hover"]::after,
 [data-pane-separator][data-separator="active"]::after,
-[data-pane-separator][data-separator="focus"]::after {
+[data-pane-separator]:focus-visible::after {
   opacity: 1;
 }
 
