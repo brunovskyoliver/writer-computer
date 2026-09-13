@@ -1,4 +1,6 @@
 import { describe, expect, test, vi } from "vite-plus/test";
+import { extractWikiToken, __test } from "../src/components/editor-area/wiki-link-extension";
+import { isDrawingPath } from "../src/lib/drawings";
 import {
   canonicalWikiTarget,
   normalizeWikiTarget,
@@ -499,5 +501,84 @@ describe("resolveWikiImage", () => {
     const result = await resolveWikiImage("pic.png", null, "/anywhere/note.md", fileExists, noFind);
     expect(result).toBe("/anywhere/pic.png");
     expect(noFind).not.toHaveBeenCalled();
+  });
+});
+
+describe("extractWikiToken (double-click-to-open-a-drawing gate)", () => {
+  // Single-line doc stand-in: the extension only calls `lineAt`.
+  const docOf = (text: string) => ({ lineAt: () => ({ from: 0, text }) });
+  const at = (text: string, pos: number) => extractWikiToken(docOf(text), pos);
+
+  test("reports the embed prefix", () => {
+    expect(at("![[a.excalidraw.svg]]", 5)).toEqual({ embed: true, inner: "a.excalidraw.svg" });
+    expect(at("[[a.excalidraw.svg]]", 5)).toEqual({ embed: false, inner: "a.excalidraw.svg" });
+  });
+
+  test("picks the token covering the position when a line holds two embeds", () => {
+    const line = "![[a.excalidraw.svg]] ![[b.excalidraw.svg]]";
+    expect(at(line, 5)?.inner).toBe("a.excalidraw.svg");
+    expect(at(line, 27)?.inner).toBe("b.excalidraw.svg");
+    expect(at(line, 21)?.inner).toBe("a.excalidraw.svg");
+  });
+
+  test("returns null outside any token", () => {
+    expect(at("no links here", 4)).toBeNull();
+  });
+
+  test("only the compound extension counts as a drawing", () => {
+    const drawing = at("![[a.excalidraw.svg]]", 5)!;
+    expect(isDrawingPath(parseWikiImageEmbedTarget(drawing.inner)!)).toBe(true);
+    const plainSvg = at("![[a.svg]]", 5)!;
+    expect(isDrawingPath(parseWikiImageEmbedTarget(plainSvg.inner)!)).toBe(false);
+  });
+});
+
+describe("drawing embed press stash", () => {
+  const { recordDrawingPress, takeDrawingPress } = __test;
+
+  // Enough of an EditorView for the synchronous line-text lookup.
+  const viewOf = (text: string) =>
+    ({
+      posAtCoords: () => 0,
+      state: { doc: { lineAt: () => ({ from: 0, text }) } },
+    }) as never;
+
+  const press = (text: string, x = 100, y = 100) =>
+    recordDrawingPress({ clientX: x, clientY: y } as MouseEvent, viewOf(text));
+  const take = (x = 100, y = 100) => takeDrawingPress({ clientX: x, clientY: y } as MouseEvent);
+
+  test("a press on a drawing embed is spendable once", () => {
+    press("![[a.excalidraw.svg]]");
+    expect(take()).toBe("a.excalidraw.svg");
+    expect(take()).toBeNull();
+  });
+
+  test("a press elsewhere leaves nothing to spend", () => {
+    take();
+    press("![[a.png]]");
+    expect(take()).toBeNull();
+    press("[[a.excalidraw.svg]]");
+    expect(take()).toBeNull();
+  });
+
+  test("the second press of a double-click does not clobber the stash", () => {
+    press("![[a.excalidraw.svg]]");
+    // The embed has unfolded by now, so the same coordinates hit another line.
+    press("some other line");
+    expect(take()).toBe("a.excalidraw.svg");
+  });
+
+  test("a double-click elsewhere does not spend a stale press", () => {
+    press("![[a.excalidraw.svg]]", 100, 100);
+    expect(take(400, 300)).toBeNull();
+  });
+
+  test("a press goes stale", () => {
+    const now = vi.spyOn(Date, "now");
+    now.mockReturnValue(0);
+    press("![[a.excalidraw.svg]]");
+    now.mockReturnValue(5000);
+    expect(take()).toBeNull();
+    now.mockRestore();
   });
 });

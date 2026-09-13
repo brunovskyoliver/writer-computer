@@ -18,6 +18,7 @@ import {
 import { convertFileSrc } from "@tauri-apps/api/core";
 import * as tauri from "@/lib/tauri";
 import { getFileStem } from "@/lib/paths";
+import { isDrawingPath } from "@/lib/drawings";
 import { getWorkspaceRoot } from "@/hooks/workspace-api";
 import * as editorApi from "@/hooks/editor-api";
 import {
@@ -57,14 +58,18 @@ function isInsideCode(state: EditorState, pos: number): boolean {
 }
 
 /**
- * Extract the wiki-link target text from the line containing `pos`.
+ * Extract the wiki-link token from the line containing `pos`.
  * Searches the whole line for a `[[...]]` token whose range covers `pos`,
  * so it works both when clicking raw text and replace-widget positions.
+ *
+ * `embed` reports the `!` prefix: the double-click-to-open-a-drawing handler
+ * must not fire on a plain `[[sketch.excalidraw.svg]]` link, which the click
+ * handler already navigates.
  */
-function extractWikiTarget(
+export function extractWikiToken(
   doc: { lineAt(pos: number): { from: number; text: string } },
   pos: number,
-): string | null {
+): { embed: boolean; inner: string } | null {
   const line = doc.lineAt(pos);
   const text = line.text;
 
@@ -74,7 +79,7 @@ function extractWikiTarget(
     const matchStart = line.from + match.index;
     const matchEnd = matchStart + match[0].length;
     if (pos >= matchStart && pos <= matchEnd) {
-      return match[2];
+      return { embed: match[1] === "!", inner: match[2]! };
     }
   }
 
@@ -323,7 +328,55 @@ function wikiTargetAt(event: MouseEvent, view: EditorView): string | null {
   }
   const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
   if (pos === null) return null;
-  return extractWikiTarget(view.state.doc, pos);
+  return extractWikiToken(view.state.doc, pos)?.inner ?? null;
+}
+
+/** The drawing embed under the last mouse press, if any. Written on
+ *  `mousedown` and read on `dblclick`, because the embed has already
+ *  unfolded (and the layout shifted) by the time the second event fires.
+ *
+ *  Matched back to the double-click by time and position: a stale press on
+ *  one embed must not open it when the user then double-clicks elsewhere.
+ *  Both presses of a double-click land within a few pixels of each other, so
+ *  a mismatch means this isn't the press that started it. */
+let lastDrawingPress: { target: string; x: number; y: number; at: number } | null = null;
+
+const DRAWING_PRESS_MAX_AGE_MS = 800;
+const DRAWING_PRESS_MAX_DRIFT_PX = 8;
+
+/** The drawing embed target at the event's position, or null. Synchronous
+ *  and cheap: a line-text scan and two string checks, no resolution. */
+function drawingEmbedAt(event: MouseEvent, view: EditorView): string | null {
+  const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+  if (pos === null) return null;
+  const token = extractWikiToken(view.state.doc, pos);
+  if (!token?.embed) return null;
+  const target = parseWikiImageEmbedTarget(token.inner);
+  return target && isDrawingPath(target) ? target : null;
+}
+
+function recordDrawingPress(event: MouseEvent, view: EditorView): void {
+  const target = drawingEmbedAt(event, view);
+  // A press that finds nothing leaves the stash alone: the second press of a
+  // double-click lands on the now-unfolded source, several lines off, and
+  // finds nothing itself.
+  if (target) {
+    lastDrawingPress = { target, x: event.clientX, y: event.clientY, at: Date.now() };
+  }
+}
+
+function takeDrawingPress(event: MouseEvent): string | null {
+  const press = lastDrawingPress;
+  lastDrawingPress = null;
+  if (!press) return null;
+  if (Date.now() - press.at > DRAWING_PRESS_MAX_AGE_MS) return null;
+  if (
+    Math.abs(event.clientX - press.x) > DRAWING_PRESS_MAX_DRIFT_PX ||
+    Math.abs(event.clientY - press.y) > DRAWING_PRESS_MAX_DRIFT_PX
+  ) {
+    return null;
+  }
+  return press.target;
 }
 
 function wikiLinkClickHandler(getFilePath: () => string, isDisposed: () => boolean): Extension {
@@ -333,9 +386,37 @@ function wikiLinkClickHandler(getFilePath: () => string, isDisposed: () => boole
       // into the link (which would unfold the rendered widget), but defer
       // navigation to the click (mouseup) so it follows on release.
       mousedown(event, view) {
+        recordDrawingPress(event, view);
         if (wikiTargetAt(event, view) === null) return false;
         event.preventDefault();
         event.stopPropagation();
+        return true;
+      },
+      // Double-click an inline drawing embed → open it in its own tab.
+      //
+      // The target has to be read on the *first* press. That press puts the
+      // caret inside the token, the drag gate releases on pointerup, and the
+      // embed unfolds to one line of source — a 300px image collapses to a
+      // 20px line and everything below shifts up. By the time `dblclick`
+      // fires, neither the widget node nor the coordinates point at the
+      // embed any more. So `mousedown` stashes the target while the layout
+      // is still intact and `dblclick` spends it.
+      dblclick(event) {
+        const drawing = takeDrawingPress(event);
+        if (!drawing) return false;
+
+        event.preventDefault();
+        event.stopPropagation();
+
+        void resolveEmbed(drawing, getWorkspaceRoot(), getFilePath() || null)
+          .then((absolutePath) => {
+            if (!absolutePath || isDisposed()) return;
+            void editorApi.navigateToFile(absolutePath);
+          })
+          .catch((error) => {
+            if (!isDisposed()) console.error("[editor] Failed to open drawing embed:", error);
+          });
+
         return true;
       },
       click(event, view) {
@@ -418,6 +499,10 @@ const wikiLinkTheme = EditorView.baseTheme({
 // ---------------------------------------------------------------------------
 // Public extension
 // ---------------------------------------------------------------------------
+
+/** Exported for the unit tests: the press stash is module state, and the
+ *  time/position match is the only non-obvious part of the double-click. */
+export const __test = { recordDrawingPress, takeDrawingPress };
 
 export function wikiLinkExtension(
   getFilePath: () => string,
