@@ -91,6 +91,25 @@ export function getPaneRects(): ReadonlyMap<string, PaneRect> {
   return rects;
 }
 
+/**
+ * The editor area in viewport coordinates plus every pane body relative to
+ * it — everything a drag needs to turn a pointer position into a pane and a
+ * region. Null until the area has mounted. Pane bodies are the drop surfaces;
+ * there are no DOM listeners on them because the dragged source holds pointer
+ * capture, so hit-testing is geometric.
+ */
+export function getEditorAreaGeometry(): {
+  area: { x: number; y: number; width: number; height: number };
+  panes: ReadonlyMap<string, PaneRect>;
+} | null {
+  if (!container) return null;
+  const box = container.getBoundingClientRect();
+  return {
+    area: { x: box.left, y: box.top, width: box.width, height: box.height },
+    panes: rects,
+  };
+}
+
 function subscribe(listener: () => void) {
   listeners.add(listener);
   return () => listeners.delete(listener);
