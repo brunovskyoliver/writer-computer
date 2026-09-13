@@ -9,6 +9,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 }));
 
 import { useEditorStore } from "../src/stores/editor-store";
+import { createLayout } from "../src/lib/editor-layout";
 
 function makeTab(id: string, currentPath: string) {
   return {
@@ -24,6 +25,7 @@ describe("keyboard shortcuts - tab navigation", () => {
     useEditorStore.setState({
       openFiles: new Map(),
       tabs: [makeTab("tab-a", "/a.md"), makeTab("tab-b", "/b.md"), makeTab("tab-c", "/c.md")],
+      layout: createLayout(["tab-a", "tab-b", "tab-c"], "tab-a"),
       activeTabId: "tab-a",
       activeFilePath: null,
     });

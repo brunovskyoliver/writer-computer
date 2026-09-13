@@ -19,6 +19,13 @@ import { toggleSidebar } from "../src/hooks/use-sidebar";
 import { toggleTheme } from "../src/hooks/use-theme";
 import { createPendingOpenDrainer, handleOpenPayload } from "../src/hooks/use-open-drop";
 import { getEditorSessionSnapshot } from "../src/stores/editor-store";
+import {
+  createLayout,
+  layoutTabIds,
+  panes,
+  splitPaneWithTab,
+  validateLayout,
+} from "../src/lib/editor-layout";
 // Side-effect: registers the subscription that re-points the standalone
 // single-file watcher whenever the active file changes in a compact window.
 import "../src/lib/standalone-watch";
@@ -204,6 +211,7 @@ describe("editor-store", () => {
     useEditorStore.setState({
       openFiles: new Map(),
       tabs: [],
+      layout: createLayout(),
       activeTabId: null,
       activeFilePath: null,
     });
@@ -1201,5 +1209,173 @@ describe("workspace-store closeWorkspace", () => {
     await useWorkspaceStore.getState().closeWorkspace();
     expect(useWorkspaceStore.getState().root).toBeNull();
     expect(mockedInvoke).not.toHaveBeenCalledWith("close_workspace", expect.anything());
+  });
+});
+
+describe("editor-store layout", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useEditorStore.setState({
+      openFiles: new Map(),
+      tabs: [],
+      layout: createLayout(),
+      activeTabId: null,
+      activeFilePath: null,
+    });
+    useWorkspaceStore.setState({ chromeMode: "workspace" });
+  });
+
+  /** Move `tabId` into a new pane beside the current one, and focus it. */
+  function splitOff(tabId: string) {
+    const { layout } = useEditorStore.getState();
+    useEditorStore.setState({
+      layout: splitPaneWithTab(layout, layout.focusedPaneId, "x", "after", tabId),
+    });
+  }
+
+  test("starts as one focused pane that owns every open tab", async () => {
+    mockedInvoke.mockResolvedValue({ path: "/a.md", content: "a", modified_at: 1 });
+    await useEditorStore.getState().openFile("/a.md");
+    useEditorStore.getState().openNewTab();
+
+    const { layout, tabs } = useEditorStore.getState();
+    expect(panes(layout)).toHaveLength(1);
+    expect(layoutTabIds(layout)).toEqual(tabs.map((tab) => tab.id));
+    expect(validateLayout(layout)).toEqual([]);
+  });
+
+  test("derives activeTabId and activeFilePath from the focused pane", async () => {
+    mockedInvoke.mockResolvedValue({ path: "/a.md", content: "a", modified_at: 1 });
+    await useEditorStore.getState().openFile("/a.md");
+    await useEditorStore.getState().openFileInNewTab("/b.md");
+
+    const [first, second] = useEditorStore.getState().tabs;
+    splitOff(second!.id);
+
+    const [left, right] = panes(useEditorStore.getState().layout);
+    useEditorStore.getState().setFocusedPane(left!.id);
+    expect(useEditorStore.getState().activeTabId).toBe(first!.id);
+
+    useEditorStore.getState().setFocusedPane(right!.id);
+    expect(useEditorStore.getState().activeTabId).toBe(second!.id);
+    expect(useEditorStore.getState().activeFilePath).toBe("/b.md");
+  });
+
+  test("opens into the focused pane instead of appending to one global strip", async () => {
+    mockedInvoke.mockResolvedValue({ path: "/a.md", content: "a", modified_at: 1 });
+    await useEditorStore.getState().openFile("/a.md");
+    await useEditorStore.getState().openFileInNewTab("/b.md");
+    const [, second] = useEditorStore.getState().tabs;
+    splitOff(second!.id);
+
+    const right = panes(useEditorStore.getState().layout)[1]!;
+    useEditorStore.getState().setFocusedPane(right.id);
+    await useEditorStore.getState().openFileInNewTab("/c.md");
+
+    const [leftPane, rightPane] = panes(useEditorStore.getState().layout);
+    expect(leftPane!.tabIds).toHaveLength(1);
+    expect(rightPane!.tabIds).toHaveLength(2);
+    expect(useEditorStore.getState().activeFilePath).toBe("/c.md");
+  });
+
+  test("closing a pane's last tab collapses the pane and moves focus in one update", async () => {
+    mockedInvoke.mockResolvedValue({ path: "/a.md", content: "a", modified_at: 1 });
+    await useEditorStore.getState().openFile("/a.md");
+    await useEditorStore.getState().openFileInNewTab("/b.md");
+    const [first, second] = useEditorStore.getState().tabs;
+    splitOff(second!.id);
+
+    let notifications = 0;
+    const unsubscribe = useEditorStore.subscribe(() => {
+      notifications += 1;
+    });
+    useEditorStore.getState().closeTab(second!.id);
+    unsubscribe();
+
+    const state = useEditorStore.getState();
+    expect(notifications).toBe(1);
+    expect(panes(state.layout)).toHaveLength(1);
+    expect(state.activeTabId).toBe(first!.id);
+    expect(validateLayout(state.layout)).toEqual([]);
+  });
+
+  test("deleting a file removes its tabs from their panes and collapses what empties", async () => {
+    mockedInvoke.mockResolvedValue({ path: "/a.md", content: "a", modified_at: 1 });
+    await useEditorStore.getState().openFile("/a.md");
+    await useEditorStore.getState().openFileInNewTab("/b.md");
+    const [, second] = useEditorStore.getState().tabs;
+    splitOff(second!.id);
+
+    useEditorStore.getState().removePathReferences("/b.md");
+
+    const state = useEditorStore.getState();
+    expect(panes(state.layout)).toHaveLength(1);
+    expect(layoutTabIds(state.layout)).toEqual(state.tabs.map((tab) => tab.id));
+    expect(validateLayout(state.layout)).toEqual([]);
+  });
+
+  test("renaming a path keeps every tab in the pane that owned it", async () => {
+    mockedInvoke.mockResolvedValue({ path: "/dir/a.md", content: "a", modified_at: 1 });
+    await useEditorStore.getState().openFile("/dir/a.md");
+    await useEditorStore.getState().openFileInNewTab("/dir/b.md");
+    const [, second] = useEditorStore.getState().tabs;
+    splitOff(second!.id);
+    const before = panes(useEditorStore.getState().layout).map((pane) => pane.tabIds);
+
+    useEditorStore.getState().rewritePathPrefix("/dir", "/moved");
+
+    const state = useEditorStore.getState();
+    expect(panes(state.layout).map((pane) => pane.tabIds)).toEqual(before);
+    expect(tabPaths()).toEqual(["/moved/a.md", "/moved/b.md"]);
+  });
+
+  test("a compact-window open resets the layout to a single pane", async () => {
+    mockedInvoke.mockResolvedValue({ path: "/a.md", content: "a", modified_at: 1 });
+    await useEditorStore.getState().openFile("/a.md");
+    await useEditorStore.getState().openFileInNewTab("/b.md");
+    const [, second] = useEditorStore.getState().tabs;
+    splitOff(second!.id);
+
+    mockedInvoke.mockResolvedValue({ path: "/c.md", content: "c", modified_at: 1 });
+    await useEditorStore.getState().openCompactFile("/c.md");
+
+    const state = useEditorStore.getState();
+    expect(panes(state.layout)).toHaveLength(1);
+    expect(state.tabs).toHaveLength(1);
+    expect(layoutTabIds(state.layout)).toEqual([state.tabs[0]!.id]);
+    expect(validateLayout(state.layout)).toEqual([]);
+  });
+
+  test("an open that resolves after the layout was replaced does not resurrect its pane", async () => {
+    const deferred = createDeferred<{ path: string; content: string; modified_at: number }>();
+    mockedInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "read_file") return deferred.promise;
+      return null;
+    });
+
+    const pending = useEditorStore.getState().openFile("/slow.md");
+    mockedInvoke.mockResolvedValue({ path: "/fast.md", content: "fast", modified_at: 1 });
+    await useEditorStore.getState().openCompactFile("/fast.md");
+
+    deferred.resolve({ path: "/slow.md", content: "slow", modified_at: 1 });
+    await pending.catch(() => {});
+
+    const state = useEditorStore.getState();
+    expect(tabPaths()).toEqual(["/fast.md"]);
+    expect(layoutTabIds(state.layout)).toEqual(state.tabs.map((tab) => tab.id));
+    expect(validateLayout(state.layout)).toEqual([]);
+  });
+
+  test("editing a document does not bump the layout revision", async () => {
+    mockedInvoke.mockResolvedValue({ path: "/a.md", content: "a", modified_at: 1 });
+    await useEditorStore.getState().openFile("/a.md");
+
+    const before = useEditorStore.getState().layout;
+    useEditorStore.getState().updateContent("/a.md", "a changed");
+    useEditorStore.getState().updateFrontmatter("/a.md", "title: x");
+
+    const after = useEditorStore.getState().layout;
+    expect(after.revision).toBe(before.revision);
+    expect(after).toBe(before);
   });
 });

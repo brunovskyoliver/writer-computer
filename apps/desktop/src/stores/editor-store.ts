@@ -17,6 +17,19 @@ import { getDocumentStats, type DocumentStats } from "@/lib/document-stats";
 import { isDrawingPath } from "@/lib/drawings";
 import { cancelSave, scheduleSave, registerSaveStore } from "@/lib/save";
 import {
+  activateTab as activateTabInLayout,
+  createLayout,
+  findPane,
+  focusedTabId,
+  insertTab,
+  layoutTabIds,
+  normalizeLayout,
+  removeTab as removeTabFromLayout,
+  removeTabs as removeTabsFromLayout,
+  setFocusedPane as focusPaneInLayout,
+  type Layout,
+} from "@/lib/editor-layout";
+import {
   locationBehavior,
   serializeLocation,
   deserializeLocation,
@@ -58,8 +71,14 @@ export interface SessionTab {
 
 interface EditorState {
   openFiles: Map<string, OpenFile>;
+  /** Every open tab, ordered by pane traversal. `layout` decides which pane
+   *  owns each one; this is just the canonical collection keyed by id. */
   tabs: Tab[];
+  /** The one writable layout tree for this window. */
+  layout: Layout;
+  /** Derived from the focused pane — read freely, never assign. */
   activeTabId: string | null;
+  /** Derived from the focused pane's active tab — read freely, never assign. */
   activeFilePath: string | null;
 
   openFile: (path: string) => Promise<void>;
@@ -74,6 +93,7 @@ interface EditorState {
   closeActiveTab: () => void;
   setActiveFile: (path: string) => void;
   setActiveTab: (tabId: string) => void;
+  setFocusedPane: (paneId: string) => void;
   navigateToFile: (path: string) => Promise<void>;
   navigateBack: () => Promise<void>;
   navigateForward: () => Promise<void>;
@@ -217,6 +237,53 @@ function locationPrimaryPath(location: Location): string | null {
 function deriveActiveFilePath(tabs: Tab[], activeTabId: string | null): string | null {
   const activeTab = tabs.find((tab) => tab.id === activeTabId);
   return activeTab ? locationPrimaryPath(activeTab.location) : null;
+}
+
+/**
+ * The single exit from every tab or layout mutation.
+ *
+ * Orders `tabs` by pane traversal, drops any tab the layout no longer owns,
+ * and re-derives the compatibility `activeTabId`/`activeFilePath` from the
+ * focused pane. Routing every mutation through here is what makes a move that
+ * empties a pane, collapses a split, and changes focus one atomic update — and
+ * it means no call site gets to decide for itself what "active" means.
+ */
+function publish(
+  tabs: Tab[],
+  layout: Layout,
+): Pick<EditorState, "tabs" | "layout" | "activeTabId" | "activeFilePath"> {
+  const normalized = normalizeLayout(layout);
+  const byId = new Map(tabs.map((tab) => [tab.id, tab]));
+  const ordered = layoutTabIds(normalized).flatMap((tabId) => {
+    const tab = byId.get(tabId);
+    return tab ? [tab] : [];
+  });
+  const activeTabId = focusedTabId(normalized);
+  return {
+    tabs: ordered,
+    layout: normalized,
+    activeTabId,
+    activeFilePath: deriveActiveFilePath(ordered, activeTabId),
+  };
+}
+
+/** Remove from the layout every tab that `nextTabs` no longer contains,
+ *  collapsing whatever panes that empties. */
+function dropMissingTabs(state: Pick<EditorState, "tabs" | "layout">, nextTabs: Tab[]) {
+  const surviving = new Set(nextTabs.map((tab) => tab.id));
+  const removed = state.tabs.filter((tab) => !surviving.has(tab.id)).map((tab) => tab.id);
+  return removeTabsFromLayout(state.layout, removed);
+}
+
+/** Add a tab to `paneId` (default: the focused pane) and make it active. A
+ *  pane captured before an await may be gone by now, so fall back to focus. */
+function appendTab(
+  state: Pick<EditorState, "tabs" | "layout">,
+  tab: Tab,
+  paneId: string = state.layout.focusedPaneId,
+) {
+  const target = findPane(state.layout, paneId) ? paneId : state.layout.focusedPaneId;
+  return publish([...state.tabs, tab], insertTab(state.layout, target, tab.id));
 }
 
 function getTabIndex(tabs: Tab[], tabId: string) {
@@ -371,12 +438,16 @@ async function ensureFileLoaded(path: string, set: EditorStateSetter, get: () =>
 export const useEditorStore = create<EditorState>((set, get) => ({
   openFiles: new Map(),
   tabs: [],
+  layout: createLayout(),
   activeTabId: null,
   activeFilePath: null,
 
   openFile: async (path: string) => {
     const state = get();
     const activeTab = getActiveTab(state);
+    // Captured before any await: a slow read must land in the pane the user
+    // opened from, not in whichever pane happens to be focused when it lands.
+    const targetPaneId = state.layout.focusedPaneId;
 
     if (activeTab?.location.kind === "launcher") {
       await state.replaceTabWithFile(activeTab.id, path);
@@ -405,11 +476,16 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (loadFailedBeforeGrace) return;
 
     const nextTab = createFileTab(path);
-    set((state) => ({
-      tabs: [...state.tabs, nextTab],
-      activeTabId: nextTab.id,
-      activeFilePath: locationPrimaryPath(nextTab.location),
-    }));
+    set((state) => {
+      // The pane this open was aimed at can disappear while the read is in
+      // flight — a workspace switch, a compact-window reset, a closed pane.
+      // Drop the result rather than landing it in whichever pane happens to
+      // be focused by now.
+      if (findPane(state.layout, targetPaneId)) return appendTab(state, nextTab, targetPaneId);
+      const files = maybePruneFiles(state, state.tabs, [path]);
+      return files ? { openFiles: files } : state;
+    });
+    if (!get().tabs.some((tab) => tab.id === nextTab.id)) return;
 
     try {
       await loadPromise;
@@ -457,10 +533,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       const baseState = filesWithTarget ? { ...state, openFiles: filesWithTarget } : state;
       const tabs = [nextTab];
       const prunedFiles = maybePruneFiles(baseState, tabs, candidatePaths);
+      // A compact window is single-view by definition: drop the whole tree.
       return {
-        tabs,
-        activeTabId: nextTab.id,
-        activeFilePath: locationPrimaryPath(nextTab.location),
+        ...publish(tabs, createLayout([nextTab.id], nextTab.id, state.layout.revision + 1)),
         ...(prunedFiles
           ? { openFiles: prunedFiles }
           : filesWithTarget
@@ -490,12 +565,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       const openFiles = state.openFiles.has(path)
         ? undefined
         : new Map(state.openFiles).set(path, createLoadingFile(path));
-      return {
-        tabs: [...state.tabs, nextTab],
-        activeTabId: nextTab.id,
-        activeFilePath: locationPrimaryPath(nextTab.location),
-        ...(openFiles ? { openFiles } : {}),
-      };
+      return { ...appendTab(state, nextTab), ...(openFiles ? { openFiles } : {}) };
     });
 
     try {
@@ -508,22 +578,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   openNewTab: () => {
     const nextTab = createLauncherTab();
-    set((state) => ({
-      tabs: [...state.tabs, nextTab],
-      activeTabId: nextTab.id,
-      activeFilePath: null,
-    }));
+    set((state) => appendTab(state, nextTab));
   },
 
   ensureLauncherTab: () => {
     set((state) => {
       if (state.tabs.length > 0) return state;
-      const launcherTab = createLauncherTab();
-      return {
-        tabs: [launcherTab],
-        activeTabId: launcherTab.id,
-        activeFilePath: null,
-      };
+      return appendTab(state, createLauncherTab());
     });
   },
 
@@ -542,20 +603,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       if (activeTab?.location.kind === "launcher") {
         const index = getTabIndex(currentState.tabs, activeTab.id);
         if (index !== -1) {
+          // Reusing the launcher's id leaves pane membership untouched.
           const tabs = [...currentState.tabs];
           tabs[index] = { ...nextTab, id: activeTab.id };
-          return {
-            tabs,
-            activeTabId: activeTab.id,
-            activeFilePath: deriveActiveFilePath(tabs, activeTab.id),
-          };
+          return publish(tabs, activateTabInLayout(currentState.layout, activeTab.id));
         }
       }
-      return {
-        tabs: [...currentState.tabs, nextTab],
-        activeTabId: nextTab.id,
-        activeFilePath: deriveActiveFilePath([...currentState.tabs, nextTab], nextTab.id),
-      };
+      return appendTab(currentState, nextTab);
     });
   },
 
@@ -578,14 +632,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       const openFiles = state.openFiles.has(path)
         ? undefined
         : new Map(state.openFiles).set(path, createLoadingFile(path));
-      return {
-        tabs,
-        activeFilePath:
-          state.activeTabId === tabId
-            ? locationPrimaryPath(nextTab.location)
-            : state.activeFilePath,
-        ...(openFiles ? { openFiles } : {}),
-      };
+      // Same tab id, so the layout is unchanged; only the location moved.
+      return { ...publish(tabs, state.layout), ...(openFiles ? { openFiles } : {}) };
     });
 
     try {
@@ -611,11 +659,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         tabs[index] = targetTab;
         const files = maybePruneFiles(state, tabs, [path]);
 
-        return {
-          tabs,
-          activeFilePath: state.activeTabId === tabId ? null : state.activeFilePath,
-          ...(files ? { openFiles: files } : {}),
-        };
+        return { ...publish(tabs, state.layout), ...(files ? { openFiles: files } : {}) };
       });
     }
   },
@@ -642,24 +686,19 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
         const closedTab = state.tabs[index]!;
         let tabs = state.tabs.filter((tab) => tab.id !== tabId);
+        // The layout picks the surviving neighbour inside the closed tab's own
+        // pane and collapses that pane if it just emptied.
+        let layout = removeTabFromLayout(state.layout, tabId);
 
-        let activeTabId = state.activeTabId;
         if (tabs.length === 0) {
           const launcherTab = createLauncherTab();
           tabs = [launcherTab];
-          activeTabId = launcherTab.id;
-        } else if (state.activeTabId === tabId) {
-          activeTabId = tabs[index]?.id ?? tabs[index - 1]?.id ?? null;
+          layout = insertTab(layout, layout.focusedPaneId, launcherTab.id);
         }
 
         const files = maybePruneFiles(state, tabs, tabPaths(closedTab));
 
-        return {
-          tabs,
-          activeTabId,
-          activeFilePath: deriveActiveFilePath(tabs, activeTabId),
-          ...(files ? { openFiles: files } : {}),
-        };
+        return { ...publish(tabs, layout), ...(files ? { openFiles: files } : {}) };
       });
 
       pendingNavigationVersionByTabId.delete(tabId);
@@ -683,13 +722,19 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       (candidate) => candidate.location.kind === "file" && candidate.location.path === path,
     );
     if (!tab) return;
-    set({ activeTabId: tab.id, activeFilePath: path });
+    set((state) => publish(state.tabs, activateTabInLayout(state.layout, tab.id)));
   },
 
   setActiveTab: (tabId: string) => {
     const tab = get().tabs.find((candidate) => candidate.id === tabId);
     if (!tab) return;
-    set({ activeTabId: tabId, activeFilePath: deriveActiveFilePath(get().tabs, tabId) });
+    set((state) => publish(state.tabs, activateTabInLayout(state.layout, tabId)));
+  },
+
+  // Focus follows the pane, and the active file follows focus. Selecting a
+  // pane is therefore the same kind of state change as selecting a tab.
+  setFocusedPane: (paneId: string) => {
+    set((state) => publish(state.tabs, focusPaneInLayout(state.layout, paneId)));
   },
 
   navigateToFile: async (path: string) => {
@@ -716,11 +761,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         return;
       }
       const drawingTab = createFileTab(path);
-      set((currentState) => ({
-        tabs: [...currentState.tabs, drawingTab],
-        activeTabId: drawingTab.id,
-        activeFilePath: locationPrimaryPath(drawingTab.location),
-      }));
+      set((currentState) => appendTab(currentState, drawingTab));
       return;
     }
 
@@ -749,14 +790,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       const openFiles = currentState.openFiles.has(path)
         ? undefined
         : new Map(currentState.openFiles).set(path, createLoadingFile(path));
-      return {
-        tabs,
-        activeFilePath:
-          currentState.activeTabId === activeTab.id
-            ? locationPrimaryPath(nextLocation)
-            : currentState.activeFilePath,
-        ...(openFiles ? { openFiles } : {}),
-      };
+      return { ...publish(tabs, currentState.layout), ...(openFiles ? { openFiles } : {}) };
     });
 
     try {
@@ -770,14 +804,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         const tabs = [...currentState.tabs];
         tabs[index] = previousTab;
         const files = maybePruneFiles(currentState, tabs, [path]);
-        return {
-          tabs,
-          activeFilePath:
-            currentState.activeTabId === activeTab.id
-              ? locationPrimaryPath(previousTab.location)
-              : currentState.activeFilePath,
-          ...(files ? { openFiles: files } : {}),
-        };
+        return { ...publish(tabs, currentState.layout), ...(files ? { openFiles: files } : {}) };
       });
     }
   },
@@ -803,11 +830,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       if (index === -1) return currentState;
       const tabs = [...currentState.tabs];
       tabs[index] = nextTab;
-      return {
-        tabs,
-        activeFilePath:
-          currentState.activeTabId === activeTab.id ? targetPath : currentState.activeFilePath,
-      };
+      return publish(tabs, currentState.layout);
     });
 
     if (!targetPath) return;
@@ -823,14 +846,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         const tabs = [...currentState.tabs];
         tabs[index] = previousTab;
         const files = maybePruneFiles(currentState, tabs, [targetPath]);
-        return {
-          tabs,
-          activeFilePath:
-            currentState.activeTabId === activeTab.id
-              ? locationPrimaryPath(previousTab.location)
-              : currentState.activeFilePath,
-          ...(files ? { openFiles: files } : {}),
-        };
+        return { ...publish(tabs, currentState.layout), ...(files ? { openFiles: files } : {}) };
       });
     }
   },
@@ -856,11 +872,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       if (index === -1) return currentState;
       const tabs = [...currentState.tabs];
       tabs[index] = nextTab;
-      return {
-        tabs,
-        activeFilePath:
-          currentState.activeTabId === activeTab.id ? targetPath : currentState.activeFilePath,
-      };
+      return publish(tabs, currentState.layout);
     });
 
     if (!targetPath) return;
@@ -876,14 +888,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         const tabs = [...currentState.tabs];
         tabs[index] = previousTab;
         const files = maybePruneFiles(currentState, tabs, [targetPath]);
-        return {
-          tabs,
-          activeFilePath:
-            currentState.activeTabId === activeTab.id
-              ? locationPrimaryPath(previousTab.location)
-              : currentState.activeFilePath,
-          ...(files ? { openFiles: files } : {}),
-        };
+        return { ...publish(tabs, currentState.layout), ...(files ? { openFiles: files } : {}) };
       });
     }
   },
@@ -904,11 +909,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       const rewrite = (loc: Location) => rewriteLocation(loc, oldPath, newPath);
       const tabs = state.tabs.map((tab) => applyRewriteToTab(tab, rewrite) ?? tab);
 
-      return {
-        openFiles: files,
-        tabs,
-        activeFilePath: state.activeFilePath === oldPath ? newPath : state.activeFilePath,
-      };
+      // Tab ids are untouched by a rename, so pane membership is too.
+      return { openFiles: files, ...publish(tabs, state.layout) };
     });
 
     cancelSave(oldPath);
@@ -926,18 +928,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         .map((tab) => applyRewriteToTab(tab, transform))
         .filter((tab): tab is Tab => tab !== null);
 
-      let activeTabId = state.activeTabId;
-      if (!tabs.some((tab) => tab.id === activeTabId)) {
-        activeTabId = tabs[0]?.id ?? null;
-      }
-
       const files = state.openFiles.has(path) ? new Map(state.openFiles) : null;
       files?.delete(path);
 
       return {
-        tabs,
-        activeTabId,
-        activeFilePath: deriveActiveFilePath(tabs, activeTabId),
+        ...publish(tabs, dropMissingTabs(state, tabs)),
         ...(files ? { openFiles: files } : {}),
       };
     });
@@ -971,11 +966,6 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         .map((tab) => applyRewriteToTab(tab, transform))
         .filter((tab): tab is Tab => tab !== null);
 
-      let activeTabId = state.activeTabId;
-      if (!tabs.some((tab) => tab.id === activeTabId)) {
-        activeTabId = tabs[0]?.id ?? null;
-      }
-
       const files = new Map(state.openFiles);
       for (const path of files.keys()) {
         if (matches(path)) {
@@ -984,12 +974,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         }
       }
 
-      return {
-        tabs,
-        activeTabId,
-        activeFilePath: deriveActiveFilePath(tabs, activeTabId),
-        openFiles: files,
-      };
+      return { ...publish(tabs, dropMissingTabs(state, tabs)), openFiles: files };
     });
 
     for (const path of cancelledPaths) {
@@ -1042,11 +1027,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         }
       }
 
-      return {
-        tabs,
-        openFiles: files,
-        activeFilePath: state.activeFilePath ? rewritePath(state.activeFilePath) : null,
-      };
+      return { openFiles: files, ...publish(tabs, state.layout) };
     });
 
     for (const path of reschedulePaths) {
@@ -1078,12 +1059,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }
 
     if (restoredTabs.length === 0) {
-      set({
+      set((state) => ({
         openFiles: new Map(),
-        tabs: [],
-        activeTabId: null,
-        activeFilePath: null,
-      });
+        ...publish([], createLayout([], null, state.layout.revision + 1)),
+      }));
       get().ensureLauncherTab();
       return;
     }
@@ -1130,11 +1109,18 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         files.set(activePath, seededActive);
       }
 
+      // A v1 session is a flat tab list, which restores as one pane. The
+      // same normalization path runs for it as for a runtime change.
       return {
         openFiles: files,
-        tabs: restoredTabs,
-        activeTabId: activeTab?.id ?? null,
-        activeFilePath: activePath,
+        ...publish(
+          restoredTabs,
+          createLayout(
+            restoredTabs.map((tab) => tab.id),
+            activeTab?.id ?? null,
+            state.layout.revision + 1,
+          ),
+        ),
       };
     });
 
@@ -1167,17 +1153,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       const files = new Map(state.openFiles);
       for (const path of failedPaths) files.delete(path);
 
-      const activeTabId = nextTabs.some((tab) => tab.id === state.activeTabId)
-        ? state.activeTabId
-        : (nextTabs[0]?.id ?? null);
       shouldEnsureLauncher = nextTabs.length === 0;
 
-      return {
-        openFiles: files,
-        tabs: nextTabs,
-        activeTabId,
-        activeFilePath: deriveActiveFilePath(nextTabs, activeTabId),
-      };
+      return { openFiles: files, ...publish(nextTabs, dropMissingTabs(state, nextTabs)) };
     });
 
     if (shouldEnsureLauncher) get().ensureLauncherTab();
