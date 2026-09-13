@@ -88,6 +88,7 @@ export function useProsemarkEditor(
       const view = viewRef.current;
       if (view) {
         closeEditorSearch({ view });
+        editorApi.clearEditorView(view);
         view.destroy();
       }
       viewRef.current = null;
@@ -116,6 +117,7 @@ export function useProsemarkEditor(
     });
 
     viewRef.current = view;
+    editorApi.setEditorView(currentPath, view);
     prevPathRef.current = currentPath;
     prevReloadVersionRef.current = file?.reloadVersion ?? 0;
     onViewChangeRef.current?.(view);
@@ -156,6 +158,9 @@ export function useProsemarkEditor(
 
     prevPathRef.current = filePath;
     prevReloadVersionRef.current = reloadVersion;
+    // The view is reused across a tab switch, so re-key it or an insert aimed
+    // at this file would land in the note it used to show.
+    if (pathChanged) editorApi.setEditorView(filePath, view);
 
     const file = editorApi.getOpenFile(filePath);
     const content = file?.content ?? "";

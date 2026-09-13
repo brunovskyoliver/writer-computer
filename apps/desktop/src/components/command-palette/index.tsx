@@ -33,6 +33,9 @@ import { useGlobalRecentFiles } from "@/hooks/use-global-recent-files";
 import { openStandaloneFile } from "@/hooks/use-open-drop";
 import { settingsKind } from "@/components/editor-area/page-kinds/settings";
 import { getFileName, getFileStem, getParentDir } from "@/lib/paths";
+import { createDrawing, nextAvailableDrawingPath } from "@/lib/drawings";
+import { showEditorNotice } from "@/components/editor-area/editor-notice-store";
+import * as editorApi from "@/hooks/editor-api";
 import * as tauri from "@/lib/tauri";
 import type { RecentFile } from "@/lib/tauri";
 
@@ -110,6 +113,19 @@ export function CommandPalette() {
     })();
   }
 
+  // Load-bearing order: write the file, insert the embed while the note still
+  // has the cursor, then open the tab — opening it moves focus off the note.
+  // With no note in front (launcher, settings, another drawing tab)
+  // `activeFilePath` is null, so the drawing lands in the workspace root and
+  // nothing is inserted. Drawings go in the note's own directory: Writer has
+  // no attachment-folder concept and this does not add one.
+  async function handleNewDrawing(baseDir: string, notePath: string | null) {
+    const path = await nextAvailableDrawingPath(baseDir, tauri.fileExists);
+    await createDrawing(path);
+    if (notePath) editorApi.insertAtCursor(notePath, `![[${getFileName(path)}]]`);
+    await openFile(path);
+  }
+
   async function handleOpenWorkspace() {
     const picked = await tauri.pickWorkspace();
     if (picked) {
@@ -142,6 +158,22 @@ export function CommandPalette() {
       description: "Command",
       run: () => openCommandPalette("create-file"),
     },
+    root &&
+      !isCompactFileMode && {
+        id: "new-drawing",
+        label: "Create New Drawing",
+        description: "Command",
+        run: () => {
+          const noteDir = activeFilePath ? getParentDir(activeFilePath) : root;
+          close();
+          void handleNewDrawing(noteDir, activeFilePath).catch((error) => {
+            console.error("[command-palette] Failed to create drawing:", error);
+            showEditorNotice(
+              `Could not create drawing: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          });
+        },
+      },
     root &&
       activeFilePath && {
         id: "open-in-compact-window",

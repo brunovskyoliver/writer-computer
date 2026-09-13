@@ -1,3 +1,4 @@
+import type { EditorView } from "@codemirror/view";
 import { useEditorStore } from "@/stores/editor-store";
 export type { OpenFile, Tab, SessionTab } from "@/stores/editor-store";
 
@@ -67,4 +68,33 @@ export function removePathsWithPrefix(prefix: string) {
 
 export function rewritePathPrefix(oldPrefix: string, newPrefix: string) {
   useEditorStore.getState().rewritePathPrefix(oldPrefix, newPrefix);
+}
+
+// Path → live CodeMirror view. Inactive tabs keep their `EditorPane` mounted,
+// so several views exist at once, and the swap effect retargets one view at
+// another file without remounting — hence keyed by path, with the view's stale
+// keys dropped on every set.
+const editorViews = new Map<string, EditorView>();
+
+export function setEditorView(path: string, view: EditorView) {
+  clearEditorView(view);
+  editorViews.set(path, view);
+}
+
+export function clearEditorView(view: EditorView) {
+  for (const [key, value] of editorViews) if (value === view) editorViews.delete(key);
+}
+
+/** Insert at the note's caret through the view, so the edit flows through the
+ *  update listener into the store and the save scheduler the same way a typed
+ *  character does. False when that note has no live editor. */
+export function insertAtCursor(path: string, text: string): boolean {
+  const view = editorViews.get(path);
+  if (!view) return false;
+  const cursor = view.state.selection.main.head;
+  view.dispatch({
+    changes: { from: cursor, insert: text },
+    selection: { anchor: cursor + text.length },
+  });
+  return true;
 }

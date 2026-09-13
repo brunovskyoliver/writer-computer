@@ -89,3 +89,30 @@ export function drawingName(path: string): string {
   const name = getFileName(path);
   return name.slice(0, -DRAWING_EXTENSION.length);
 }
+
+/**
+ * First free `drawing.excalidraw.svg`, `drawing-1…`, … in `dir`. The existence
+ * check is a parameter so the collision walk is testable without the invoke
+ * layer; callers pass `tauri.fileExists`.
+ *
+ * First free, not highest+1: a workspace where `drawing-1` was deleted should
+ * reuse the hole rather than counting past it.
+ */
+export async function nextAvailableDrawingPath(
+  dir: string,
+  exists: (path: string) => Promise<boolean>,
+): Promise<string> {
+  for (let n = 0; ; n++) {
+    const path = `${dir}/drawing${n === 0 ? "" : `-${n}`}${DRAWING_EXTENSION}`;
+    if (!(await exists(path))) return path;
+  }
+}
+
+/**
+ * Seed a new, empty drawing file. Goes through `saveDrawing` deliberately: the
+ * file a create makes is written by exactly the code every later save uses, so
+ * there is one write path and no second notion of what a drawing file is.
+ */
+export function createDrawing(path: string): Promise<void> {
+  return saveDrawing(path, { elements: [], appState: {}, files: {} });
+}

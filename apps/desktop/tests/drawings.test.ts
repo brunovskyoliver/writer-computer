@@ -8,7 +8,7 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: vi.fn(),
 }));
 
-import { isDrawingPath } from "../src/lib/drawings";
+import { isDrawingPath, nextAvailableDrawingPath } from "../src/lib/drawings";
 import { locationForPath } from "../src/stores/editor-store";
 
 describe("isDrawingPath", () => {
@@ -58,4 +58,36 @@ describe("locationForPath", () => {
       expect(locationForPath(path)).toEqual({ kind: expected, path });
     });
   }
+});
+
+describe("nextAvailableDrawingPath", () => {
+  const existsIn = (taken: string[]) => (path: string) => Promise.resolve(taken.includes(path));
+
+  test("no collision", async () => {
+    expect(await nextAvailableDrawingPath("/vault/notes", existsIn([]))).toBe(
+      "/vault/notes/drawing.excalidraw.svg",
+    );
+  });
+
+  test("one collision", async () => {
+    const taken = ["/vault/notes/drawing.excalidraw.svg"];
+    expect(await nextAvailableDrawingPath("/vault/notes", existsIn(taken))).toBe(
+      "/vault/notes/drawing-1.excalidraw.svg",
+    );
+  });
+
+  // First free, not highest+1: a deleted drawing-1 leaves a hole to reuse.
+  test("gap in the sequence", async () => {
+    const taken = ["/vault/notes/drawing.excalidraw.svg", "/vault/notes/drawing-2.excalidraw.svg"];
+    expect(await nextAvailableDrawingPath("/vault/notes", existsIn(taken))).toBe(
+      "/vault/notes/drawing-1.excalidraw.svg",
+    );
+  });
+
+  test("drawing-1 exists but drawing does not", async () => {
+    const taken = ["/vault/notes/drawing-1.excalidraw.svg"];
+    expect(await nextAvailableDrawingPath("/vault/notes", existsIn(taken))).toBe(
+      "/vault/notes/drawing.excalidraw.svg",
+    );
+  });
 });
