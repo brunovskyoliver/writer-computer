@@ -122,6 +122,8 @@ export interface DragEnvironment {
   moveTabFromDrop: (candidate: DropCandidate) => boolean;
   suppressNextClick: () => void;
   reportFailure: (message: string) => void;
+  /** A drag became live / ended: the window can make editors inert. */
+  setDragging?: (active: boolean) => void;
 }
 
 export interface DragCoordinator {
@@ -418,6 +420,7 @@ export function createDragCoordinator(env: DragEnvironment): DragCoordinator {
         // Capture already gone — nothing to release.
       }
     }
+    if (current.started) env.setDragging?.(false);
     current.adapter.onEnd?.();
     if (current.drop) notify();
   };
@@ -452,6 +455,7 @@ export function createDragCoordinator(env: DragEnvironment): DragCoordinator {
     } catch {
       // The pointer is no longer active; the drag still runs on window events.
     }
+    env.setDragging?.(true);
     current.adapter.onActivate?.();
     if (current.frame === null) current.frame = env.requestFrame(step);
   };
@@ -610,6 +614,9 @@ function browserEnvironment(): DragEnvironment {
     moveTabFromDrop: (candidate) => useEditorStore.getState().moveTabFromDrop(candidate),
     suppressNextClick,
     reportFailure: (message) => window.alert(message),
+    // Editors must not see the drag: a pointer crossing a body would
+    // otherwise extend a text selection or start a drawing stroke.
+    setDragging: (active) => document.body.classList.toggle("editor-dragging", active),
   };
 }
 

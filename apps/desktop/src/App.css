@@ -240,9 +240,23 @@ body.tree-dragging [data-tree-path] {
   border-radius: 2px;
 }
 
-/* Focused pane, once there is more than one: a subtle accent inset. */
-[data-multi-pane] [data-pane-focused] {
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+/* Focused pane, once there is more than one: the other panes' strips
+   recede. No border — the bodies' own top/bottom fades already separate
+   panes, and a line on top of them reads as clutter. */
+[data-multi-pane] [data-pane-id]:not([data-pane-focused]) [data-pane-strip] {
+  opacity: 0.55;
+}
+
+/* While a file or tab drag is live, bodies are inert: no selection extends,
+   no stroke starts, and the cursor says what is happening. */
+body.editor-dragging,
+body.editor-dragging * {
+  cursor: grabbing !important;
+}
+
+body.editor-dragging [data-tab-host] {
+  pointer-events: none;
+  user-select: none;
 }
 
 /* cmdk command palette */

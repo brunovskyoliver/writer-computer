@@ -52,7 +52,7 @@ function PaneSlot({ paneId }: { paneId: string }) {
       onFocusCapture={() => setFocusedPane(paneId)}
     >
       <div ref={bodyRef} className="absolute inset-0" />
-      <div className="absolute inset-x-0 top-0 z-40">
+      <div data-pane-strip className="absolute inset-x-0 top-0 z-40">
         <EditorTabs paneId={paneId} clearTrafficLights={clearTrafficLights} />
       </div>
     </div>
@@ -71,7 +71,8 @@ function PaneNode({ node }: { node: LayoutNode }) {
       </div>
       <div
         aria-hidden
-        className="shrink-0 bg-[var(--border-color)]"
+        // No fill: the bodies' scroll fades already read as the seam.
+        className="shrink-0"
         style={
           node.axis === "x"
             ? { width: SEPARATOR_SIZE, cursor: "col-resize" }

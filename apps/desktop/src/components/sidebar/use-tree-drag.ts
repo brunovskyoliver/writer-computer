@@ -298,13 +298,13 @@ export function useTreeDrag({
         onEnd: endDrag,
       };
 
+      // No pointer capture on the row: `.tree-dragging` makes rows
+      // non-hit-testable for the drag, and WebKit stops delivering to a
+      // captured element in that state (and fires `lostpointercapture`,
+      // which cancels). The coordinator's window listeners track the
+      // pointer on their own.
       editorDrag().arm(
-        {
-          pointerId: event.pointerId,
-          clientX: event.clientX,
-          clientY: event.clientY,
-          target: event.currentTarget,
-        },
+        { pointerId: event.pointerId, clientX: event.clientX, clientY: event.clientY },
         // A folder is not a document: the editor area offers nothing for a
         // selection that contains one, and the tree keeps its move behavior.
         {
