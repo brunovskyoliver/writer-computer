@@ -29,6 +29,7 @@ import {
   removeTab as removeTabFromLayout,
   removeTabs as removeTabsFromLayout,
   setFocusedPane as focusPaneInLayout,
+  setSplitRatio as setSplitRatioInLayout,
   type DropCandidate,
   type Layout,
 } from "@/lib/editor-layout";
@@ -121,6 +122,9 @@ interface EditorState {
   setActiveFile: (path: string) => void;
   setActiveTab: (tabId: string) => void;
   setFocusedPane: (paneId: string) => void;
+  /** Commit a finished divider drag. The resize library owns the live
+   *  gesture; only the final ratio is layout state. */
+  setSplitRatio: (splitId: string, ratio: number) => void;
   openFilesFromDrop: (drop: FileDrop, isCurrent?: () => boolean) => Promise<FileDropOutcome>;
   moveTabFromDrop: (candidate: DropCandidate) => boolean;
   navigateToFile: (path: string, target?: OpenTarget) => Promise<void>;
@@ -793,6 +797,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   // pane is therefore the same kind of state change as selecting a tab.
   setFocusedPane: (paneId: string) => {
     set((state) => publish(state.tabs, focusPaneInLayout(state.layout, paneId)));
+  },
+
+  setSplitRatio: (splitId: string, ratio: number) => {
+    set((state) => publish(state.tabs, setSplitRatioInLayout(state.layout, splitId, ratio)));
   },
 
   /**

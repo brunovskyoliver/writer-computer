@@ -247,6 +247,31 @@ body.tree-dragging [data-tree-path] {
   opacity: 0.55;
 }
 
+/* Pane dividers. The library sets the resize cursor; the seam itself is
+   invisible until hovered, dragged, or keyboard-focused, then reads in the
+   accent so the user can see what they are moving. */
+[data-pane-separator] {
+  position: relative;
+  background: transparent;
+  outline: none;
+}
+
+[data-pane-separator]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--accent) 60%, transparent);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+[data-pane-separator]:hover::after,
+[data-pane-separator][data-separator="hover"]::after,
+[data-pane-separator][data-separator="active"]::after,
+[data-pane-separator][data-separator="focus"]::after {
+  opacity: 1;
+}
+
 /* While a file or tab drag is live, bodies are inert: no selection extends,
    no stroke starts, and the cursor says what is happening. */
 body.editor-dragging,

@@ -1821,6 +1821,31 @@ describe("editor-store pane routing", () => {
     expect(validateLayout(state.layout)).toEqual([]);
   });
 
+  test("a finished divider drag commits one clamped ratio without touching tabs", async () => {
+    await twoPanes();
+    const before = useEditorStore.getState();
+    const split = before.layout.root;
+    expect(split.kind).toBe("split");
+    if (split.kind !== "split") return;
+
+    useEditorStore.getState().setSplitRatio(split.id, 0.3);
+    const after = useEditorStore.getState();
+    expect(after.layout.root.kind === "split" && after.layout.root.ratio).toBe(0.3);
+    expect(after.layout.revision).toBe(before.layout.revision + 1);
+    // Tabs and documents are untouched; only the tree moved.
+    expect(after.tabs).toEqual(before.tabs);
+    expect(after.openFiles).toBe(before.openFiles);
+
+    // The same ratio again is a no-op, so nothing is persisted for it.
+    useEditorStore.getState().setSplitRatio(split.id, 0.3);
+    expect(useEditorStore.getState().layout).toBe(after.layout);
+
+    // Out-of-range ratios are clamped rather than committed as-is.
+    useEditorStore.getState().setSplitRatio(split.id, 1.5);
+    const root = useEditorStore.getState().layout.root;
+    expect(root.kind === "split" && root.ratio).toBeLessThan(1);
+  });
+
   test("resetEditorState replaces the layout so stale pane ids cannot be reused", async () => {
     const { left } = await twoPanes();
     useEditorStore.getState().resetEditorState();

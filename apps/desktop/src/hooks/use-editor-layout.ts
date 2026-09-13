@@ -1,4 +1,4 @@
-import { findPane, type LayoutNode, type Pane } from "@/lib/editor-layout";
+import { findPane, minimumSize, type LayoutNode, type Pane, type Size } from "@/lib/editor-layout";
 import { useEditorStore } from "@/stores/editor-store";
 
 /**
@@ -57,4 +57,17 @@ export function useIsTabFocused(tabId: string) {
 
 export function useSetFocusedPane() {
   return useEditorStore((s) => s.setFocusedPane);
+}
+
+export function useSetSplitRatio() {
+  return useEditorStore((s) => s.setSplitRatio);
+}
+
+/** The smallest editor area the whole tree fits in. A window shrunk below
+ *  it scrolls rather than starving panes; the selector returns a new object
+ *  only when the number is new, so it is cheap to subscribe to. */
+export function useLayoutMinimumSize(): Size {
+  const width = useEditorStore((s) => minimumSize(s.layout.root).width);
+  const height = useEditorStore((s) => minimumSize(s.layout.root).height);
+  return { width, height };
 }

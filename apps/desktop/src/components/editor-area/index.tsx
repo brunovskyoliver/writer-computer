@@ -1,6 +1,11 @@
 import { useCallback } from "react";
 import { useActiveTab, useOpenTabs } from "@/hooks/use-tabs";
-import { usePane, useIsTabFocused, useSetFocusedPane } from "@/hooks/use-editor-layout";
+import {
+  usePane,
+  useIsTabFocused,
+  useLayoutMinimumSize,
+  useSetFocusedPane,
+} from "@/hooks/use-editor-layout";
 import { useEditorStore } from "@/stores/editor-store";
 import { paneOfTab } from "@/lib/editor-layout";
 import type { Tab } from "@/stores/editor-store";
@@ -76,6 +81,7 @@ function TabHost({ tab }: { tab: Tab }) {
 function EditorArea() {
   const activeTab = useActiveTab();
   const tabs = useOpenTabs();
+  const minimum = useLayoutMinimumSize();
 
   const containerRef = useCallback((element: HTMLDivElement | null) => {
     setPaneContainer(element);
@@ -83,14 +89,23 @@ function EditorArea() {
 
   return (
     <div className="relative h-full overflow-hidden">
-      <div ref={containerRef} className="relative h-full min-h-0 overflow-hidden">
-        {/* Chrome and geometry only — the bodies below are positioned over the
-            rectangles these slots measure. */}
-        <PaneLayout />
-        {tabs.map((tab) => (
-          <TabHost key={tab.id} tab={tab} />
-        ))}
-        <DropPreview />
+      {/* A window shrunk below what the tree needs scrolls this sheet rather
+          than starving panes. The sheet is the positioning context for
+          slots, bodies, and preview alike, so they scroll together. */}
+      <div className="h-full min-h-0 overflow-auto">
+        <div
+          ref={containerRef}
+          className="relative h-full min-h-0 overflow-hidden"
+          style={{ minWidth: minimum.width, minHeight: minimum.height }}
+        >
+          {/* Chrome and geometry only — the bodies below are positioned over the
+              rectangles these slots measure. */}
+          <PaneLayout />
+          {tabs.map((tab) => (
+            <TabHost key={tab.id} tab={tab} />
+          ))}
+          <DropPreview />
+        </div>
       </div>
       {activeTab ? pageKindView(activeTab.location).renderFooter?.(activeTab.location) : null}
       <EditorSearchOverlay />
