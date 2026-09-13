@@ -22,9 +22,12 @@ function EditorArea({ showFooter = true }: EditorAreaProps) {
           if (!k.keepAlive && !isActive) return null;
           const Component = pageKindView(tab.location).Component as React.ComponentType<{
             location: typeof tab.location;
+            tabId: string;
             isActive: boolean;
           }>;
-          return <Component key={tab.id} location={tab.location} isActive={isActive} />;
+          return (
+            <Component key={tab.id} location={tab.location} tabId={tab.id} isActive={isActive} />
+          );
         })}
       </div>
       {showFooter && activeTab

@@ -472,42 +472,6 @@ describe("editor-store", () => {
     expect(file?.diskContent).toBe("modified");
   });
 
-  test("markSaved with shorter content clamps cursorPos", async () => {
-    mockedInvoke.mockResolvedValue({
-      path: "/test.md",
-      content: "a]".repeat(50), // 100 chars
-      modified_at: 1,
-    });
-
-    await useEditorStore.getState().openFile("/test.md");
-    // Simulate cursor at position 80
-    useEditorStore.getState().updateCursorPos("/test.md", 80);
-
-    // External modification makes file shorter (20 chars)
-    useEditorStore.getState().markSaved("/test.md", "short content here!!");
-
-    const file = useEditorStore.getState().openFiles.get("/test.md");
-    // cursorPos must be clamped to new content length
-    expect(file?.cursorPos).toBeLessThanOrEqual(file!.content.length);
-  });
-
-  test("stale cursorPos is clamped on tab switch", async () => {
-    mockedInvoke.mockResolvedValue({
-      path: "/test.md",
-      content: "a".repeat(100),
-      modified_at: 1,
-    });
-
-    await useEditorStore.getState().openFile("/test.md");
-    useEditorStore.getState().updateCursorPos("/test.md", 80);
-
-    // Simulate external modification making file much shorter
-    useEditorStore.getState().markSaved("/test.md", "short");
-
-    const file = useEditorStore.getState().openFiles.get("/test.md")!;
-    expect(file.cursorPos).toBeLessThanOrEqual(file.content.length);
-  });
-
   test("session snapshots omit launcher tabs", async () => {
     mockedInvoke.mockResolvedValue({ path: "/a.md", content: "a", modified_at: 1 });
 
@@ -1166,8 +1130,6 @@ describe("workspace-store closeWorkspace", () => {
             isLoading: false,
             saveError: null,
             reloadVersion: 0,
-            scrollPos: 0,
-            cursorPos: 0,
             displayDate: null,
             stats: { words: 0, characters: 0, paragraphs: 0 },
           },

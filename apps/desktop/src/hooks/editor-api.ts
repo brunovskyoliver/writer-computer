@@ -1,4 +1,5 @@
 import type { EditorView } from "@codemirror/view";
+import * as editorViews from "@/lib/editor-views";
 import { useEditorStore } from "@/stores/editor-store";
 export type { OpenFile, Tab, SessionTab } from "@/stores/editor-store";
 
@@ -28,14 +29,6 @@ export function markSaved(path: string, diskContent: string) {
 
 export function updateContent(path: string, content: string) {
   useEditorStore.getState().updateContent(path, content);
-}
-
-export function updateCursorPos(path: string, pos: number) {
-  useEditorStore.getState().updateCursorPos(path, pos);
-}
-
-export function updateScrollPos(path: string, pos: number) {
-  useEditorStore.getState().updateScrollPos(path, pos);
 }
 
 export function updateFrontmatter(path: string, frontmatter: string | null) {
@@ -70,26 +63,46 @@ export function rewritePathPrefix(oldPrefix: string, newPrefix: string) {
   useEditorStore.getState().rewritePathPrefix(oldPrefix, newPrefix);
 }
 
-// Path → live CodeMirror view. Inactive tabs keep their `EditorPane` mounted,
-// so several views exist at once, and the swap effect retargets one view at
-// another file without remounting — hence keyed by path, with the view's stale
-// keys dropped on every set.
-const editorViews = new Map<string, EditorView>();
+// --- editor registrations --------------------------------------------------
 
-export function setEditorView(path: string, view: EditorView) {
-  clearEditorView(view);
-  editorViews.set(path, view);
+/**
+ * The registry itself lives in `lib/editor-views.ts` so the editor store can
+ * clear a closed tab's view state without importing this module. Re-exported
+ * here because call sites in components already speak `editorApi`.
+ */
+export {
+  getEditorView,
+  getTabViewState,
+  registerEditorView,
+  retargetEditorView,
+  setTabCursor,
+  setTabScroll,
+  syncSiblingViews,
+  syncTransaction,
+  unregisterEditorView,
+} from "@/lib/editor-views";
+
+/** Every live view showing `path`, in tab traversal order. */
+export function getEditorViewsForPath(path: string): EditorView[] {
+  const tabOrder = useEditorStore.getState().tabs.map((tab) => tab.id);
+  return editorViews.getEditorViewsForPath(path, tabOrder);
 }
 
-export function clearEditorView(view: EditorView) {
-  for (const [key, value] of editorViews) if (value === view) editorViews.delete(key);
+/** The view an API-level insert should target: the focused tab's, if it shows
+ *  this file, otherwise the first in tab traversal order. */
+function viewForPath(path: string): EditorView | null {
+  const { activeTabId } = useEditorStore.getState();
+  const focused = activeTabId ? editorViews.getEditorRegistration(activeTabId) : null;
+  if (focused?.path === path) return focused.view;
+  return getEditorViewsForPath(path)[0] ?? null;
 }
 
 /** Insert at the note's caret through the view, so the edit flows through the
- *  update listener into the store and the save scheduler the same way a typed
- *  character does. False when that note has no live editor. */
+ *  update listener into the store, the sibling views, and the save scheduler
+ *  the same way a typed character does. False when that note has no live
+ *  editor. */
 export function insertAtCursor(path: string, text: string): boolean {
-  const view = editorViews.get(path);
+  const view = viewForPath(path);
   if (!view) return false;
   const cursor = view.state.selection.main.head;
   const line = view.state.doc.lineAt(cursor);

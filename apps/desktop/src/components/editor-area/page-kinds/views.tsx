@@ -25,9 +25,15 @@ import type { PageKindView } from "./types";
 // definition.
 // Page-kind view registry: exports the pageKindView resolver alongside the file-tab adapter component; not a Fast-Refresh component surface.
 // eslint-disable-next-line react-doctor/only-export-components
-const FileTabBody = ({ location, isActive }: { location: FileLocation; isActive: boolean }) => (
-  <EditorPane path={location.path} isActive={isActive} />
-);
+const FileTabBody = ({
+  location,
+  tabId,
+  isActive,
+}: {
+  location: FileLocation;
+  tabId: string;
+  isActive: boolean;
+}) => <EditorPane tabId={tabId} path={location.path} isActive={isActive} />;
 
 const views = {
   // No footer: a drawing has no word count, frontmatter or document date.

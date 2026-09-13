@@ -79,8 +79,10 @@ export type AnyPageKind = PageKind<string, { kind: string }>;
  *  Kept out of `PageKind` so the editor UI is only imported by the renderer
  *  (`pageKindViews` in `./views`), never by the data/serialization layer. */
 export interface PageKindView<L extends { kind: string } = { kind: string }> {
-  /** React renderer for the tab body. */
-  Component: ComponentType<{ location: L; isActive: boolean }>;
+  /** React renderer for the tab body. `tabId` is the view's identity: cursor,
+   *  scroll, and the CodeMirror registration are all keyed by it, so the same
+   *  document open in two panes keeps two independent views. */
+  Component: ComponentType<{ location: L; tabId: string; isActive: boolean }>;
   /** Optional chrome rendered below the active tab body. */
   renderFooter?: (location: L) => ReactNode;
 }

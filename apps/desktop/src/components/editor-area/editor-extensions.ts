@@ -1,5 +1,12 @@
 import { EditorView, ViewPlugin, drawSelection } from "@codemirror/view";
-import { type Compartment, type Extension, Prec } from "@codemirror/state";
+import {
+  type ChangeSet,
+  type Compartment,
+  type EditorState,
+  type Extension,
+  Prec,
+  type Transaction,
+} from "@codemirror/state";
 import { markdown } from "@codemirror/lang-markdown";
 import { history } from "@codemirror/commands";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
@@ -67,26 +74,58 @@ const headingWeightHighlight = Prec.highest(
   ),
 );
 
-// Mirror document and caret changes into the editor store. Swaps and reloads
-// carry a "writer" userEvent and are skipped: the store already has that
-// content and the caret is being restored, not moved.
-function storeSyncExtension(getFilePath: () => string): Extension {
-  return EditorView.updateListener.of((update) => {
-    const isSwap = update.transactions.some((tr) => tr.isUserEvent("writer"));
-    if (update.docChanged && !isSwap) {
-      editorApi.updateContent(getFilePath(), update.state.doc.toString());
-    }
-    if (update.selectionSet && !isSwap) {
-      editorApi.updateCursorPos(getFilePath(), update.state.selection.main.head);
-    }
-    if (update.docChanged || update.selectionSet) {
-      useEditorSearchStore.getState().bumpDocVersion(update.view);
-    }
-  });
+// Mirror document and caret changes into the editor store, and push the change
+// out to any other view of the same file.
+//
+// Two kinds of transaction are excluded from the document write:
+//
+// - Swaps and reloads carry a "writer" userEvent. The store already has that
+//   content and the caret is being restored, not moved.
+// - Sibling synchronizations carry `syncTransaction`. Without that guard, A
+//   typing would publish to B, whose listener would publish back to A. The
+//   originating view is the single writer for one keystroke: one store update,
+//   one save schedule, however many panes show the file.
+//
+// The caret *is* recorded for a synchronization, because CodeMirror has mapped
+// this view's selection through the incoming changes and that new position is
+// genuinely where this view's caret now sits.
+/** The subset of `ViewUpdate` this needs. Named so the behavior can be driven
+ *  in a test without mounting a real `EditorView`. */
+export interface PublishableUpdate {
+  docChanged: boolean;
+  selectionSet: boolean;
+  transactions: readonly Transaction[];
+  changes: ChangeSet;
+  state: EditorState;
+  view: EditorView;
+}
+
+export function publishEditorUpdate(update: PublishableUpdate, path: string, tabId: string) {
+  const isSwap = update.transactions.some((tr) => tr.isUserEvent("writer"));
+  const isSync = update.transactions.some(
+    (tr) => tr.annotation(editorApi.syncTransaction) === true,
+  );
+  if (update.docChanged && !isSwap && !isSync) {
+    editorApi.updateContent(path, update.state.doc.toString());
+    editorApi.syncSiblingViews(path, update.view, update.changes);
+  }
+  if (update.selectionSet && !isSwap) {
+    editorApi.setTabCursor(tabId, path, update.state.selection.main.head);
+  }
+  if (update.docChanged || update.selectionSet) {
+    useEditorSearchStore.getState().bumpDocVersion(update.view);
+  }
+}
+
+function storeSyncExtension(getFilePath: () => string, getTabId: () => string): Extension {
+  return EditorView.updateListener.of((update) =>
+    publishEditorUpdate(update, getFilePath(), getTabId()),
+  );
 }
 
 export function createEditorExtensions(
   getFilePath: () => string,
+  getTabId: () => string,
   isDisposed: () => boolean,
   historyCompartment: Compartment,
 ): Extension[] {
@@ -120,7 +159,7 @@ export function createEditorExtensions(
     imageSrcResolver(getFilePath),
     wikiLinkExtension(getFilePath, isDisposed),
     markdownFormatting,
-    storeSyncExtension(getFilePath),
+    storeSyncExtension(getFilePath, getTabId),
     editorClipboardExtension(getFilePath, isDisposed),
     focusOnRevealExtension(isDisposed),
   ];

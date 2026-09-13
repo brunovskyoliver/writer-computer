@@ -52,12 +52,17 @@ function restoreScrollPosition(
 }
 
 export function useProsemarkEditor(
+  tabId: string,
   filePath: string,
   getScrollContainer?: () => HTMLElement | null,
   autoFocus = false,
   onViewChange?: (view: EditorView | null) => void,
 ) {
   const viewRef = useRef<EditorView | null>(null);
+  const tabIdRef = useRef(tabId);
+  // Generation of this view's registration, so the cleanup cannot delete a
+  // replacement view that React already mounted.
+  const registrationRef = useRef(0);
   const scrollCleanupRef = useRef<(() => void) | null>(null);
   const disposedRef = useRef(false);
   const filePathRef = useRef(filePath);
@@ -74,6 +79,7 @@ export function useProsemarkEditor(
   const reloadVersion = useReloadVersion(filePath);
 
   // Keep refs in sync for use by closures and the swap effect.
+  tabIdRef.current = tabId;
   filePathRef.current = filePath;
   getScrollContainerRef.current = getScrollContainer;
   autoFocusRef.current = autoFocus;
@@ -88,7 +94,7 @@ export function useProsemarkEditor(
       const view = viewRef.current;
       if (view) {
         closeEditorSearch({ view });
-        editorApi.clearEditorView(view);
+        editorApi.unregisterEditorView(tabIdRef.current, registrationRef.current);
         view.destroy();
       }
       viewRef.current = null;
@@ -101,8 +107,10 @@ export function useProsemarkEditor(
     disposedRef.current = false;
 
     const currentPath = filePathRef.current;
+    const currentTabId = tabIdRef.current;
     const file = editorApi.getOpenFile(currentPath);
     const initialContent = file?.content ?? "";
+    const viewState = editorApi.getTabViewState(currentTabId, currentPath);
 
     const view = new EditorView({
       parent: el,
@@ -110,6 +118,7 @@ export function useProsemarkEditor(
         doc: initialContent,
         extensions: createEditorExtensions(
           () => filePathRef.current,
+          () => tabIdRef.current,
           () => disposedRef.current,
           historyCompartmentRef.current!,
         ),
@@ -117,7 +126,7 @@ export function useProsemarkEditor(
     });
 
     viewRef.current = view;
-    editorApi.setEditorView(currentPath, view);
+    registrationRef.current = editorApi.registerEditorView(currentTabId, currentPath, view);
     prevPathRef.current = currentPath;
     prevReloadVersionRef.current = file?.reloadVersion ?? 0;
     onViewChangeRef.current?.(view);
@@ -127,15 +136,15 @@ export function useProsemarkEditor(
 
     advanceViewportParse(view, () => disposedRef.current);
 
-    restoreCursorPosition(view, file?.cursorPos ?? 0);
+    restoreCursorPosition(view, viewState.cursor);
     clampSelectionToHeadings(view);
 
     const scrollContainer = resolveScrollContainer(el, getScrollContainerRef.current);
     if (scrollContainer) {
-      restoreScrollPosition(scrollContainer, file?.scrollPos ?? 0, () => disposedRef.current);
+      restoreScrollPosition(scrollContainer, viewState.scroll, () => disposedRef.current);
 
       const handleScroll = () => {
-        editorApi.updateScrollPos(filePathRef.current, scrollContainer.scrollTop);
+        editorApi.setTabScroll(tabIdRef.current, filePathRef.current, scrollContainer.scrollTop);
       };
       scrollContainer.addEventListener("scroll", handleScroll, { passive: true });
       scrollCleanupRef.current = () => scrollContainer.removeEventListener("scroll", handleScroll);
@@ -160,13 +169,13 @@ export function useProsemarkEditor(
     prevReloadVersionRef.current = reloadVersion;
     // The view is reused across a tab switch, so re-key it or an insert aimed
     // at this file would land in the note it used to show.
-    if (pathChanged) editorApi.setEditorView(filePath, view);
+    if (pathChanged) editorApi.retargetEditorView(tabId, filePath);
 
     const file = editorApi.getOpenFile(filePath);
     const content = file?.content ?? "";
 
     const cursorPos = pathChanged
-      ? Math.min(file?.cursorPos ?? 0, content.length)
+      ? Math.min(editorApi.getTabViewState(tabId, filePath).cursor, content.length)
       : Math.min(view.state.selection.main.head, content.length);
 
     if (pathChanged) {
@@ -207,14 +216,18 @@ export function useProsemarkEditor(
             showEditorNotice(`Heading "#${pendingAnchor}" not found in ${getFileName(filePath)}`);
           }
         } else {
-          restoreScrollPosition(scrollContainer, file?.scrollPos ?? 0, () => disposedRef.current);
+          restoreScrollPosition(
+            scrollContainer,
+            editorApi.getTabViewState(tabId, filePath).scroll,
+            () => disposedRef.current,
+          );
         }
       }
     }
 
     advanceViewportParse(view, () => disposedRef.current);
     clampSelectionToHeadings(view);
-  }, [filePath, reloadVersion]);
+  }, [tabId, filePath, reloadVersion]);
 
   return mountRef;
 }

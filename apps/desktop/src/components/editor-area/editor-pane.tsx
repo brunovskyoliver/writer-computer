@@ -20,11 +20,12 @@ function AsciiSpinner() {
 }
 
 interface EditorPaneProps {
+  tabId: string;
   path: string;
   isActive: boolean;
 }
 
-export const EditorPane = memo(function EditorPane({ path, isActive }: EditorPaneProps) {
+export const EditorPane = memo(function EditorPane({ tabId, path, isActive }: EditorPaneProps) {
   const isLoading = useIsFileLoading(path);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const [editorView, setEditorView] = useState<EditorView | null>(null);
@@ -66,6 +67,7 @@ export const EditorPane = memo(function EditorPane({ path, isActive }: EditorPan
           <FrontmatterPanel filePath={path} />
         </div>
         <ProseMarkEditor
+          tabId={tabId}
           filePath={path}
           getScrollContainer={getScrollContainer}
           autoFocus={isActive}

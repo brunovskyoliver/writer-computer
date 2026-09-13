@@ -4,6 +4,7 @@ import {
   discardDrawingSessions,
   reportDrawingSaveError,
 } from "@/lib/drawing-sessions";
+import { clearTabViewState, rewriteEditorPaths } from "@/lib/editor-views";
 import { create } from "zustand";
 import type { FileContent } from "@/types/fs";
 import * as tauri from "@/lib/tauri";
@@ -48,8 +49,6 @@ export interface OpenFile {
   isLoading: boolean;
   saveError: string | null;
   reloadVersion: number;
-  scrollPos: number;
-  cursorPos: number;
   displayDate: string | null;
   stats: DocumentStats;
 }
@@ -111,8 +110,6 @@ interface EditorState {
   markSaved: (path: string, diskContent: string, hasNewerChanges?: boolean) => void;
   setSaveError: (path: string, error: string | null) => void;
   reloadFromDisk: (path: string, rawContent: string) => void;
-  updateScrollPos: (path: string, pos: number) => void;
-  updateCursorPos: (path: string, pos: number) => void;
 }
 
 type EditorStateSetter = (
@@ -177,8 +174,6 @@ function createLoadingFile(path: string): OpenFile {
     isLoading: true,
     saveError: null,
     reloadVersion: 0,
-    scrollPos: 0,
-    cursorPos: 0,
     displayDate: null,
     stats: EMPTY_STATS,
   };
@@ -702,6 +697,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       });
 
       pendingNavigationVersionByTabId.delete(tabId);
+      // A close ends the view; a move does not, and never reaches here.
+      clearTabViewState(tabId);
     };
     const tab = get().tabs.find((candidate) => candidate.id === tabId);
     const path = tab?.location.kind === "drawing" ? tab.location.path : null;
@@ -913,6 +910,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       return { openFiles: files, ...publish(tabs, state.layout) };
     });
 
+    rewriteEditorPaths((path) => (path === oldPath ? newPath : path));
     cancelSave(oldPath);
     if (shouldScheduleSave) scheduleSave(newPath);
   },
@@ -1030,6 +1028,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       return { openFiles: files, ...publish(tabs, state.layout) };
     });
 
+    rewriteEditorPaths(rewritePath);
     for (const path of reschedulePaths) {
       scheduleSave(path);
     }
@@ -1257,28 +1256,6 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           reloadVersion: file.reloadVersion + 1,
         }),
       );
-      return { openFiles: files };
-    });
-  },
-
-  updateScrollPos: (path: string, pos: number) => {
-    set((state) => {
-      const file = state.openFiles.get(path);
-      if (!file || file.scrollPos === pos) return state;
-
-      const files = new Map(state.openFiles);
-      files.set(path, { ...file, scrollPos: pos });
-      return { openFiles: files };
-    });
-  },
-
-  updateCursorPos: (path: string, pos: number) => {
-    set((state) => {
-      const file = state.openFiles.get(path);
-      if (!file || file.cursorPos === pos) return state;
-
-      const files = new Map(state.openFiles);
-      files.set(path, { ...file, cursorPos: pos });
       return { openFiles: files };
     });
   },
