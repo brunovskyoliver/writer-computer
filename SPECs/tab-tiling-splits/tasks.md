@@ -22,7 +22,7 @@ description: "Dependency-ordered implementation tasks for tab tiling and split p
 
 **Purpose**: Add the one planned runtime dependency.
 
-- [ ] T001 Add `react-resizable-panels` via the existing `catalog:` entry in `apps/desktop/package.json` and refresh `pnpm-lock.yaml` with `vp install`
+- [x] T001 Add `react-resizable-panels` via the existing `catalog:` entry in `apps/desktop/package.json` and refresh `pnpm-lock.yaml` with `vp install`
 
 ---
 
