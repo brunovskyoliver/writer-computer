@@ -266,6 +266,27 @@ explicit `viewBackgroundColor` — which finding 2 proves does round-trip.
   hidden, and Excalidraw sizes its canvas from a resize observer — a `display: none` host
   measures 0×0. Switch to a note tab and back and confirm the canvas repaints full size. If it
   does not, that is a keepAlive-vs-remount tradeoff, not a bug to chase.
+- **The sidebar could not show a drawing at all — an unstated assumption in the spec.**
+  `read_directory_impl` (`commands/fs.rs`) listed directories and files with extension exactly
+  `md`; everything else was dropped before it reached the frontend. spec.md's acceptance
+  criterion "a `.excalidraw.svg` clicked in the sidebar opens as a drawing" assumed a sidebar
+  that shows non-Markdown files, which Writer has never had, and no Phase 5 task covered it.
+  Found at the checkpoint, when the copied fixture did not appear.
+  - Fixed narrowly (user's call: drawings only, not a general file browser). One predicate,
+    `is_sidebar_file`, now decides both the listing and folder visibility, so the two cannot
+    drift — a drawing listed inside a folder the tree hides is the failure that prevents.
+  - `DirectoryContent::Markdown` became `Visible`, and `directory_tree_is_empty` was deleted:
+    its fast path existed because the Markdown index already answered "no Markdown here", but
+    the index knows nothing about drawings, so a drawing-only folder was absent from it and
+    hid. Both branches of `directory_is_sidebar_visible` now run one classification.
+  - `is_markdown` on `DirEntry` stays literal rather than becoming "openable". It gates the
+    file context menu and `extract_title`, and a drawing wants neither — its title is its
+    filename stem and its body is SVG, not prose. Consequence: **a drawing has no sidebar
+    context menu** (no rename, no delete), even though `drawingKind` implements `rewritePath`
+    and `removePath`. Worth revisiting; not this task.
+  - No frontend change was needed: the click already routed through `openFile` →
+    `locationForPath`. The `!entry.is_markdown` guard at `file-tree-node.tsx:78` is on the
+    context menu only.
 - **Known rough edge, decide at the checkpoint:** `openFile` only navigates in place when the
   active tab's kind is `file`, so clicking the _same_ drawing in the sidebar while its tab is
   active opens a duplicate tab. Settings tabs behave identically today. T036 (Phase 6) hits this

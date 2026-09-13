@@ -172,6 +172,10 @@ full woff2>) }`, and rendering the SVG **inlined into the DOM** renders correct 
 - new `apps/desktop/tests/drawings.test.ts` — `isDrawingPath` extension table,
   `locationForPath` extension table, collision-suffix search with the existence check
   injected.
+- `apps/desktop/src-tauri/src/commands/fs.rs` — `is_sidebar_file`, so the sidebar lists
+  drawings and a drawing-only folder stays visible. Not anticipated when this spec was
+  written: the sidebar has only ever surfaced Markdown and directories, which made the
+  "clicked in the sidebar" acceptance criterion untestable. See the worksheet.
 - `docs/editor.md` — the `drawing` page kind and the no-live-refresh note.
 - `CHANGELOG.md`, `TODOS.md`.
 

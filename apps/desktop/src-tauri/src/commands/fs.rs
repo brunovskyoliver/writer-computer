@@ -117,10 +117,28 @@ pub(crate) fn modified_time(path: &std::path::Path) -> u64 {
         .unwrap_or(0)
 }
 
-/// Recursively checks if a directory contains at least one visible .md file.
+/// Compound extension for drawings. Mirrors `DRAWING_EXTENSION` in
+/// `apps/desktop/src/lib/drawings.ts` — a plain `.svg` is an image, not a
+/// drawing.
+const DRAWING_EXTENSION: &str = ".excalidraw.svg";
+
+/// The file kinds the sidebar surfaces: Markdown notes and drawings. One
+/// predicate so listing and folder visibility cannot drift apart — a drawing
+/// visible in a folder that the tree hides is the failure this prevents.
+fn is_sidebar_file(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    let lower = name.to_ascii_lowercase();
+    lower.ends_with(".md") && name.len() > 3
+        || (lower.ends_with(DRAWING_EXTENSION) && name.len() > DRAWING_EXTENSION.len())
+}
+
+/// Recursively classifies a directory tree by whether it holds anything the
+/// sidebar shows.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum DirectoryContent {
-    Markdown,
+    Visible,
     Empty,
     Other,
 }
@@ -142,8 +160,8 @@ fn visible_fs_entry(
 
 /// Classify a directory tree through the same visible/ignored lens as the
 /// sidebar. Folder-only trees count as empty so a newly created folder stays
-/// available for authoring; a visible non-Markdown file makes the tree
-/// `Other`. A Markdown file wins immediately.
+/// available for authoring; a visible file the sidebar would not list makes
+/// the tree `Other`. A sidebar file wins immediately.
 fn classify_directory_content(
     path: &Path,
     ignore: Option<&WorkspaceIgnore>,
@@ -154,13 +172,13 @@ fn classify_directory_content(
             continue;
         };
         if file_type.is_file() {
-            if entry_path.extension().and_then(|e| e.to_str()) == Some("md") {
-                return Ok(DirectoryContent::Markdown);
+            if is_sidebar_file(&entry_path) {
+                return Ok(DirectoryContent::Visible);
             }
             content = DirectoryContent::Other;
         } else if file_type.is_dir() {
             match classify_directory_content(&entry_path, ignore)? {
-                DirectoryContent::Markdown => return Ok(DirectoryContent::Markdown),
+                DirectoryContent::Visible => return Ok(DirectoryContent::Visible),
                 DirectoryContent::Other => content = DirectoryContent::Other,
                 DirectoryContent::Empty => {}
             }
@@ -169,29 +187,11 @@ fn classify_directory_content(
     Ok(content)
 }
 
-/// Fast indexed-path check for a folder-only tree. Once the Markdown index is
-/// ready we already know this subtree has no Markdown, so the first visible
-/// file proves it is not empty and lets us stop without walking the remainder.
-fn directory_tree_is_empty(
-    path: &Path,
-    ignore: Option<&WorkspaceIgnore>,
-) -> Result<bool, AppError> {
-    for entry in fs::read_dir(path)? {
-        let Some((entry_path, file_type)) = visible_fs_entry(entry, ignore)? else {
-            continue;
-        };
-        if file_type.is_file()
-            || (file_type.is_dir() && !directory_tree_is_empty(&entry_path, ignore)?)
-        {
-            return Ok(false);
-        }
-    }
-    Ok(true)
-}
-
 /// O(1) Markdown check via the pre-built set once available. Directories not
-/// in that set still need a recursive classification to distinguish durable
-/// empty folder trees from trees containing only non-Markdown files.
+/// in that set still need a recursive classification: the index only knows
+/// about Markdown, so a folder holding nothing but drawings is absent from it
+/// and would otherwise be hidden. The walk also distinguishes durable empty
+/// folder trees from trees containing only files the sidebar does not list.
 fn directory_is_sidebar_visible(
     path: &Path,
     state: Option<&WorkspaceState>,
@@ -207,17 +207,14 @@ fn directory_is_sidebar_visible(
         // concurrent workspace switch's `workspace_ignore.write()`).
         let ignore_arc: Option<Arc<WorkspaceIgnore>> =
             state.workspace_ignore.read().as_ref().map(Arc::clone);
-        if index_ready {
-            return directory_tree_is_empty(path, ignore_arc.as_deref());
-        }
         return Ok(matches!(
             classify_directory_content(path, ignore_arc.as_deref())?,
-            DirectoryContent::Markdown | DirectoryContent::Empty
+            DirectoryContent::Visible | DirectoryContent::Empty
         ));
     }
     Ok(matches!(
         classify_directory_content(path, None)?,
-        DirectoryContent::Markdown | DirectoryContent::Empty
+        DirectoryContent::Visible | DirectoryContent::Empty
     ))
 }
 
@@ -249,8 +246,9 @@ pub fn read_directory_impl(
         let name = entry.file_name().to_string_lossy().to_string();
 
         // Skip hidden files/dirs (the workspace `.gitignore` stays available
-        // because `read_directory` only surfaces markdown files and
-        // directories, never dotfiles — see the sidebar spec).
+        // because `read_directory` only surfaces the file kinds in
+        // `is_sidebar_file` plus directories, never dotfiles — see the sidebar
+        // spec).
         if name.starts_with('.') {
             continue;
         }
@@ -272,19 +270,26 @@ pub fn read_directory_impl(
                     title: None,
                 });
             }
-        } else if file_type.is_file() {
-            let is_markdown = entry_path.extension().and_then(|e| e.to_str()) == Some("md");
-            if is_markdown {
-                let title = extract_title(&entry_path);
-                files.push(DirEntry {
-                    name,
-                    path: entry_path.to_string_lossy().to_string(),
-                    is_dir: false,
-                    is_markdown: true,
-                    modified_at: modified_time(&entry_path),
-                    title,
-                });
-            }
+        } else if file_type.is_file() && is_sidebar_file(&entry_path) {
+            // `is_markdown` stays literal — it gates the file context menu and
+            // title extraction, neither of which applies to a drawing (whose
+            // title is its filename stem and whose body is SVG, not prose).
+            let is_markdown = entry_path
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| e.eq_ignore_ascii_case("md"));
+            files.push(DirEntry {
+                name,
+                path: entry_path.to_string_lossy().to_string(),
+                is_dir: false,
+                is_markdown,
+                modified_at: modified_time(&entry_path),
+                title: if is_markdown {
+                    extract_title(&entry_path)
+                } else {
+                    None
+                },
+            });
         }
     }
 
@@ -781,6 +786,43 @@ mod tests {
         for entry in &result {
             assert!(entry.is_dir || entry.is_markdown);
         }
+    }
+
+    #[test]
+    fn test_read_directory_lists_drawings_but_not_plain_svgs() {
+        let dir = setup_test_dir();
+        fs::write(dir.path().join("sketch.excalidraw.svg"), "<svg/>").unwrap();
+        fs::write(dir.path().join("logo.svg"), "<svg/>").unwrap();
+        let result = read_directory_impl(&dir.path().to_string_lossy(), None).unwrap();
+
+        let drawing = result
+            .iter()
+            .find(|entry| entry.name == "sketch.excalidraw.svg")
+            .expect("drawing is listed in the sidebar");
+        // Literal, not "openable": it gates the file context menu and title
+        // extraction, and a drawing has neither.
+        assert!(!drawing.is_markdown);
+        assert!(drawing.title.is_none());
+        assert!(!result.iter().any(|entry| entry.name == "logo.svg"));
+    }
+
+    #[test]
+    fn test_directory_holding_only_a_drawing_stays_visible() {
+        let dir = setup_test_dir();
+        fs::create_dir_all(dir.path().join("sketches")).unwrap();
+        fs::write(
+            dir.path().join("sketches").join("a.excalidraw.svg"),
+            "<svg/>",
+        )
+        .unwrap();
+        let result = read_directory_impl(&dir.path().to_string_lossy(), None).unwrap();
+
+        // Without the drawing the folder would classify as `Other` and be
+        // hidden, exactly as `empty/` (which holds a plain non-Markdown file) is.
+        assert!(result
+            .iter()
+            .any(|entry| entry.name == "sketches" && entry.is_dir));
+        assert!(!result.iter().any(|entry| entry.name == "empty"));
     }
 
     #[test]
