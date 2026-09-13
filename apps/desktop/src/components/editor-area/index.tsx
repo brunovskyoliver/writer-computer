@@ -1,6 +1,6 @@
 import { useCallback } from "react";
-import { useActiveTab, useActiveTabId, useOpenTabs } from "@/hooks/use-tabs";
-import { usePane } from "@/hooks/use-editor-layout";
+import { useActiveTab, useOpenTabs } from "@/hooks/use-tabs";
+import { usePane, useIsTabFocused } from "@/hooks/use-editor-layout";
 import { useEditorStore } from "@/stores/editor-store";
 import { paneOfTab } from "@/lib/editor-layout";
 import type { Tab } from "@/stores/editor-store";
@@ -25,17 +25,17 @@ interface EditorAreaProps {
  * cursor, and for a drawing it can flush a write — so a move would silently
  * save. Here the parent never changes; only `style` does.
  */
-function TabHost({ tab, isFocused }: { tab: Tab; isFocused: boolean }) {
+function TabHost({ tab }: { tab: Tab }) {
   // Which pane owns this tab is layout state, so read it from the store rather
   // than threading it down through the tree that must not own these bodies.
   const paneId = useEditorStore((s) => paneOfTab(s.layout, tab.id)?.id ?? null);
   const pane = usePane(paneId ?? "");
   const rect = usePaneRect(paneId ?? "");
   const isVisible = pane?.activeTabId === tab.id;
+  const isFocused = useIsTabFocused(tab.id);
 
   const kind = pageKind(tab.location);
   if (!kind.keepAlive && !isVisible) return null;
-  if (!rect) return null;
 
   const Component = pageKindView(tab.location).Component as React.ComponentType<{
     location: typeof tab.location;
@@ -47,12 +47,15 @@ function TabHost({ tab, isFocused }: { tab: Tab; isFocused: boolean }) {
   return (
     <div
       data-tab-host={tab.id}
-      className="absolute"
+      // Filling the container is the correct geometry for a single pane, so
+      // it is the right thing to draw before the first measurement lands and
+      // the right thing to fall back to if a measurement is ever missing. The
+      // editor area can never come up blank waiting on a ResizeObserver.
+      className={rect ? "absolute" : "absolute inset-0"}
       style={{
-        left: rect.left,
-        top: rect.top,
-        width: rect.width,
-        height: rect.height,
+        ...(rect
+          ? { left: rect.left, top: rect.top, width: rect.width, height: rect.height }
+          : null),
         // A body that is not its pane's active tab stays mounted but takes up
         // no visual space and receives nothing.
         display: isVisible ? undefined : "none",
@@ -70,7 +73,6 @@ function TabHost({ tab, isFocused }: { tab: Tab; isFocused: boolean }) {
 
 function EditorArea({ showFooter = true }: EditorAreaProps) {
   const activeTab = useActiveTab();
-  const activeTabId = useActiveTabId();
   const tabs = useOpenTabs();
 
   const containerRef = useCallback((element: HTMLDivElement | null) => {
@@ -84,7 +86,7 @@ function EditorArea({ showFooter = true }: EditorAreaProps) {
             rectangles these slots measure. */}
         <PaneLayout />
         {tabs.map((tab) => (
-          <TabHost key={tab.id} tab={tab} isFocused={tab.id === activeTabId} />
+          <TabHost key={tab.id} tab={tab} />
         ))}
       </div>
       {showFooter && activeTab
