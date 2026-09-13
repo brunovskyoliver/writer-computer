@@ -390,3 +390,9 @@ i{ a{ i< a< i" a" i' a' i\` a\``and`it at`.
 - Registers, marks and macros are session-only; there is no requirement to persist them.
 - Depends on the existing settings persistence, the existing save and tab-close paths, and
   the document footer. No backend (Rust) changes are expected.
+- Compact windows show no document footer, so with Vim on they get a footer strip holding
+  only the mode indicator and command line (no word counts). Without it the `:` prompt
+  would have nowhere to render, since the editor's own bottom panel is hidden app-wide.
+- The library's own "recording @a" message is not moved into the footer: it is dropped by
+  the library the moment any `:` prompt closes, so the footer's indicator reads the
+  recording state from the engine instead.
