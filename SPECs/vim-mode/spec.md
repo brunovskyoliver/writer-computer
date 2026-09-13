@@ -396,3 +396,12 @@ i{ a{ i< a< i" a" i' a' i\` a\``and`it at`.
 - The library's own "recording @a" message is not moved into the footer: it is dropped by
   the library the moment any `:` prompt closes, so the footer's indicator reads the
   recording state from the engine instead.
+- `:s` / `:%s` do not report a substitution count: the emulation library only reports
+  failures ("No matches for …", "Invalid regex …"), never a count, and Writer does not add
+  one. The result is visible in the document and reverts with one `u`.
+- Search-match colour is the CodeMirror search default: neither the app's find overlay nor
+  the emulation library themes `.cm-searchMatch`, so both use the same base colour.
+- The emulation library scrolls the editor's own scroller. Writer's editor scrolls through
+  an ancestor container, so `vim-scroll.ts` redirects the adapter's scroll geometry to
+  that container, with the visible window inset by the same safe margin the find overlay
+  uses. `zt` therefore lands a line just below the top fade, not under it.

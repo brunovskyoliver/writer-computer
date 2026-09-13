@@ -43,6 +43,8 @@ When the scrollable element is an ancestor:
 
 Reference: `EditorView.scrollHandler.of((view, range) => …)` in `apps/desktop/src/components/editor-area/use-prosemark-editor.ts`.
 
+The same rule covers libraries that scroll on their own: `@replit/codemirror-vim`'s CM5 adapter reads and writes `view.scrollDOM` for `Ctrl+D/U/F/B/E/Y`, `zz`/`zt`/`zb` and `H`/`M`/`L`. `vim-scroll.ts` replaces the adapter's `getScrollInfo` / `scrollTo` / `findPosV("page")` on the instance so they measure and move the ancestor scroller instead (inset by `EDITOR_SAFE_SCROLL_MARGIN`, like search navigation).
+
 ## Block widgets: pick the decoration shape
 
 Common shapes for widgets that own a block region:

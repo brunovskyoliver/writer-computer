@@ -5,6 +5,7 @@ import * as editorApi from "@/hooks/editor-api";
 import { saveNow } from "@/lib/save";
 import { useSettingsStore } from "@/stores/settings-store";
 import { registerVimExCommands } from "./vim-ex-commands";
+import { redirectVimScrollToOuterScroller } from "./vim-scroll";
 import {
   createTab,
   deleteTab,
@@ -101,6 +102,8 @@ class VimModePlugin implements PluginValue {
     const cm = mod.getCM(this.view);
     if (!cm) throw new Error("[vim-mode] vim() configured but no CM5 adapter on the view");
 
+    // A fresh adapter is built on every enable, so the redirect goes with it.
+    redirectVimScrollToOuterScroller(cm, this.view);
     this.cm = cm;
     this.vim = mod.Vim;
     this.enabled = true;
