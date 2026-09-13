@@ -1,9 +1,11 @@
 import { Compartment, type Extension } from "@codemirror/state";
 import { EditorView, ViewPlugin, type PluginValue, type ViewUpdate } from "@codemirror/view";
 import type { CodeMirror, CodeMirrorV } from "@replit/codemirror-vim";
+import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import * as editorApi from "@/hooks/editor-api";
 import { saveNow } from "@/lib/save";
 import { useSettingsStore } from "@/stores/settings-store";
+import { createVimClipboardBridge, type VimClipboardBridge } from "./vim-clipboard";
 import { registerVimExCommands } from "./vim-ex-commands";
 import { redirectVimScrollToOuterScroller } from "./vim-scroll";
 import {
@@ -25,13 +27,24 @@ import {
  * plugin owns the settings subscription, mirrors the library's events into
  * `vim-store` for the footer, and moves the library's prompt/notification
  * nodes into the footer's dialog host so they render in the app's chrome.
+ * Registers are a library singleton, so the clipboard bridge is module-scoped
+ * and shared by every enabled view.
  */
 
 type VimModule = typeof import("@replit/codemirror-vim");
 
 let vimModule: Promise<VimModule> | null = null;
+let clipboardBridge: VimClipboardBridge | null = null;
 function loadVim(): Promise<VimModule> {
   vimModule ??= import("@replit/codemirror-vim").then((mod) => {
+    clipboardBridge = createVimClipboardBridge({
+      register: () => mod.Vim.getRegisterController().unnamedRegister,
+      readText,
+      writeText,
+      // `copy` / `cut` bubble from the editor to the window, and `focus` fires
+      // there when the app comes back to the front.
+      target: window,
+    });
     registerVimExCommands(mod.Vim, {
       resolve: (view) => {
         const registration = editorApi.getEditorRegistrationForView(view);
@@ -107,6 +120,7 @@ class VimModePlugin implements PluginValue {
     this.cm = cm;
     this.vim = mod.Vim;
     this.enabled = true;
+    clipboardBridge!.acquire();
     createTab(this.getTabId());
 
     cm.on("vim-mode-change", this.onModeChange);
@@ -124,9 +138,20 @@ class VimModePlugin implements PluginValue {
     cm.off("dialog", this.onDialog);
     this.dropHostedDialog();
 
+    // A recording is global; leaving it live behind a disabled view would
+    // silently resume on the next enable. Its dialog goes away with the
+    // panel below, and its close callback would focus the editor (stealing
+    // focus from the Settings toggle), so it is dropped rather than run.
+    const macro = this.vim!.getVimGlobalState_().macroModeState;
+    if (macro.isRecording) {
+      macro.onRecordingDone = undefined;
+      macro.exitMacroRecordMode();
+    }
+
     this.enabled = false;
     this.cm = null;
     this.vim = null;
+    clipboardBridge!.release();
     // Reconfiguring never touches the document: caret, scroll and history
     // survive the flip.
     this.view.dispatch({ effects: this.compartment.reconfigure([]) });
@@ -160,11 +185,21 @@ class VimModePlugin implements PluginValue {
     setTabPending(this.getTabId(), this.cm?.state.vim?.status ?? "");
   };
 
+  /**
+   * The engine signals `vim-command-done` when it clears its input state,
+   * which is *before* it runs the action or operator it just parsed. The
+   * recording flag and the registers are read a microtask later so they
+   * reflect the command that just finished, not the one before it.
+   */
   private readonly onCommandDone = () => {
     const tabId = this.getTabId();
     setTabPending(tabId, "");
-    const macro = this.vim?.getVimGlobalState_().macroModeState;
-    setTabRecording(tabId, macro?.isRecording ? (macro.latestRegister ?? null) : null);
+    queueMicrotask(() => {
+      if (!this.enabled) return;
+      const macro = this.vim!.getVimGlobalState_().macroModeState;
+      setTabRecording(tabId, macro.isRecording ? (macro.latestRegister ?? null) : null);
+      clipboardBridge!.syncRegisterToClipboard();
+    });
   };
 
   /**
@@ -207,6 +242,7 @@ class VimModePlugin implements PluginValue {
     // The view is going away; skip the reconfigure and just release the mirror.
     this.enabled = false;
     this.dropHostedDialog();
+    clipboardBridge!.release();
     deleteTab(this.getTabId());
   }
 }
