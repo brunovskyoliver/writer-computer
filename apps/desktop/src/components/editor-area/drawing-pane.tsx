@@ -45,7 +45,7 @@ export function DrawingPane({
       >
         {/* Keyed by path so navigating a tab to another drawing remounts with
             fresh state rather than reusing the previous scene. */}
-        <DrawingEditor key={location.path} path={location.path} />
+        <DrawingEditor key={location.path} path={location.path} isActive={isActive} />
       </Suspense>
     </div>
   );

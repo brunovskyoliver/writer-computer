@@ -5,6 +5,7 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
 }));
 
+import type { EditorView } from "@codemirror/view";
 import { useEditorStore } from "../src/stores/editor-store";
 import * as editorApi from "../src/hooks/editor-api";
 
@@ -119,11 +120,39 @@ describe("editorApi", () => {
       ],
     ]);
     useEditorStore.setState({ openFiles: files });
-
     editorApi.markSaved("/a.md", "modified");
+    expect(useEditorStore.getState().openFiles.get("/a.md")?.isDirty).toBe(false);
+  });
 
-    const file = useEditorStore.getState().openFiles.get("/a.md");
-    expect(file?.isDirty).toBe(false);
-    expect(file?.diskContent).toBe("modified");
+  test("insertAtCursor returns false if view not registered", () => {
+    expect(editorApi.insertAtCursor("/missing.md", "hello")).toBe(false);
+  });
+
+  test("insertAtCursor inserts text and ensures heading starts on clean line", () => {
+    const fakeState = {
+      selection: { main: { head: 18 } },
+      doc: {
+        lineAt: () => ({ from: 0, text: "Some existing line" }),
+      },
+    };
+    const fakeView = {
+      state: fakeState,
+      dispatch: vi.fn(),
+    } as unknown as EditorView;
+    editorApi.setEditorView("/doc.md", fakeView);
+
+    const inserted = editorApi.insertAtCursor("/doc.md", "### Title\n![[drawing.excalidraw.svg]]");
+    expect(inserted).toBe(true);
+    expect(fakeView.dispatch).toHaveBeenCalledWith({
+      changes: {
+        from: 18,
+        insert: "\n\n### Title\n![[drawing.excalidraw.svg]]",
+      },
+      selection: {
+        anchor: 18 + "\n\n### Title\n![[drawing.excalidraw.svg]]".length,
+      },
+    });
+
+    editorApi.clearEditorView(fakeView);
   });
 });

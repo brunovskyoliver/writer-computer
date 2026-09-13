@@ -24,6 +24,39 @@ export function isDrawingPath(path: string): boolean {
   return name.length > DRAWING_EXTENSION.length && name.toLowerCase().endsWith(DRAWING_EXTENSION);
 }
 
+/**
+ * Sanitize a user-provided raw drawing name into a clean filename stem.
+ * Strips any `.excalidraw.svg` or `.svg` suffix, trims whitespace, and replaces
+ * directory separators with hyphens. Defaults to "drawing" if empty.
+ */
+export function sanitizeDrawingStem(rawName?: string | null): string {
+  if (!rawName) return "drawing";
+  let name = rawName.trim();
+  if (name.toLowerCase().endsWith(DRAWING_EXTENSION)) {
+    name = name.slice(0, -DRAWING_EXTENSION.length).trim();
+  } else if (name.toLowerCase().endsWith(".svg")) {
+    name = name.slice(0, -4).trim();
+  }
+  name = name.replace(/[/\\]+/g, "-").trim();
+  return name || "drawing";
+}
+
+/**
+ * Extract the display title from a user-provided drawing name.
+ * Strips any `.excalidraw.svg` or `.svg` suffix and trims whitespace.
+ * Returns empty string if blank.
+ */
+export function extractDrawingTitle(rawName?: string | null): string {
+  if (!rawName) return "";
+  let name = rawName.trim();
+  if (name.toLowerCase().endsWith(DRAWING_EXTENSION)) {
+    name = name.slice(0, -DRAWING_EXTENSION.length).trim();
+  } else if (name.toLowerCase().endsWith(".svg")) {
+    name = name.slice(0, -4).trim();
+  }
+  return name.trim();
+}
+
 export type DrawingScene = {
   elements: readonly NonDeletedExcalidrawElement[];
   appState: Partial<AppState>;
@@ -100,7 +133,7 @@ export function drawingName(path: string): string {
 }
 
 /**
- * First free `drawing.excalidraw.svg`, `drawing-1…`, … in `dir`. The existence
+ * First free `<stem>.excalidraw.svg`, `<stem>-1…`, … in `dir`. The existence
  * check is a parameter so the collision walk is testable without the invoke
  * layer; callers pass `tauri.fileExists`.
  *
@@ -110,9 +143,11 @@ export function drawingName(path: string): string {
 export async function nextAvailableDrawingPath(
   dir: string,
   exists: (path: string) => Promise<boolean>,
+  rawStem = "drawing",
 ): Promise<string> {
+  const stem = sanitizeDrawingStem(rawStem);
   for (let n = 0; ; n++) {
-    const path = `${dir}/drawing${n === 0 ? "" : `-${n}`}${DRAWING_EXTENSION}`;
+    const path = `${dir}/${stem}${n === 0 ? "" : `-${n}`}${DRAWING_EXTENSION}`;
     if (!(await exists(path))) return path;
   }
 }

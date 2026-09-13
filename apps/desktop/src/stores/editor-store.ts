@@ -1,3 +1,9 @@
+import {
+  hasDrawingSession,
+  withDrawingSaveBoundary,
+  discardDrawingSessions,
+  reportDrawingSaveError,
+} from "@/lib/drawing-sessions";
 import { create } from "zustand";
 import type { FileContent } from "@/types/fs";
 import * as tauri from "@/lib/tauri";
@@ -629,33 +635,42 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   closeTab: (tabId: string) => {
-    set((state) => {
-      const index = getTabIndex(state.tabs, tabId);
-      if (index === -1) return state;
+    const close = () => {
+      set((state) => {
+        const index = getTabIndex(state.tabs, tabId);
+        if (index === -1) return state;
 
-      const closedTab = state.tabs[index]!;
-      let tabs = state.tabs.filter((tab) => tab.id !== tabId);
+        const closedTab = state.tabs[index]!;
+        let tabs = state.tabs.filter((tab) => tab.id !== tabId);
 
-      let activeTabId = state.activeTabId;
-      if (tabs.length === 0) {
-        const launcherTab = createLauncherTab();
-        tabs = [launcherTab];
-        activeTabId = launcherTab.id;
-      } else if (state.activeTabId === tabId) {
-        activeTabId = tabs[index]?.id ?? tabs[index - 1]?.id ?? null;
-      }
+        let activeTabId = state.activeTabId;
+        if (tabs.length === 0) {
+          const launcherTab = createLauncherTab();
+          tabs = [launcherTab];
+          activeTabId = launcherTab.id;
+        } else if (state.activeTabId === tabId) {
+          activeTabId = tabs[index]?.id ?? tabs[index - 1]?.id ?? null;
+        }
 
-      const files = maybePruneFiles(state, tabs, tabPaths(closedTab));
+        const files = maybePruneFiles(state, tabs, tabPaths(closedTab));
 
-      return {
-        tabs,
-        activeTabId,
-        activeFilePath: deriveActiveFilePath(tabs, activeTabId),
-        ...(files ? { openFiles: files } : {}),
-      };
-    });
+        return {
+          tabs,
+          activeTabId,
+          activeFilePath: deriveActiveFilePath(tabs, activeTabId),
+          ...(files ? { openFiles: files } : {}),
+        };
+      });
 
-    pendingNavigationVersionByTabId.delete(tabId);
+      pendingNavigationVersionByTabId.delete(tabId);
+    };
+    const tab = get().tabs.find((candidate) => candidate.id === tabId);
+    const path = tab?.location.kind === "drawing" ? tab.location.path : null;
+    if (path && hasDrawingSession(path)) {
+      void withDrawingSaveBoundary(close, path).catch(reportDrawingSaveError);
+    } else {
+      close();
+    }
   },
 
   closeActiveTab: () => {
@@ -904,6 +919,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   // tabs, history, openFiles, and pending saves are all cleaned up explicitly
   // instead of relying on the file watcher to fix things up later.
   removePathReferences: (path: string) => {
+    discardDrawingSessions(path);
     set((state) => {
       const transform = (loc: Location) => removeFromLocation(loc, path);
       const tabs = state.tabs
@@ -936,6 +952,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   // Drop every reference to paths starting with `prefix` from editor state.
   // Used after deleting a folder to clean up all contained files.
   removePathsWithPrefix: (prefix: string) => {
+    discardDrawingSessions(prefix);
     const dirPrefix = prefix.endsWith("/") ? prefix : `${prefix}/`;
     const matches = (p: string) => p === prefix || p.startsWith(dirPrefix);
 

@@ -1,3 +1,4 @@
+import { discardDrawingSessions, withDrawingSaveBoundary } from "@/lib/drawing-sessions";
 import { useCallback } from "react";
 import {
   useRefreshDirectory,
@@ -31,13 +32,17 @@ export function useMoveEntry() {
   // its name (rename) or its parent (move) — the handling is identical.
   const applyPathChange = useCallback(
     async (entry: DirEntry, newPath: string): Promise<void> => {
-      await tauri.renameEntry(entry.path, newPath);
+      await withDrawingSaveBoundary(async () => {
+        await tauri.renameEntry(entry.path, newPath);
+        discardDrawingSessions(entry.path);
+      }, entry.path);
       if (entry.is_dir) {
         rewritePathPrefix(entry.path, newPath);
         rewriteExpandedDir(entry.path, newPath);
         rewritePinnedPath(entry.path, newPath);
       } else {
         renameOpenFile(entry.path, newPath);
+        rewritePathPrefix(entry.path, newPath);
         rewritePinnedPath(entry.path, newPath);
       }
       const fromParent = getParentDir(entry.path);

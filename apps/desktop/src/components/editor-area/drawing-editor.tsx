@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Excalidraw, getSceneVersion } from "@excalidraw/excalidraw";
+import { Excalidraw } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
 import type { AppState, BinaryFiles } from "@excalidraw/excalidraw/types";
 import type { OrderedExcalidrawElement } from "@excalidraw/excalidraw/element/types";
-import { loadDrawing, saveDrawing, type DrawingScene } from "@/lib/drawings";
+import { loadDrawing, type DrawingScene } from "@/lib/drawings";
+import {
+  createDrawingSession,
+  registerDrawingSession,
+  saveDrawingSessions,
+} from "@/lib/drawing-sessions";
 import { useSetting } from "@/hooks/use-settings";
 import { activeMode, type ThemePreference } from "@/lib/theme";
 
@@ -22,19 +27,7 @@ declare global {
 }
 window.EXCALIDRAW_ASSET_PATH = new URL("excalidraw-assets/", window.location.href).href;
 
-// Excalidraw's `onChange` fires continuously while drawing, and a save is not
-// cheap: `exportToSvg` with `exportEmbedScene` re-renders the whole scene,
-// serializes it into the SVG, and any markdown tab embedding the drawing then
-// re-decodes the new file. At 150 ms every pause to reposition the pointer
-// triggered that. A pending save is flushed on unmount, so a longer window
-// costs nothing but delay.
-const SAVE_DEBOUNCE_MS = 1000;
-
-// Keeps Excalidraw's own look; restyling it to match Writer is out of scope
-// and would break on every upgrade. The two disabled actions are load/save
-// *scene* — a foreign scene loaded into this tab would autosave straight over
-// the file the tab is bound to. Module scope so the object identity is stable
-// across renders.
+// Writer owns persistence; keep native scene load/save actions disabled.
 const UI_OPTIONS = { canvasActions: { loadScene: false, saveToActiveFile: false } };
 
 type LoadState =
@@ -42,116 +35,48 @@ type LoadState =
   | { status: "error"; message: string }
   | { status: "ready"; scene: DrawingScene };
 
-type PendingChange = {
-  elements: readonly OrderedExcalidrawElement[];
-  appState: AppState;
-  files: BinaryFiles;
-  version: number;
-  bgColor?: string;
-  filesCount: number;
-};
-
-export default function DrawingEditor({ path }: { path: string }) {
+export default function DrawingEditor({
+  path,
+  isActive = true,
+}: {
+  path: string;
+  isActive?: boolean;
+}) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const themePreference = useSetting("appearance.theme") as ThemePreference | undefined;
-  // ponytail: reads the preference, not the resolved DOM attribute. An OS
-  // theme flip while the preference is "system" won't repaint an already-open
-  // drawing tab until it remounts — the same gap the rest of the React tree
-  // has (only CSS vars follow the system live).
   const theme = activeMode(themePreference);
-
-  const pathRef = useRef(path);
-  pathRef.current = path;
-
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingChange = useRef<PendingChange | null>(null);
-  const lastSavedVersion = useRef<number>(-1);
-  const lastSavedBg = useRef<string | undefined>(undefined);
-  const lastSavedFilesCount = useRef<number>(0);
-
-  // Excalidraw emits an `onChange` at mount that can carry an empty element
-  // array before `initialData` is applied. Saving that would overwrite the
-  // user's real drawing with nothing — the highest-consequence failure in this
-  // feature. Stay disarmed until the first non-empty change; once armed, an
-  // empty scene is a real "user deleted everything" and does save.
-  const armed = useRef(false);
+  const session = useRef<ReturnType<typeof createDrawingSession> | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    void loadDrawing(path).then((result) => {
-      if (cancelled) return;
-      if (!result.ok) {
-        setState({ status: "error", message: result.error });
-        return;
-      }
-      armed.current = result.scene.elements.length === 0;
-      lastSavedVersion.current = getSceneVersion(result.scene.elements);
-      lastSavedBg.current = result.scene.appState.viewBackgroundColor;
-      lastSavedFilesCount.current = Object.keys(result.scene.files ?? {}).length;
-      setState({ status: "ready", scene: result.scene });
-    });
+    let unregister: (() => void) | undefined;
+    // A tab reopened while its previous export finishes must read that write.
+    void saveDrawingSessions(path)
+      .then(() => loadDrawing(path))
+      .then((result) => {
+        if (cancelled) return;
+        if (!result.ok) {
+          setState({ status: "error", message: result.error });
+          return;
+        }
+        session.current = createDrawingSession(path, result.scene);
+        unregister = registerDrawingSession(path, session.current.save, session.current.settled);
+        setState({ status: "ready", scene: result.scene });
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setState({ status: "error", message: String(error) });
+      });
     return () => {
       cancelled = true;
+      unregister?.();
     };
   }, [path]);
 
-  const flushSave = useCallback(() => {
-    if (!saveTimer.current) return;
-    clearTimeout(saveTimer.current);
-    saveTimer.current = null;
-    const change = pendingChange.current;
-    if (!change) return;
-    lastSavedVersion.current = change.version;
-    lastSavedBg.current = change.bgColor;
-    lastSavedFilesCount.current = change.filesCount;
-    void saveDrawing(pathRef.current, {
-      elements: change.elements.filter((element) => !element.isDeleted),
-      appState: change.appState,
-      files: change.files,
-    });
-  }, []);
-
-  // Flush a pending save on unmount (tab close), or the last edits within the
-  // debounce window are dropped. `saveDrawing` serializes writes per path, so
-  // this can't race an in-flight export.
-  useEffect(() => () => flushSave(), [flushSave]);
-
   const handleChange = useCallback(
     (elements: readonly OrderedExcalidrawElement[], appState: AppState, files: BinaryFiles) => {
-      if (!armed.current) {
-        if (elements.length === 0) return;
-        armed.current = true;
-      }
-
-      const version = getSceneVersion(elements);
-      const bgColor = appState.viewBackgroundColor;
-      const filesCount = Object.keys(files ?? {}).length;
-
-      // Skip saves and allocations if scene elements/content haven't mutated
-      // (e.g. pan, zoom, selection, hover, cursor moves).
-      if (
-        version === lastSavedVersion.current &&
-        bgColor === lastSavedBg.current &&
-        filesCount === lastSavedFilesCount.current
-      ) {
-        return;
-      }
-
-      pendingChange.current = {
-        elements,
-        appState,
-        files,
-        version,
-        bgColor,
-        filesCount,
-      };
-
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-      saveTimer.current = setTimeout(() => {
-        flushSave();
-      }, SAVE_DEBOUNCE_MS);
+      session.current?.change(elements, appState, files);
     },
-    [flushSave],
+    [],
   );
 
   if (state.status === "loading") {
@@ -165,7 +90,7 @@ export default function DrawingEditor({ path }: { path: string }) {
         <p className="font-medium">This drawing could not be opened.</p>
         <p className="text-muted-foreground mt-1 font-mono text-xs break-all">{state.message}</p>
         <p className="text-muted-foreground mt-2">
-          The file has not been modified. Autosave is off for this tab.
+          The file has not been modified. Saving is disabled for this tab.
         </p>
       </div>
     );
@@ -177,6 +102,8 @@ export default function DrawingEditor({ path }: { path: string }) {
       theme={theme}
       onChange={handleChange}
       UIOptions={UI_OPTIONS}
+      handleKeyboardGlobally={false}
+      viewModeEnabled={!isActive}
     />
   );
 }

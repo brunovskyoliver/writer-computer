@@ -8,7 +8,12 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: vi.fn(),
 }));
 
-import { isDrawingPath, nextAvailableDrawingPath } from "../src/lib/drawings";
+import {
+  extractDrawingTitle,
+  isDrawingPath,
+  nextAvailableDrawingPath,
+  sanitizeDrawingStem,
+} from "../src/lib/drawings";
 import { locationForPath } from "../src/stores/editor-store";
 
 describe("isDrawingPath", () => {
@@ -37,6 +42,45 @@ describe("isDrawingPath", () => {
       expect(isDrawingPath(path)).toBe(expected);
     });
   }
+});
+
+describe("sanitizeDrawingStem", () => {
+  test("defaults to drawing when empty or whitespace", () => {
+    expect(sanitizeDrawingStem("")).toBe("drawing");
+    expect(sanitizeDrawingStem("   ")).toBe("drawing");
+    expect(sanitizeDrawingStem(null)).toBe("drawing");
+    expect(sanitizeDrawingStem(undefined)).toBe("drawing");
+  });
+
+  test("preserves valid stems", () => {
+    expect(sanitizeDrawingStem("architecture")).toBe("architecture");
+    expect(sanitizeDrawingStem("System Overview")).toBe("System Overview");
+  });
+
+  test("strips excalidraw.svg extension", () => {
+    expect(sanitizeDrawingStem("flowchart.excalidraw.svg")).toBe("flowchart");
+    expect(sanitizeDrawingStem("flowchart.EXCALIDRAW.SVG")).toBe("flowchart");
+    expect(sanitizeDrawingStem("diagram.svg")).toBe("diagram");
+  });
+
+  test("replaces path separators with dashes", () => {
+    expect(sanitizeDrawingStem("folder/drawing")).toBe("folder-drawing");
+    expect(sanitizeDrawingStem("folder\\sub\\drawing")).toBe("folder-sub-drawing");
+  });
+});
+
+describe("extractDrawingTitle", () => {
+  test("returns empty string when blank", () => {
+    expect(extractDrawingTitle("")).toBe("");
+    expect(extractDrawingTitle("   ")).toBe("");
+    expect(extractDrawingTitle(null)).toBe("");
+  });
+
+  test("returns cleaned title", () => {
+    expect(extractDrawingTitle("System Architecture")).toBe("System Architecture");
+    expect(extractDrawingTitle("flowchart.excalidraw.svg")).toBe("flowchart");
+    expect(extractDrawingTitle("diagram.svg")).toBe("diagram");
+  });
 });
 
 describe("locationForPath", () => {
@@ -89,5 +133,24 @@ describe("nextAvailableDrawingPath", () => {
     expect(await nextAvailableDrawingPath("/vault/notes", existsIn(taken))).toBe(
       "/vault/notes/drawing.excalidraw.svg",
     );
+  });
+
+  test("custom stem without collision", async () => {
+    expect(
+      await nextAvailableDrawingPath("/vault/notes", existsIn([]), "system architecture"),
+    ).toBe("/vault/notes/system architecture.excalidraw.svg");
+  });
+
+  test("custom stem with collision", async () => {
+    const taken = ["/vault/notes/architecture.excalidraw.svg"];
+    expect(await nextAvailableDrawingPath("/vault/notes", existsIn(taken), "architecture")).toBe(
+      "/vault/notes/architecture-1.excalidraw.svg",
+    );
+  });
+
+  test("custom stem with extension typed", async () => {
+    expect(
+      await nextAvailableDrawingPath("/vault/notes", existsIn([]), "architecture.excalidraw.svg"),
+    ).toBe("/vault/notes/architecture.excalidraw.svg");
   });
 });

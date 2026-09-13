@@ -1,3 +1,4 @@
+import { saveDrawingSessions, reportDrawingSaveError } from "@/lib/drawing-sessions";
 import { useEffect } from "react";
 import { useUIStore } from "@/stores/ui-store";
 import { useEditorStore } from "@/stores/editor-store";
@@ -115,7 +116,30 @@ export function useKeyboardShortcuts() {
         return;
       }
     }
+    function captureDrawingKey(e: KeyboardEvent) {
+      if (document.body.inert) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        return;
+      }
+      if ((e.target as Element | null)?.closest?.('[role="dialog"], dialog')) return;
+      const mod = e.metaKey || e.ctrlKey;
+      const { tabs, activeTabId } = useEditorStore.getState();
+      if (mod && e.key.toLowerCase() === "s") {
+        const tab = tabs.find((candidate) => candidate.id === activeTabId);
+        if (tab?.location.kind === "drawing") {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          void saveDrawingSessions(tab.location.path).catch(reportDrawingSaveError);
+          return;
+        }
+      }
+    }
+    window.addEventListener("keydown", captureDrawingKey, true);
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", captureDrawingKey, true);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
   }, []);
 }

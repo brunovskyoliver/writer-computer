@@ -1,3 +1,4 @@
+import { deleteEntryAfterDrawingWrites } from "@/lib/drawing-sessions";
 import { useCallback } from "react";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import {
@@ -125,7 +126,7 @@ export function useFileTreeContextMenus({
               if (!confirmed) return;
             }
             try {
-              await tauri.deleteEntry(entry.path);
+              await deleteEntryAfterDrawingWrites(entry.path);
               removePathReferences(entry.path);
               removePinnedFile(entry.path);
               await refreshDirectory(parent);
@@ -198,7 +199,7 @@ export function useFileTreeContextMenus({
             }
 
             try {
-              await tauri.deleteEntry(entry.path);
+              await deleteEntryAfterDrawingWrites(entry.path);
               removePathsWithPrefix(entry.path);
               removePinnedFilesWithPrefix(entry.path);
               invalidatePath(entry.path);
@@ -261,7 +262,7 @@ export function useFileTreeContextMenus({
               await Promise.all(
                 pathArray.map(async (p) => {
                   try {
-                    await tauri.deleteEntry(p);
+                    await deleteEntryAfterDrawingWrites(p);
                     removePathReferences(p);
                     removePinnedFile(p);
                     removePinnedFilesWithPrefix(p);

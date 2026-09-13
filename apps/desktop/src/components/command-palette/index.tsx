@@ -33,7 +33,13 @@ import { useGlobalRecentFiles } from "@/hooks/use-global-recent-files";
 import { openStandaloneFile } from "@/hooks/use-open-drop";
 import { settingsKind } from "@/components/editor-area/page-kinds/settings";
 import { getFileName, getFileStem, getParentDir } from "@/lib/paths";
-import { createDrawing, nextAvailableDrawingPath } from "@/lib/drawings";
+import {
+  DRAWING_EXTENSION,
+  createDrawing,
+  extractDrawingTitle,
+  nextAvailableDrawingPath,
+  sanitizeDrawingStem,
+} from "@/lib/drawings";
 import { showEditorNotice } from "@/components/editor-area/editor-notice-store";
 import * as editorApi from "@/hooks/editor-api";
 import * as tauri from "@/lib/tauri";
@@ -83,8 +89,9 @@ export function CommandPalette() {
   const isCompactFileMode = useIsCompactFileMode();
 
   const isCreateIntent = intent === "create-file";
+  const isDrawingIntent = intent === "create-drawing";
   const trimmedSearch = search.trim();
-  const fileQuery = isCreateIntent ? "" : search;
+  const fileQuery = isCreateIntent || isDrawingIntent ? "" : search;
   // Standalone compact windows have no workspace index — search filters the
   // global recents list client-side instead of hitting fuzzy_search.
   const results = useFuzzySearch(isCompactFileMode ? "" : fileQuery);
@@ -119,11 +126,29 @@ export function CommandPalette() {
   // `activeFilePath` is null, so the drawing lands in the workspace root and
   // nothing is inserted. Drawings go in the note's own directory: Writer has
   // no attachment-folder concept and this does not add one.
-  async function handleNewDrawing(baseDir: string, notePath: string | null) {
-    const path = await nextAvailableDrawingPath(baseDir, tauri.fileExists);
+  async function handleNewDrawing(baseDir: string, notePath: string | null, rawName?: string) {
+    const title = extractDrawingTitle(rawName);
+    const stem = sanitizeDrawingStem(rawName);
+    const path = await nextAvailableDrawingPath(baseDir, tauri.fileExists, stem);
     await createDrawing(path);
-    if (notePath) editorApi.insertAtCursor(notePath, `![[${getFileName(path)}]]`);
+    if (notePath) {
+      const embed = `![[${getFileName(path)}]]`;
+      const insertText = title ? `### ${title}\n${embed}` : embed;
+      editorApi.insertAtCursor(notePath, insertText);
+    }
     await openFile(path);
+  }
+
+  function handleCreateDrawing() {
+    const noteDir = activeFilePath ? getParentDir(activeFilePath) : root;
+    if (!noteDir) return;
+    close();
+    void handleNewDrawing(noteDir, activeFilePath, trimmedSearch).catch((error) => {
+      console.error("[command-palette] Failed to create drawing:", error);
+      showEditorNotice(
+        `Could not create drawing: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
   }
 
   async function handleOpenWorkspace() {
@@ -163,16 +188,7 @@ export function CommandPalette() {
         id: "new-drawing",
         label: "Create New Drawing",
         description: "Command",
-        run: () => {
-          const noteDir = activeFilePath ? getParentDir(activeFilePath) : root;
-          close();
-          void handleNewDrawing(noteDir, activeFilePath).catch((error) => {
-            console.error("[command-palette] Failed to create drawing:", error);
-            showEditorNotice(
-              `Could not create drawing: ${error instanceof Error ? error.message : String(error)}`,
-            );
-          });
-        },
+        run: () => openCommandPalette("create-drawing"),
       },
     root &&
       activeFilePath && {
@@ -240,9 +256,9 @@ export function CommandPalette() {
   ].filter((c): c is Command => Boolean(c));
 
   const visibleFiles: SearchResult[] =
-    !isCreateIntent && trimmedSearch && !isCompactFileMode ? results : [];
+    !isCreateIntent && !isDrawingIntent && trimmedSearch && !isCompactFileMode ? results : [];
   const visibleRecents: RecentFile[] =
-    !isCreateIntent && isCompactFileMode && trimmedSearch
+    !isCreateIntent && !isDrawingIntent && isCompactFileMode && trimmedSearch
       ? globalRecents.filter(
           (entry) =>
             matchesSearch(entry.title ?? "", trimmedSearch) ||
@@ -250,13 +266,19 @@ export function CommandPalette() {
             matchesSearch(entry.path, trimmedSearch),
         )
       : [];
-  const visibleCommands = isCreateIntent
-    ? []
-    : trimmedSearch
-      ? commands.filter((c) => matchesSearch(c.label, trimmedSearch))
-      : commands;
-  const firstValue =
-    visibleCommands[0]?.id ?? visibleFiles[0]?.path ?? visibleRecents[0]?.path ?? "";
+  const visibleCommands =
+    isCreateIntent || isDrawingIntent
+      ? []
+      : trimmedSearch
+        ? commands.filter((c) => matchesSearch(c.label, trimmedSearch))
+        : commands;
+
+  const drawingActionValue = "create-drawing-action";
+  const firstValue = isDrawingIntent
+    ? drawingActionValue
+    : isCreateIntent
+      ? (createPath ?? "")
+      : (visibleCommands[0]?.id ?? visibleFiles[0]?.path ?? visibleRecents[0]?.path ?? "");
 
   const listRef = useRef<HTMLDivElement>(null);
   const [selectedValue, setSelectedValue] = useState(firstValue);
@@ -272,7 +294,11 @@ export function CommandPalette() {
   }, [search, intent, firstValue]);
   /* eslint-enable react-doctor/no-derived-state */
 
-  const placeholder = isCreateIntent ? "Create a new note..." : "Search...";
+  const placeholder = isCreateIntent
+    ? "Create a new note..."
+    : isDrawingIntent
+      ? "Drawing name (optional, press Enter to skip)..."
+      : "Search...";
 
   return (
     <CommandDialog
@@ -298,6 +324,24 @@ export function CommandPalette() {
               </CommandGroup>
             )}
           </>
+        ) : isDrawingIntent ? (
+          <CommandGroup heading="Create drawing">
+            <CommandItem value={drawingActionValue} onSelect={handleCreateDrawing}>
+              <div className="flex flex-col">
+                <span>
+                  Create:{" "}
+                  {trimmedSearch
+                    ? `${sanitizeDrawingStem(trimmedSearch)}${DRAWING_EXTENSION}`
+                    : `drawing${DRAWING_EXTENSION}`}
+                </span>
+                <span className="text-[13px] text-text-muted">
+                  {trimmedSearch
+                    ? `Heading: "### ${extractDrawingTitle(trimmedSearch)}"`
+                    : "Leave blank for default name without heading (press Enter)"}
+                </span>
+              </div>
+            </CommandItem>
+          </CommandGroup>
         ) : (
           <>
             {visibleFiles.length === 0 &&

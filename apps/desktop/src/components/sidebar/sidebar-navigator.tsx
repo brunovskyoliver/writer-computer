@@ -1,3 +1,4 @@
+import { deleteEntryAfterDrawingWrites } from "@/lib/drawing-sessions";
 import { useCallback, useState, type MouseEvent } from "react";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { useWorkspace } from "@/hooks/use-workspace";
@@ -172,7 +173,7 @@ export function SidebarNavigator({
               if (!confirmed) return;
             }
             try {
-              await tauri.deleteEntry(entry.path);
+              await deleteEntryAfterDrawingWrites(entry.path);
               removePathReferences(entry.path);
               removePinnedFile(entry.path);
               await refreshDirectory(parent);

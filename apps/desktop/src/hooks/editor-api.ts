@@ -92,9 +92,15 @@ export function insertAtCursor(path: string, text: string): boolean {
   const view = editorViews.get(path);
   if (!view) return false;
   const cursor = view.state.selection.main.head;
+  const line = view.state.doc.lineAt(cursor);
+  const textBeforeOnLine = line.text.slice(0, cursor - line.from);
+  // If inserting a heading on a line that already has non-whitespace text,
+  // precede it with a newline so Markdown parses the heading properly.
+  const needsLeadingNewline = text.startsWith("#") && textBeforeOnLine.trim().length > 0;
+  const insertText = needsLeadingNewline ? `\n\n${text}` : text;
   view.dispatch({
-    changes: { from: cursor, insert: text },
-    selection: { anchor: cursor + text.length },
+    changes: { from: cursor, insert: insertText },
+    selection: { anchor: cursor + insertText.length },
   });
   return true;
 }

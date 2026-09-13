@@ -1,3 +1,4 @@
+import { useDrawingShutdown } from "./hooks/use-drawing-shutdown";
 import { AppLayout } from "./components/app-layout";
 import { CommandPalette } from "./components/command-palette";
 import { TelemetryConsentDialog } from "./components/telemetry-consent-dialog";
@@ -12,6 +13,7 @@ import "./lib/standalone-watch";
 import "./App.css";
 
 function App() {
+  const shutdownReady = useDrawingShutdown();
   const isStartupResolved = useIsStartupResolved();
 
   useFileWatcher();
@@ -19,7 +21,7 @@ function App() {
   useMenuEvents();
   useOpenDrop();
 
-  if (!isStartupResolved) {
+  if (!isStartupResolved || !shutdownReady) {
     return null;
   }
 

@@ -7,6 +7,7 @@ mod ignore;
 #[cfg(target_os = "macos")]
 mod macos;
 pub mod open_target;
+mod shutdown;
 mod state;
 mod telemetry;
 #[cfg(desktop)]
@@ -63,7 +64,13 @@ fn attach_window_handlers(app: &tauri::AppHandle, window: &WebviewWindow) {
                 }
             }
         }
+        WindowEvent::CloseRequested { api, .. } => {
+            if shutdown::request(&handle, Some(label.clone())) {
+                api.prevent_close();
+            }
+        }
         WindowEvent::Destroyed => {
+            shutdown::destroyed(&handle, &label);
             // Remove the state; the `WorkspaceState`'s `RecommendedWatcher`
             // drops on the last `Arc` release, unregistering FSEvents/inotify.
             handle.state::<AppState>().remove(&label);
@@ -473,6 +480,7 @@ fn handle_single_instance(app: &tauri::AppHandle, argv: Vec<String>) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default()
+        .manage(shutdown::Shutdown::default())
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             handle_single_instance(app, argv);
         }))
@@ -490,6 +498,8 @@ pub fn run() {
     builder
         .manage(AppState::new())
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            shutdown::install_macos(app.handle()).map_err(std::io::Error::other)?;
             // Initialize the main window's per-window state (settings layer,
             // pending-open queue). `get_or_create` lazily builds the
             // `WorkspaceState` for the `"main"` label.
@@ -554,6 +564,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            shutdown::drawing_shutdown_ready,
+            shutdown::drawing_shutdown_complete,
             commands::fs::read_directory,
             commands::fs::read_recent_files,
             commands::fs::read_file_entries,
@@ -605,6 +617,11 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_app, _event| {
+            if let tauri::RunEvent::ExitRequested { api, .. } = &_event {
+                if shutdown::request(_app, None) {
+                    api.prevent_exit();
+                }
+            }
             // On macOS, dragging a folder/file to the dock icon sends file:// URLs
             // via the RunEvent::Opened event. The variant only exists in the
             // macOS build of Tauri, so the handler must be gated behind a cfg.

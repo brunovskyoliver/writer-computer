@@ -1,3 +1,4 @@
+import { withDrawingSaveBoundary, hasDrawingSession } from "@/lib/drawing-sessions";
 import { create } from "zustand";
 import type { DirEntry } from "@/types/fs";
 import type { RestoreWorkspaceResponse } from "@/lib/tauri";
@@ -113,6 +114,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       return;
     }
 
+    if (hasDrawingSession()) await withDrawingSaveBoundary(() => {});
+
     // Clear editor state before switching
     useEditorStore.setState({
       openFiles: new Map(),
@@ -160,7 +163,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     if (!root) return;
     const snapshot = getEditorSessionSnapshot(useEditorStore.getState());
     void saveSession(root, snapshot.tabs, snapshot.activeIndex);
-    await tauri.closeWorkspace(root);
+    await withDrawingSaveBoundary(() => tauri.closeWorkspace(root));
     if (get().root !== root) return;
     useEditorStore.setState({
       openFiles: new Map(),
