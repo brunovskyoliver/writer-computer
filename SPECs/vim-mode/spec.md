@@ -408,3 +408,10 @@ i{ a{ i< a< i" a" i' a' i\` a\``and`it at`.
   an ancestor container, so `vim-scroll.ts` redirects the adapter's scroll geometry to
   that container, with the visible window inset by the same safe margin the find overlay
   uses. `zt` therefore lands a line just below the top fade, not under it.
+- `Esc` in Insert mode with a wiki-link completion open leaves Insert mode _and_ closes
+  the completion in one press, rather than closing only the completion (FR-029's "first").
+  The emulation library consumes `Esc` in Insert mode before the completion's own keymap
+  sees it, and the completion closes because the caret moves; putting a keymap ahead of
+  the library would be the only way to split the two, and one `Esc` doing both is what
+  Obsidian's Vim mode does. Insert mode binds nothing on `Tab`, `Enter`, or `Shift+Tab`,
+  so the rest of FR-029 holds without work.

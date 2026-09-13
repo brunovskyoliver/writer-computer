@@ -78,3 +78,73 @@ Standard editing shortcuts provided by CodeMirror's basic setup.
 | Escape               | Close find                     |
 | Alt+Shift+ArrowLeft  | Extend selection by word left  |
 | Alt+Shift+ArrowRight | Extend selection by word right |
+
+## Vim Mode
+
+Off by default. Turn it on under Settings → Editor → Vim Mode, or run "Toggle Vim Mode"
+from the command palette. The change applies to every open editor at once and keeps the
+caret, scroll position, and undo history. Emulation comes from `@replit/codemirror-vim`;
+Writer adds the setting, the footer indicator and command line, the `:w`/`:q` family, and
+the clipboard bridge (`SPECs/vim-mode/spec.md`).
+
+### Footer indicator
+
+The document footer shows the current mode (`NORMAL`, `INSERT`, `REPLACE`, `VISUAL`,
+`V-LINE`, `V-BLOCK`), any pending count or operator keys (`2d`, `"a`), and `recording @x`
+while a macro records. Each pane has its own mode; the indicator follows the focused pane.
+The `:` and `/` prompts open in the same footer strip. Compact windows, which normally have
+no footer, get a footer strip with just the indicator and prompt while Vim mode is on.
+
+### Vocabulary
+
+Everything the library ships works. The groups below are what the feature is validated
+against; anything outside them (Vimscript, `:map`ping `jk` to `Esc`, folds, `:e`/`:sp`)
+is not supported.
+
+| Group            | Keys                                                                                                                                 |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Mode transitions | `i a I A o O R v V Ctrl+V Esc`                                                                                                       |
+| Motions          | `h j k l w W b B e E ge 0 ^ $ gg G { } ( ) % f F t T ; , H M L`, with counts; `gj gk g0 g$` move by screen row in wrapped paragraphs |
+| Operators        | `d c y > < = gu gU g~ ~ J` with any motion or text object; line forms `dd cc yy >> <<`; shortcuts `x X s S D C Y r p P`              |
+| Text objects     | `iw aw iW aW is as ip ap`, bracket pairs `i( a( i[ a[ i{ a{ i< a<`, quotes `i" a" i' a'` and ``i` a` ``, tags `it at`                |
+| Undo / repeat    | `u`, `Ctrl+R`, `.` — one Insert session is one undo step                                                                             |
+| Visual           | `o` swaps ends, operators act on the selection, `gv` reselects; Visual-Block supports `I A c d y r $`                                |
+| Scrolling        | `Ctrl+D Ctrl+U` half page, `Ctrl+F Ctrl+B` full page, `Ctrl+E Ctrl+Y` one line, `zz zt zb` reposition the caret line                 |
+| Search           | `/` and `?` with wrap-around, `n N * #`; highlights clear on the first edit or click (`:noh` still works)                            |
+| Registers        | `"a`–`"z` (append with `"A`–`"Z`), the black-hole register `"_`; the unnamed register is the system clipboard                        |
+| Macros           | `q<letter>` … `q`, replay with `@<letter>`, `<count>@<letter>`, `@@`                                                                 |
+| Marks            | `m<letter>`, jump with `` ` `` and `'`                                                                                               |
+
+Registers, macros, marks, and the last search pattern are shared by every pane and window
+for the session; none of them persist across restarts.
+
+### Ex commands
+
+`:` opens the command line in the footer; `Esc` cancels it. Unknown commands show
+`Not an editor command: <name>` and do nothing else.
+
+| Command         | Effect                                                                                                  |
+| --------------- | ------------------------------------------------------------------------------------------------------- |
+| `:w`            | Save now through the app's save path (same result as Cmd+S). A failed write shows the usual save error. |
+| `:q`            | Close the tab if it is clean; otherwise `E37: No write since last change (add ! to override)`.          |
+| `:q!`           | Discard changes (restore the on-disk content) and close the tab.                                        |
+| `:wq`, `:x`     | Save, then close the tab if the write succeeded; on failure the tab stays open.                         |
+| `:s`, `:%s`     | Substitute with `g`, `i`, `c` flags and ranges including `'<,'>`; one undo step. No count is reported.  |
+| `:noh`          | Clear search highlights, keep the pattern.                                                              |
+| `:<n>`          | Go to line `n`.                                                                                         |
+| everything else | Library-provided: `:g`, `:sort`, `:normal`, `:reg`, `:map`, `:set`, …                                   |
+
+### Coexistence
+
+- Every Cmd shortcut in this document keeps working in every Vim mode: the library binds
+  nothing on Meta, so Cmd+B/I/K, Cmd+D, Cmd+F, Cmd+Z, Cmd+Enter, and the global hook see the
+  key as before. Alt+Arrow line moves and history navigation are likewise untouched.
+- Insert mode leaves `Enter`, `Tab`, `Shift+Tab`, `Backspace`, and autocomplete to the
+  editor: list continuation, indent, bracket closing, and Tab-to-accept behave as with Vim
+  off. `Esc` with a completion open closes the completion first.
+- `Esc` in Normal mode is consumed by Vim and reaches no app UI: the sidebar, find overlay,
+  section rail, and compact-window dismiss are untouched.
+- Table cells, mermaid editors, and drawing widgets keep their own keys; Vim applies only
+  to the markdown text.
+- Prosemark hides markup (`**`, `#`, link URLs) but the document still contains it, so
+  `h`/`l`/`w` and the operators step over the hidden characters, as in Obsidian's Vim mode.
