@@ -79,7 +79,6 @@ export function mathDecorations() {
 
         const display = state.doc.sliceString(node.from, node.from + 2) === "$$";
         if (editing) {
-          if (!display) return;
           return Decoration.widget({
             widget: new MathWidget(formula, true, true),
             block: true,

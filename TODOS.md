@@ -8,6 +8,8 @@
 
 ## Done
 
+- Inline math editing preview: `$...$` now shares the live preview above source.
+
 - LaTeX Suite phase 6 (T046–T048): live toggles and snippet variables across windows, with settings reload race protection. [Tasks](SPECs/latex-suite/tasks.md), [verification](SPECs/Agent/worksheet-latex-suite-phase6.md). Phase 7 remains in progress under the main suite task.
 
 - Keep typing clear of the pane fade and add room below the final line: [spec](SPECs/editor-bottom-typing-spec.md).

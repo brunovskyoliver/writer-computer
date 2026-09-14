@@ -206,21 +206,27 @@ test("display block keeps mixed closing layout and container boundaries", () => 
   expect(mathNodes("> $$\n> x\n\n# Outside\n\n$$\ny\n$$")).toEqual(["$$\ny\n$$"]);
 });
 
-test("display preview updates and refolds after editing", () => {
+test.each(["$", "$$"])("%s preview updates and refolds after editing", (delimiter) => {
+  const doc = `before\n\nprefix ${delimiter}x${delimiter} suffix\n\nafter`;
+  const from = doc.indexOf("x", doc.indexOf(delimiter));
   let state = EditorState.create({
-    doc: "before\n\n$$\nx\n$$\n\nafter",
-    selection: { anchor: 11 },
+    doc,
+    selection: { anchor: from },
     extensions: [
       markdown({ extensions: [prosemarkMarkdownSyntaxExtensions, latexMathNesting] }),
       mathDecorations(),
     ],
   });
-  state = state.update({ changes: { from: 11, to: 12, insert: "y^2" } }).state;
+  state = state.update({ changes: { from, to: from + 1, insert: "y^2" } }).state;
   const previews: string[] = [];
-  state.field(foldExtension).between(0, state.doc.length, (_from, _to, deco) => {
-    if (deco.spec.widget?.preview) previews.push(deco.spec.widget.formula);
+  state.field(foldExtension).between(0, state.doc.length, (start, end, deco) => {
+    if (deco.spec.widget?.preview) {
+      expect(start).toBe(doc.indexOf("prefix"));
+      expect(end).toBe(start);
+      previews.push(deco.spec.widget.formula);
+    }
   });
-  expect(previews).toEqual(["\ny^2\n"]);
+  expect(previews).toEqual(["y^2"]);
   state = state.update({ selection: { anchor: 0 } }).state;
   let replacements = 0;
   state.field(foldExtension).between(0, state.doc.length, (from, to) => {

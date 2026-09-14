@@ -234,4 +234,4 @@ Auto-fraction receives only the current line's formula content, starting at the 
 
 ## Math editing previews
 
-Display math keeps a rendered preview above its opening source line while selected, using `keepDecorationOnUnfold` and a block widget with `side: -1`. Inline math unfolds without a preview. Preview widgets use a separate class from clickable folded formulas, so clicking a preview does not reset the source selection. Standalone root-level `$$` blocks parse across blank lines; nested containers retain the inline parser. An unclosed root math block stays visible as source through the end of the document.
+Inline and display math keep a rendered preview above its opening source line while selected, using `keepDecorationOnUnfold` and a block widget with `side: -1`. Preview widgets use a separate class from clickable folded formulas, so clicking a preview does not reset the source selection. Standalone root-level `$$` blocks parse across blank lines; nested containers retain the inline parser. An unclosed root math block stays visible as source through the end of the document.
