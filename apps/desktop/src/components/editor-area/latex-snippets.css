@@ -13,6 +13,13 @@
   outline: 1px solid color-mix(in srgb, var(--accent) 60%, transparent);
 }
 
-.cm-nonmatchingBracket {
+/* The decoration wraps the token span rather than replacing it, so the inner
+   span carries the LaTeX bracket colour and needs overriding too. Both
+   selectors go through `.cm-content` because CodeMirror injects the highlight
+   style after this sheet — at equal specificity the token colour would win and
+   the error would be invisible. Guarded by
+   `apps/desktop/e2e/specs/latex-highlighting.spec.js`, not by `vp test`. */
+.cm-content .cm-nonmatchingBracket,
+.cm-content .cm-nonmatchingBracket span {
   color: var(--pm-syntax-invalid);
 }

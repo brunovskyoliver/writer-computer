@@ -43,6 +43,16 @@ export const config = {
     timeout: 60_000,
   },
 
+  // Node 24+ owns the global undici dispatcher, and its `Request` rejects an
+  // explicit Content-Length alongside a body ("invalid content-length
+  // header") — wdio's request layer sets one on every call, so session
+  // creation died before it reached the intermediary. undici computes the
+  // length itself; dropping the header is enough.
+  transformRequest: (requestOptions) => {
+    requestOptions.headers?.delete?.("content-length");
+    return requestOptions;
+  },
+
   onPrepare: async function () {
     if (!existsSync(APP_BINARY)) {
       throw new Error(

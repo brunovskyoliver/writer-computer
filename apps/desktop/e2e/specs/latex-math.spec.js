@@ -53,6 +53,12 @@ describe("LaTeX math rendering", function () {
     filePath = `${root}/${FILE_STEM}.md`;
     const wrote = await invoke("write_file", { path: filePath, content: DOC });
     ok(wrote.ok, `failed to seed ${filePath}: ${wrote.error}`);
+
+    // Reload rather than waiting on the workspace watcher: startup rebuilds the
+    // file index from disk, so the seeded document lands in the sidebar
+    // deterministically (same trick as `table-column-sizing.spec.js`).
+    await browser.execute(() => window.location.reload());
+    await $('[data-sidebar-surface][data-workspace-open="true"]').waitForExist({ timeout: 20_000 });
   });
 
   beforeEach(function () {
@@ -97,12 +103,29 @@ describe("LaTeX math rendering", function () {
     ok(content.includes("I paid $5 and $10 more."), "currency sentence should stay literal");
   });
 
-  it("unfolds to raw source when the widget is clicked", async function () {
-    const inline = await $(".cm-math-widget:not(.cm-math-display)");
-    await inline.click();
+  it("unfolds to raw source when the caret enters the math", async function () {
+    // Driven from the keyboard: a WebDriver click inside `.cm-content` does not
+    // move the CodeMirror caret, so the widget's click-to-edit handler never
+    // fires under this harness.
+    await $(".cm-content").click();
+    await browser.keys(["Meta", "a"]);
+    await browser.keys(["ArrowLeft"]);
+    for (let i = 0; i < 20; i++) {
+      const line = await browser.execute(() => {
+        const node = document.getSelection()?.anchorNode;
+        const el = node?.nodeType === 1 ? node : node?.parentElement;
+        return el?.closest(".cm-line")?.textContent ?? null;
+      });
+      if (line && line.includes("Euler:")) break;
+      await browser.keys(["ArrowDown"]);
+    }
+    // `Euler: ` is seven columns; the eighth step lands the caret inside the
+    // formula rather than on the fold boundary.
+    await browser.keys(["Meta", "ArrowLeft"]);
+    for (let i = 0; i < 8; i++) await browser.keys(["ArrowRight"]);
 
-    // The click-to-edit handler range-selects the math node; the fold drops
-    // and the raw delimiters become part of the visible document text.
+    // Entering the math range drops the fold and the raw delimiters become
+    // part of the visible document text.
     await browser.waitUntil(
       async () => {
         const text = await $(".cm-content").getText();

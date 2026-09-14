@@ -93,5 +93,16 @@ bundle identifier (see below).
   `pkill -f tauri-webdriver` and retry.
 - **App binary not found** — run `pnpm run build:app` first (or use
   `pnpm run test:e2e` which chains them).
+- **`Failed to create a session: UND_ERR_INVALID_ARG`** — already handled by
+  `transformRequest` in `wdio.conf.js`: on Node 24+ the global undici rejects
+  the explicit `Content-Length` wdio sets on every request. If you see it
+  again, check that hook is still in place.
+- **A click inside `.cm-content` does not move the CodeMirror caret** under
+  this WebDriver, so widget click-to-edit handlers never fire. Specs that need
+  a caret position drive it from the keyboard instead (see
+  `latex-highlighting.spec.js`).
+- **A file seeded mid-session does not appear in the sidebar** — the workspace
+  watcher is not enough. Reload (`window.location.reload()`) after
+  `write_file`; startup rebuilds the file index from disk.
 - **Test hangs at `waitForDisplayed`** — the WKWebView likely did not load.
   Sanity-check that `vp run desktop#dev` still launches the app normally.
