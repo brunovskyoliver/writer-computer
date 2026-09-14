@@ -3,6 +3,7 @@ import { Decoration, WidgetType } from "@codemirror/view";
 import type { SyntaxNodeRef } from "@lezer/common";
 import {
   foldableSyntaxFacet,
+  mathFormulaSpan,
   selectAllDecorationsOnSelectExtension,
 } from "@/lib/prosemark-core/main";
 import { renderMath } from "./math-renderer";
@@ -48,8 +49,7 @@ class MathWidget extends WidgetType {
 }
 
 function mathFormulaRange(node: SyntaxNodeRef): { from: number; to: number } | null {
-  const formula = node.node.getChild("MathFormula");
-  return formula ? { from: formula.from, to: formula.to } : null;
+  return mathFormulaSpan(node.node);
 }
 
 export function mathDecorations() {

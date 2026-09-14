@@ -16,7 +16,12 @@ export { nestedLinkAsPlainText } from "./nestedLinkAsPlainText";
 export { escapeMarkdownSyntaxExtension } from "../hide";
 export { additionalMarkdownSyntaxTags } from "../syntaxHighlighting";
 export { emojiMarkdownSyntaxExtension, dashMarkdownSyntaxExtension } from "../fold";
-export { mathDelimiterTag, mathFormulaTag, mathMarkdownSyntaxExtension } from "./mathMarkdown";
+export {
+  mathDelimiterTag,
+  mathFormulaSpan,
+  mathFormulaTag,
+  mathMarkdownSyntaxExtension,
+} from "./mathMarkdown";
 export { spaceDestinationLinksMarkdownSyntaxExtension } from "./spaceDestinationLinks";
 
 export const prosemarkMarkdownSyntaxExtensions = [

@@ -2,6 +2,7 @@ import { describe, expect, test } from "vite-plus/test";
 import { EditorState } from "@codemirror/state";
 import { markdown } from "@codemirror/lang-markdown";
 import { GFM } from "@lezer/markdown";
+import { latexMathNesting } from "../src/components/editor-area/latex-highlighting";
 import { prosemarkMarkdownSyntaxExtensions } from "../src/lib/prosemark-core/main";
 import { mathContext } from "../src/lib/latex-snippets/math-context";
 
@@ -11,7 +12,12 @@ function contextAt(marked: string) {
   const doc = marked.replace("|", "");
   const state = EditorState.create({
     doc,
-    extensions: [markdown({ extensions: [GFM, prosemarkMarkdownSyntaxExtensions] })],
+    // `latexMathNesting` is in the real editor config and mounts a nested tree
+    // over `MathFormula`, which changes what `resolveInner` lands on. Parse
+    // with it here so the context rules are tested against the shipped tree.
+    extensions: [
+      markdown({ extensions: [GFM, prosemarkMarkdownSyntaxExtensions, latexMathNesting] }),
+    ],
   });
   return mathContext(state, caret);
 }

@@ -157,6 +157,29 @@ update(update: ViewUpdate) {
 
 The StateFields (`hideExtension`, `foldExtension`, `listDecorationsField`) and the ViewPlugins (`headingPlugin`, `codeBlockDecorationsExtension`, `blockQuoteExtension`) all carry it. Without it a region jumped into (Cmd+G, section rail, anchor) keeps stale decorations until the next scroll. Don't add a "tree sync" plugin that re-dispatches a selection to nudge a rebuild; that was the old workaround and it tripled the rebuild cost per parse commit.
 
+## A nested parser replaces the node it mounts on
+
+`parseMixed` does not add a child — it substitutes the mounted tree's root for
+the node. After `latexMathNesting` mounts the LaTeX tokenizer on `MathFormula`,
+a `Math` node's children are `MathMark`, `Document` (the mounted root),
+`MathMark`, and `math.getChild("MathFormula")` returns `null`. That silently
+broke math folding (`mathFormulaRange` returned `null`, so no widget) and sent
+`mathContext` down its fallback branch.
+
+Read a span from the nodes the mount cannot touch. `mathFormulaSpan(math)` in
+`prosemark-core/markdown/mathMarkdown.ts` reads between the two `MathMark`
+delimiters and is the single source for the formula range; `math-decorations.ts`
+and `latex-snippets/math-context.ts` both call it. `resolveInner` does cross the
+mount boundary upward, so ancestor walks looking for `Math` still work.
+
+Overlay mounts (code fences) behave differently again: they are invisible to
+`Tree.iterate` but visible to `resolveInner` and `highlightTree`. Assert nested
+fence tokens through `highlightTree`, not a tree walk.
+
+Any test that parses Markdown and asserts on math or fence structure must use
+the same `markdown({ extensions })` list the app ships, `latexMathNesting`
+included — otherwise it passes against a tree the editor never sees.
+
 ## Synchronous render in `toDOM` beats IntersectionObserver-deferred
 
 If your renderer is sync and cache-backed (or cheap to call), paint in `toDOM`. The async-deferred path adds a "Loading…" gap users see, can re-fire after a toggle (producing a visible flash), and has no real benefit when the cache makes repeat renders O(map lookup). CM only calls `toDOM` for widgets in its viewport buffer anyway.
@@ -192,6 +215,7 @@ The editor area is a binary tree of panes (`lib/editor-layout.ts`, owned by `edi
 - `prosemark-core/imageSrc.ts` — `imageSrcResolverFacet` / `resolveImageSrc`; widgets resolve `<img src>` in `toDOM` (Writer provides the facet from `image-src-resolver.ts`), so no DOM observer rewrites images after insertion.
 - `editor-scroll.ts` — `findOuterScroller` / `scrollPosToSafeTop`, the one place that scrolls the ancestor container to a document position.
 - `editor-extensions.ts` — `createEditorExtensions`, the one place the extension list is assembled. Pieces: `editor-search-extensions.ts` (hidden search panel, `EditorView.scrollHandler` for the ancestor-scroller case, Mod-f / Mod-g / Escape), `link-navigation.ts` (click-to-follow, `followLink`), `editor-clipboard.ts` (image + frontmatter paste), `editor-body-menu.ts` (right-click menu), `viewport-parse.ts`. `use-prosemark-editor.ts` only mounts, swaps, and disposes the view.
+- `latex-highlighting.ts` — `latexSourceLanguage` (the stream tokenizer), `latexMathNesting` (the `MathFormula` mount), `latexAwareCodeLanguages` (`latex`/`tex` fences), and `latexHighlighting()`: the coloured/plain `HighlightStyle` compartment driven by `latex.highlight-source` plus the app's only `bracketMatching`, whose `renderMatch` returns nothing outside math and latex fences.
 - `vim-mode.ts` — `vimModeExtension(getTabId)`: a compartment that holds `vim()` while `editor.vim-mode` is on and `[]` otherwise, plus the view plugin that owns the settings subscription, mirrors the library's mode/keypress/command events into `vim-store`, and moves its prompt nodes into the footer's dialog host. `vim()` must stay first in the extension list: the library declines keys it has no binding for, and every other keymap (formatting, search, list editing, completion) must sit behind it so Normal-mode keys never reach them.
 - `vim-ex-commands.ts` — `registerVimExCommands(Vim, deps)`: `:w` `:q` `:q!` `:wq` `:x` on the `Vim` singleton, routed to `saveNow`, `closeTab`, and `reloadFromDisk` through injected deps; registered once per module load.
 - `vim-store.ts` — per-tab `{ mode, pending, recording }` and the footer `dialogHost`; only `vim-mode.ts` writes `byTab`, only `document-footer.tsx` writes `dialogHost`. `useVimFooterModel(tabId)` is the one selector.

@@ -6,11 +6,16 @@ import { syntaxTree } from "@codemirror/language";
 import { foldExtension, prosemarkMarkdownSyntaxExtensions } from "../src/lib/prosemark-core/main";
 import { renderMath, clearMathCache } from "../src/components/editor-area/math-renderer";
 import { mathDecorations } from "../src/components/editor-area/math-decorations";
+// The shipped editor mounts a nested LaTeX tree over `MathFormula`; parse with
+// it here so folding is tested against the tree the app actually sees.
+import { latexMathNesting } from "../src/components/editor-area/latex-highlighting";
 
 function parseState(doc: string) {
   return EditorState.create({
     doc,
-    extensions: [markdown({ extensions: [GFM, prosemarkMarkdownSyntaxExtensions] })],
+    extensions: [
+      markdown({ extensions: [GFM, prosemarkMarkdownSyntaxExtensions, latexMathNesting] }),
+    ],
   });
 }
 
@@ -111,7 +116,7 @@ describe("mathDecorations fold behavior", () => {
     return EditorState.create({
       doc,
       extensions: [
-        markdown({ extensions: [GFM, prosemarkMarkdownSyntaxExtensions] }),
+        markdown({ extensions: [GFM, prosemarkMarkdownSyntaxExtensions, latexMathNesting] }),
         mathDecorations(),
       ],
       selection: EditorSelection.single(selection.anchor, selection.head),
@@ -148,7 +153,7 @@ describe("mathDecorations fold behavior", () => {
     const state = EditorState.create({
       doc: blankDoc,
       extensions: [
-        markdown({ extensions: [GFM, prosemarkMarkdownSyntaxExtensions] }),
+        markdown({ extensions: [GFM, prosemarkMarkdownSyntaxExtensions, latexMathNesting] }),
         mathDecorations(),
       ],
       selection: EditorSelection.single(0),

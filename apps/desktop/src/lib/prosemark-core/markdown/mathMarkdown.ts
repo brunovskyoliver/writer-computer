@@ -1,5 +1,6 @@
 import type { InlineContext, MarkdownConfig } from "@lezer/markdown";
 import { styleTags, Tag } from "@lezer/highlight";
+import type { SyntaxNode } from "@lezer/common";
 
 /** Highlight tag for `$` / `$$` math delimiters. */
 export const mathDelimiterTag = Tag.define();
@@ -100,3 +101,18 @@ export const mathMarkdownSyntaxExtension: MarkdownConfig = {
     },
   ],
 };
+
+/**
+ * The formula span of a `Math` node: everything between the two `MathMark`
+ * delimiters, or `null` when the node is malformed.
+ *
+ * Read from the delimiters rather than from the `MathFormula` child because a
+ * nested parser (the LaTeX tokenizer in `latex-highlighting.ts`) mounts its
+ * own tree over `MathFormula`, which hides that node from `getChild`. The
+ * marks are part of the Markdown tree and always survive.
+ */
+export function mathFormulaSpan(math: SyntaxNode): { from: number; to: number } | null {
+  const marks = math.getChildren("MathMark");
+  if (marks.length !== 2) return null;
+  return { from: marks[0].to, to: marks[1].from };
+}

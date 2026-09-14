@@ -79,6 +79,10 @@ export const baseSyntaxHighlights = syntaxHighlighting(
       color: "var(--pm-muted-color)",
     },
     {
+      // Only reaches formulas the LaTeX tokenizer has not mounted a tree over
+      // (empty ones). Nested token colours and font live in
+      // `components/editor-area/latex-highlighting.ts` — entering a mounted
+      // tree resets the inherited class, so this rule cannot reach them.
       tag: mathFormulaTag,
       fontFamily: codeFontFamily,
       fontSize: editorFontSize,

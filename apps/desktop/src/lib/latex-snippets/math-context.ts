@@ -11,6 +11,7 @@
 import { syntaxTree } from "@codemirror/language";
 import type { EditorState } from "@codemirror/state";
 import type { SyntaxNode } from "@lezer/common";
+import { mathFormulaSpan } from "@/lib/prosemark-core/main";
 
 /** The enclosing `Math` node: the whole node including `$` delimiters, plus
  *  the formula span between them. */
@@ -34,10 +35,10 @@ const PROSE: MathContext = { kind: "prose" };
 const CODE: MathContext = { kind: "code" };
 
 function mathNodeOf(math: SyntaxNode, display: boolean): MathNode {
-  const formula = math.getChild("MathFormula");
-  // An empty display formula (`$$$$`) has no content child; fall back to the
-  // span the delimiters leave behind.
+  // Read from the delimiters, not the `MathFormula` child: the LaTeX
+  // highlighter mounts a nested tree over that node and hides it.
   const delimiter = display ? 2 : 1;
+  const formula = mathFormulaSpan(math);
   return {
     from: math.from,
     to: math.to,

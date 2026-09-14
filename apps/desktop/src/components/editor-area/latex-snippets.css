@@ -5,12 +5,14 @@
   border-radius: 2px;
 }
 
-/* Bracket matching is only switched on inside math source and latex fences,
-   so the marks stay scoped to them (US3 reuses these rules). */
-.cm-latex-source .cm-matchingBracket {
+/* Bracket matching is only switched on inside math source and latex fences:
+   `latex-highlighting.ts` is the app's only `bracketMatching` and its
+   `renderMatch` returns nothing outside them, so these marks cannot appear
+   anywhere else and need no extra scoping class. */
+.cm-matchingBracket {
   outline: 1px solid color-mix(in srgb, var(--accent) 60%, transparent);
 }
 
-.cm-latex-source .cm-nonmatchingBracket {
+.cm-nonmatchingBracket {
   color: var(--pm-syntax-invalid);
 }

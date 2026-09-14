@@ -10,7 +10,6 @@ import {
 import { markdown } from "@codemirror/lang-markdown";
 import { history } from "@codemirror/commands";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
-import { languages } from "@codemirror/language-data";
 import { tags } from "@lezer/highlight";
 import { GFM } from "@lezer/markdown";
 import {
@@ -29,6 +28,7 @@ import { useEditorSearchStore } from "./editor-search-store";
 import { headingDecorations } from "./heading-decorations";
 import { htmlBlockDecorations, htmlBlockParserExtension } from "./html-block-decorations";
 import { imageSrcResolver } from "./image-src-resolver";
+import { latexAwareCodeLanguages, latexHighlighting, latexMathNesting } from "./latex-highlighting";
 import { latexSnippetsExtension } from "./latex-snippets-extension";
 import { linkNavigationExtension } from "./link-navigation";
 import { markdownFormatting } from "./markdown-formatting";
@@ -186,8 +186,13 @@ export function createEditorExtensions(
     // the compartment is empty until the setting turns it on.
     vimModeExtension(getTabId),
     markdown({
-      codeLanguages: languages,
-      extensions: [GFM, prosemarkMarkdownSyntaxExtensions, htmlBlockParserExtension],
+      codeLanguages: latexAwareCodeLanguages,
+      extensions: [
+        GFM,
+        prosemarkMarkdownSyntaxExtensions,
+        htmlBlockParserExtension,
+        latexMathNesting,
+      ],
     }),
     linkNavigationExtension(getFilePath, isDisposed),
     editorBodyContextMenuExtension(getFilePath, isDisposed),
@@ -204,6 +209,8 @@ export function createEditorExtensions(
     dragFreezeExtensions,
     drawSelection(),
     prosemarkBaseThemeSetup(),
+    // After the base theme so the scoped LaTeX style wins on nested tokens.
+    latexHighlighting(),
     latexSnippetsExtension(getTabId),
     headingWeightHighlight,
     viewportParsePlugin,
