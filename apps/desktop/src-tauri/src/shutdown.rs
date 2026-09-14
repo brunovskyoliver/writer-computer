@@ -27,6 +27,20 @@ impl Request {
     }
 }
 
+impl State {
+    fn acknowledge(&mut self, label: &str, id: u64) -> Option<Request> {
+        if !self.pending.as_mut()?.acknowledge(label, id) {
+            return None;
+        }
+        let completed = self.pending.take()?;
+        if let Some(target) = &completed.target {
+            // Native destruction is asynchronous; queued Quit must exclude it.
+            self.ready.remove(target);
+        }
+        Some(completed)
+    }
+}
+
 #[tauri::command]
 pub fn drawing_shutdown_ready(window: tauri::WebviewWindow, state: tauri::State<Shutdown>) {
     state.0.lock().unwrap().ready.insert(window.label().into());
@@ -98,14 +112,10 @@ pub fn drawing_shutdown_complete(window: tauri::WebviewWindow, id: u64, success:
     }
     let coordinator = app.state::<Shutdown>();
     let mut state = coordinator.0.lock().unwrap();
-    let Some(request) = state.pending.as_mut() else {
+    let Some(completed) = state.acknowledge(window.label(), id) else {
         return;
     };
-    if !request.acknowledge(window.label(), id) {
-        return;
-    }
-    let target = request.target.clone();
-    state.pending = None;
+    let target = completed.target;
     let next = state.queued.pop_front();
     if target.is_none() {
         state.allow_exit = true;
@@ -115,7 +125,9 @@ pub fn drawing_shutdown_complete(window: tauri::WebviewWindow, id: u64, success:
         if let Some(window) = app.get_webview_window(&label) {
             if let Err(error) = window.destroy() {
                 eprintln!("Could not close window: {error}");
+                coordinator.0.lock().unwrap().ready.insert(label);
                 let _ = app.emit("drawing:close-cancelled", id);
+                return;
             }
         }
         if let Some(target) = next {
@@ -165,6 +177,25 @@ mod tests {
         assert!(!request.acknowledge("a", 2));
         assert_eq!(request.waiting.len(), 1);
         assert!(request.acknowledge("b", 2));
+    }
+
+    #[test]
+    fn queued_quit_does_not_wait_for_a_window_pending_native_destruction() {
+        let mut state = State {
+            ready: HashSet::from(["a".into(), "b".into()]),
+            pending: Some(Request {
+                id: 3,
+                waiting: HashSet::from(["a".into()]),
+                target: Some("a".into()),
+            }),
+            queued: VecDeque::from([None]),
+            ..State::default()
+        };
+        assert!(state.acknowledge("a", 2).is_none());
+        assert_eq!(state.ready.len(), 2);
+        assert!(state.acknowledge("a", 3).is_some());
+        assert_eq!(state.ready, HashSet::from(["b".into()]));
+        assert_eq!(state.queued.pop_front(), Some(None));
     }
 
     #[test]

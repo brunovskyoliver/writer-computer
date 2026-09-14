@@ -55,13 +55,20 @@ describe("explicit drawing persistence", () => {
     const read = vi.fn();
     const strokes = new Proxy(elements(1), {
       get(target, key, receiver) {
-        // The echo fingerprint is allowed to read length and the last element;
-        // anything beyond that is a per-stroke traversal.
-        if (key !== "length" && key !== "0") read(key);
+        read(key);
         return Reflect.get(target, key, receiver);
       },
     });
-    for (let i = 0; i < 1000; i++) changeDrawing(path, "tab-a", strokes, state, {});
+    const images = new Proxy(
+      {},
+      {
+        ownKeys() {
+          read("assets");
+          return [];
+        },
+      },
+    );
+    for (let i = 0; i < 1000; i++) changeDrawing(path, "tab-a", strokes, state, images);
     expect(read).not.toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);
     await vi.advanceTimersByTimeAsync(60_000);
@@ -307,12 +314,36 @@ test("delete waits for an already requested save before removing the file", asyn
   changeDrawing(path, "tab-a", elements(1), state, {});
   const saving = getDrawingSession(path)!.save();
   const deleting = deleteEntryAfterDrawingWrites(path);
+  changeDrawing(path, "tab-a", elements(2), state, {});
+  const quitting = saveDrawingSessions();
   await vi.waitFor(() => expect(saveDrawing).toHaveBeenCalledTimes(1));
   expect(deleteEntry).not.toHaveBeenCalled();
   finish();
-  await Promise.all([saving, deleting]);
+  await Promise.all([saving, deleting, quitting]);
   expect(deleteEntry).toHaveBeenCalledWith(path);
   view.detach();
   await saveDrawingSessions();
   expect(saveDrawing).toHaveBeenCalledTimes(1);
+});
+
+test("save completion retains edits made before the last view detaches", async () => {
+  let finish!: () => void;
+  vi.mocked(saveDrawing).mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const view = attach("tab-a");
+  changeDrawing(path, "tab-a", elements(1), state, {});
+  const saving = saveDrawingSessions(path);
+  await vi.waitFor(() => expect(saveDrawing).toHaveBeenCalledTimes(1));
+  changeDrawing(path, "tab-a", elements(2), state, {});
+  view.detach();
+  finish();
+  await saving;
+  expect(getDrawingSession(path)?.isDirty()).toBe(true);
+  await saveDrawingSessions(path);
+  expect(saveDrawing).toHaveBeenCalledTimes(2);
+  expect(getDrawingSession(path)).toBeUndefined();
 });

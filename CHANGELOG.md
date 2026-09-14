@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-09-14
+
+- Drawings save on Cmd+S, tab/window close, or app quit. Drawing events no longer schedule SVG exports or file writes, and the single-view path does no scene or asset scans. Reopening or moving drawing tabs keeps the live scene without exporting. Closing waits for saves, failed saves keep changes in memory, and pending writes cannot recreate a drawing deleted from the sidebar.
+
 ## 2026-09-13
 
 - Vim mode, off by default. Turn it on under Settings → Editor → Vim Mode or with "Toggle Vim Mode" in the command palette; every open editor switches at once and keeps its caret, scroll position, and undo history. Normal, Insert, Replace, Visual, Visual-Line, and Visual-Block modes with the usual motions, operators, text objects, counts, registers, macros, marks, search, and substitute, provided by `@replit/codemirror-vim`. The document footer shows the mode, pending keys, and `recording @x`, and hosts the `:` and `/` prompts; compact windows get a footer strip for them. `:w` saves through the app's normal save path, `:q` closes the tab (refusing while it is dirty), `:q!` discards and closes, `:wq`/`:x` save and close only if the write succeeded. The unnamed register is the system clipboard, so `yy` then Cmd+V elsewhere and Cmd+C elsewhere then `p` both work. Cmd shortcuts, list continuation, Tab, and autocomplete behave as before in every mode, and `Esc` in Normal mode touches no app UI. See the Vim Mode section of [docs/keyboard-shortcuts.md](./docs/keyboard-shortcuts.md).

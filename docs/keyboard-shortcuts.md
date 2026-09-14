@@ -12,6 +12,7 @@ These shortcuts are handled by the global `useKeyboardShortcuts` hook and work r
 | Cmd+O           | Go to file                          |
 | Cmd+N           | Create new note                     |
 | Cmd+T           | New tab                             |
+| Cmd+S           | Save the focused drawing            |
 | Cmd+W           | Close current tab                   |
 | Cmd+\\          | Toggle sidebar                      |
 | Ctrl+Tab        | Next tab in the focused pane        |

@@ -4,7 +4,7 @@ import "@excalidraw/excalidraw/index.css";
 import type { AppState, BinaryFiles, ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import type { OrderedExcalidrawElement } from "@excalidraw/excalidraw/element/types";
 import { loadDrawing, type DrawingScene } from "@/lib/drawings";
-import { attachDrawingView, changeDrawing, saveDrawingSessions } from "@/lib/drawing-sessions";
+import { attachDrawingView, changeDrawing, getDrawingSession } from "@/lib/drawing-sessions";
 import { useSetting } from "@/hooks/use-settings";
 import { activeMode, type ThemePreference } from "@/lib/theme";
 
@@ -48,9 +48,9 @@ export default function DrawingEditor({
   useEffect(() => {
     let cancelled = false;
     let detach: (() => void) | undefined;
-    // A tab reopened while its previous export finishes must read that write.
-    void saveDrawingSessions(path)
-      .then(() => loadDrawing(path))
+    // Reopening or moving a tab reuses the live scene without exporting it.
+    const live = getDrawingSession(path)?.scene();
+    void (live ? Promise.resolve({ ok: true as const, scene: live }) : loadDrawing(path))
       .then((result) => {
         if (cancelled) return;
         if (!result.ok) {

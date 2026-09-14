@@ -27,12 +27,12 @@ condition for choosing this format over raw `.excalidraw` JSON.
 - `![[drawing.excalidraw.svg]]` in a note renders inline at zero JavaScript cost —
   scrolling a note with ten drawings is indistinguishable from ten PNGs.
 - Double-clicking an inline drawing opens it in an Excalidraw editor tab on that file.
-- Edits autosave back to the same path through the existing Rust write path, without the
+- Edits save on Cmd+S, tab close, window close, or application quit back to the same path through the existing Rust write path, without the
   watcher reading the save as an external change.
 - A drawing tab survives session restore.
 - "New Drawing" creates the file, inserts the embed, and opens the tab in one command.
 - Everything works with no network reachable.
-- A file that fails to parse shows an error and **never** autosaves over the user's work.
+- A file that fails to parse shows an error and **never** saves over the user's work.
 
 ## Non-Goals
 
@@ -70,10 +70,12 @@ condition for choosing this format over raw `.excalidraw` JSON.
   Excalidraw inlines into the export (`Excalifont: error`; the shipped full font loads
   fine). Shapes, strokes, and embedded images are unaffected. This is a known cost of the
   `<img>` path, not a defect to chase — see Implementation Notes for the escape hatch.
-- **Autosave on a 150ms debounce**, matching `SOURCE_CHANGE_DEBOUNCE_MS` in
-  `mermaid-canvas.ts:31`. Excalidraw's `onChange` fires continuously.
-- **Parse failure shows an error in the tab and suppresses autosave for that tab.** It must
-  not fall back to an empty canvas — the next autosave would overwrite the real drawing
+- **Explicit saves only.** Cmd+S saves the focused drawing. Tab/window close and application
+  quit await pending drawing saves and remain open on failure. Drawing callbacks do no
+  exporting, serialization, file writes, or timer scheduling. Reopening or moving a tab
+  reuses its live session without saving.
+- **Parse failure shows an error in the tab and disables saving for that tab.** It must
+  not fall back to an empty canvas — the next save would overwrite the real drawing
   with nothing. This is the highest-consequence failure mode in the feature.
 - **New Drawing** names files `drawing`, then `drawing-1`, `drawing-2`, … on collision, in
   the note's own directory. Run from anywhere that is not a file tab (launcher, settings,
@@ -127,12 +129,11 @@ false })`, load via `loadFromBlob` returning a parse error rather than an empty 
   `EXCALIDRAW_ASSET_PATH` assignment — lives in `drawing-editor.tsx`. Verified at the build:
   the entry chunk contains no occurrence of `excalidraw`, and the 142 KB of CSS emits as its
   own `drawing-editor-*.css`.
-- **Autosave is disarmed until the first non-empty change.** Excalidraw emits an `onChange`
+- **Change tracking is disarmed until the first non-empty change.** Excalidraw emits an `onChange`
   at mount that can carry an empty element array before `initialData` is applied; saving that
   would overwrite a real drawing with nothing, without any parse failure involved. Once
-  armed, an empty scene is a genuine "user deleted everything" and does save. The pending
-  debounced save is also flushed on unmount, or closing the tab drops the last 150 ms of
-  edits.
+  armed, an empty scene is a genuine "user deleted everything" and does save. Dirty scenes remain owned by their path when a view unmounts. Closing a tab saves
+  before removing it; detaching or reattaching a view does not export.
 - **A drawing is never an open _file_.** `drawingKind.primaryPath` returns `null`, so a
   drawing tab publishes no `activeFilePath`, and `ensureFileLoaded` returns early on a
   drawing path (dropping any optimistic placeholder its callers inserted). That guard sits
@@ -164,7 +165,7 @@ full woff2>) }`, and rendering the SVG **inlined into the DOM** renders correct 
   footer.
 - new `apps/desktop/src/components/editor-area/drawing-pane.tsx` — the `React.lazy` shell.
 - new `apps/desktop/src/components/editor-area/drawing-editor.tsx` — the Excalidraw host
-  itself: theme mirroring, debounced save, parse-error state, asset path.
+  itself: theme mirroring, shared drawing session, parse-error state, asset path.
 - `apps/desktop/vite.config.ts` — copies Excalidraw's fonts into `public/excalidraw-assets/`.
 - `apps/desktop/src/components/editor-area/wiki-link-extension.ts` — `dblclick` on the
   embed widget.

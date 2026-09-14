@@ -57,11 +57,13 @@ function createSession(path: string, initial: DrawingScene) {
     });
   let saved = serialize();
   let queue = Promise.resolve();
+  let pendingSaves = 0;
   const views = new Map<string, AttachedView>();
 
   const session = {
     path,
     views,
+    deleting: undefined as Promise<void> | undefined,
 
     /** The live scene — what a newly attached view must open at, rather than
      *  re-reading a stale copy from disk. */
@@ -79,6 +81,10 @@ function createSession(path: string, initial: DrawingScene) {
       views.delete(viewId);
     },
 
+    canRelease() {
+      return views.size === 0 && pendingSaves === 0 && !session.isDirty();
+    },
+
     isDirty() {
       return serialize() !== saved;
     },
@@ -92,8 +98,9 @@ function createSession(path: string, initial: DrawingScene) {
       if (state.isLoading || (!armed && next.length === 0)) return;
 
       const view = views.get(viewId);
-      const incoming = fingerprint(next, images);
-      if (view?.echo === incoming) {
+      // The usual single-view drawing path only stores references.
+      const incoming = views.size > 1 ? fingerprint(next, images) : null;
+      if (incoming !== null && view?.echo === incoming) {
         // This is the scene we just pushed into this view coming back.
         view.echo = null;
         return;
@@ -120,6 +127,7 @@ function createSession(path: string, initial: DrawingScene) {
      * for the first and then no-ops if the content is unchanged.
      */
     save(): Promise<void> {
+      if (session.deleting) return session.deleting;
       // Capture before yielding: Excalidraw mutates elements during a stroke.
       const signature = serialize();
       const snapshot = JSON.parse(signature) as {
@@ -134,8 +142,11 @@ function createSession(path: string, initial: DrawingScene) {
           await saveDrawing(path, scene);
           saved = signature;
         });
-      queue = result;
-      return result;
+      pendingSaves++;
+      queue = result.finally(() => {
+        pendingSaves--;
+      });
+      return queue;
     },
   };
   return session;
@@ -172,7 +183,7 @@ export function attachDrawingView(
       attached.detach(viewId);
       // A clean session with nothing attached has nothing left to own. A dirty
       // one is kept so quit and explicit-save boundaries can still flush it.
-      if (attached.views.size === 0 && !attached.isDirty() && sessions.get(path) === attached) {
+      if (attached.canRelease() && sessions.get(path) === attached) {
         sessions.delete(path);
       }
     },
@@ -211,7 +222,7 @@ export async function saveDrawingSessions(path?: string): Promise<void> {
     matching(path).map((session) =>
       session.save().then(() => {
         // A closed drawing whose write has landed can be released.
-        if (session.views.size === 0 && sessions.get(session.path) === session) {
+        if (session.canRelease() && sessions.get(session.path) === session) {
           sessions.delete(session.path);
         }
       }),
@@ -267,13 +278,22 @@ export async function withDrawingSaveBoundary<T>(
 
 export async function deleteEntryAfterDrawingWrites(path: string): Promise<void> {
   const release = freezeDrawingInput();
-  try {
-    // An earlier Cmd+S must finish before deletion. Failed writes cannot recreate
-    // the file either, and must not block an explicit request to delete it.
-    await Promise.allSettled(matching(path).map((session) => session.settled()));
+  const entries = matching(path);
+  const pending = entries.map((entry) => entry.deleting ?? entry.settled());
+  const deletion = (async () => {
+    // Capture existing writes, then block new exports until deletion completes.
+    // Native Quit can arrive while this operation is awaiting an older Cmd+S.
+    await Promise.allSettled(pending);
     await deleteEntry(path);
     discardDrawingSessions(path);
+  })();
+  for (const entry of entries) entry.deleting = deletion;
+  try {
+    await deletion;
   } finally {
+    for (const entry of entries) {
+      if (entry.deleting === deletion) entry.deleting = undefined;
+    }
     release();
   }
 }
