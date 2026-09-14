@@ -122,7 +122,13 @@ pub(crate) fn modified_time(path: &std::path::Path) -> u64 {
 /// drawing.
 const DRAWING_EXTENSION: &str = ".excalidraw.svg";
 
-/// The file kinds the sidebar surfaces: Markdown notes and drawings. One
+/// Extension for PDFs. Mirrors `PDF_EXTENSION` in
+/// `apps/desktop/src/lib/pdf.ts` — a PDF is shown in the sidebar but is not
+/// Markdown, so `is_markdown` stays false for it and it never reaches the
+/// `.md`-filtered fuzzy index in `commands/search.rs`.
+const PDF_EXTENSION: &str = ".pdf";
+
+/// The file kinds the sidebar surfaces: Markdown notes, drawings and PDFs. One
 /// predicate so listing and folder visibility cannot drift apart — a drawing
 /// visible in a folder that the tree hides is the failure this prevents.
 fn is_sidebar_file(path: &Path) -> bool {
@@ -132,6 +138,7 @@ fn is_sidebar_file(path: &Path) -> bool {
     let lower = name.to_ascii_lowercase();
     lower.ends_with(".md") && name.len() > 3
         || (lower.ends_with(DRAWING_EXTENSION) && name.len() > DRAWING_EXTENSION.len())
+        || (lower.ends_with(PDF_EXTENSION) && name.len() > PDF_EXTENSION.len())
 }
 
 /// Recursively classifies a directory tree by whether it holds anything the
@@ -804,6 +811,29 @@ mod tests {
         assert!(!drawing.is_markdown);
         assert!(drawing.title.is_none());
         assert!(!result.iter().any(|entry| entry.name == "logo.svg"));
+    }
+
+    #[test]
+    fn test_is_sidebar_file_accepts_pdfs_without_making_them_markdown() {
+        let dir = setup_test_dir();
+        fs::write(dir.path().join("paper.pdf"), "%PDF-1.7").unwrap();
+        fs::write(dir.path().join("logo.svg"), "<svg/>").unwrap();
+        let result = read_directory_impl(&dir.path().to_string_lossy(), None).unwrap();
+
+        let pdf = result
+            .iter()
+            .find(|entry| entry.name == "paper.pdf")
+            .expect("pdf is listed in the sidebar");
+        // A PDF is visible but is not a note: `is_markdown` false keeps it out
+        // of the file context menu, out of title extraction, and out of the
+        // `.md`-filtered fuzzy index.
+        assert!(!pdf.is_markdown);
+        assert!(pdf.title.is_none());
+        // A bare `.svg` is still an image, not a sidebar file.
+        assert!(!result.iter().any(|entry| entry.name == "logo.svg"));
+        // A file named exactly ".pdf" has no stem and is not a document.
+        assert!(!is_sidebar_file(Path::new("/w/.pdf")));
+        assert!(is_sidebar_file(Path::new("/w/paper.PDF")));
     }
 
     #[test]
