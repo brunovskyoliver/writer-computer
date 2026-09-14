@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-09-15
+
+- Reduce document-stat calculation time and temporary allocations for large notes while preserving word, character and paragraph counts.
+
 ## 2026-09-14
 
 - Inline `$...$` math now shows a live preview above its source line while editing, matching display math.

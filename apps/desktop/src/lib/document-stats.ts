@@ -4,22 +4,6 @@ export interface DocumentStats {
   paragraphs: number;
 }
 
-const SURROGATE_PAIR_RE = /[\uD800-\uDBFF][\uDC00-\uDFFF]/g;
-
-function countMatches(text: string, re: RegExp): number {
-  let count = 0;
-  re.lastIndex = 0;
-  while (re.exec(text) !== null) count++;
-  return count;
-}
-
-// Code points, not UTF-16 units, so an emoji counts as one character. Counting
-// surrogate pairs and subtracting avoids `Array.from(text)`, which allocated one
-// string per character on every keystroke.
-function countCodePoints(text: string): number {
-  return text.length - countMatches(text, SURROGATE_PAIR_RE);
-}
-
 // Block prefixes are stripped per line. `[ \t]` rather than `\s`: a `\s` at the
 // line start swallowed the blank line before a list or heading, which merged
 // paragraphs and under-counted them.
@@ -36,11 +20,25 @@ export function getDocumentStats(content: string): DocumentStats {
   const normalized = normalizeDocumentContent(content);
   if (normalized === "") return { words: 0, characters: 0, paragraphs: 0 };
 
-  const words = countMatches(normalized, /\S+/g);
-  const characters = countCodePoints(normalized.replace(/\s+/g, " "));
-  let paragraphs = 0;
-  for (const paragraph of normalized.split(/\n\s*\n/)) {
-    if (/\S/.test(paragraph)) paragraphs++;
+  let words = 1;
+  let characters = normalized.length;
+  let paragraphs = 1;
+  // Normalization trims the edges, so every whitespace run separates words.
+  // Count collapsed whitespace and code points without allocating another
+  // document string or splitting the document into paragraphs.
+  const boundaries = /(\s+)|[\uD800-\uDBFF][\uDC00-\uDFFF]/g;
+  let match: RegExpExecArray | null;
+  while ((match = boundaries.exec(normalized)) !== null) {
+    const whitespace = match[1];
+    if (whitespace !== undefined) {
+      words++;
+      characters -= whitespace.length - 1;
+      const newline = whitespace.indexOf("\n");
+      if (newline !== -1 && whitespace.indexOf("\n", newline + 1) !== -1) paragraphs++;
+    } else {
+      // A surrogate pair occupies two UTF-16 units but one code point.
+      characters--;
+    }
   }
 
   return { words, characters, paragraphs };
