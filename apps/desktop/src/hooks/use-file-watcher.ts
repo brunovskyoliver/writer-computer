@@ -63,7 +63,7 @@ export function useFileWatcher() {
       useWorkspaceStore.getState().bumpSidebarMetadataVersion();
     });
 
-    const unlistenSettings = listen<WorkspaceIdentity>("settings:changed", (event) => {
+    const unlistenSettings = listen<WorkspaceIdentity | null>("settings:changed", (event) => {
       if (!isWorkspaceEventCurrent(event.payload, currentWorkspaceIdentity())) return;
       void useSettingsStore.getState().loadSettings();
     });

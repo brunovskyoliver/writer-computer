@@ -2,6 +2,8 @@
 
 ## 2026-09-14
 
+- LaTeX Suite toggles and snippet variables now update every open window without restarting or moving the caret. Global config edits reload across windows, and delayed settings reads no longer overwrite newer local changes. Disabling math highlighting now removes all token colours; auto-fraction keeps opening math delimiters out of the numerator.
+
 - Keep the current line clear of the pane fade while typing, adding new lines, or moving the cursor. Notes have more room below the final line, including in split panes.
 
 - LaTeX display blocks now render across blank lines, including expressions such as `\sin\left( \frac{\pi}{2} \right)*\cosh(y)=2`. A live preview stays above the source while you edit a `$$...$$` block.

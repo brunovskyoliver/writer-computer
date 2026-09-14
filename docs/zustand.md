@@ -108,3 +108,7 @@ updateCursorPos: (path, pos) => {
   });
 },
 ```
+
+## Settings reloads and local edits
+
+The global config watcher notifies every window, including the window that wrote the setting. `settings-store.loadSettings()` waits for pending writes, retries reads overtaken by a local mutation, and discards responses from older reload requests. Keep those guards when changing settings persistence: a watcher response must never overwrite a newer optimistic edit. Reloads flow through `hydrateFromBackend`, which skips equal values, including equal list contents, before publishing state or applying theme effects.

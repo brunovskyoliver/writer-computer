@@ -5,7 +5,10 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(()
 vi.mock("@/lib/theme", () => ({ applyTheme: vi.fn(), applyCssVarBindings: vi.fn() }));
 
 import { invoke } from "@tauri-apps/api/core";
-import { useLatexSnippetStore } from "../src/stores/latex-snippet-store";
+import {
+  useLatexSnippetStore,
+  startLatexSnippetSubscriptions,
+} from "../src/stores/latex-snippet-store";
 import { useSettingsStore } from "../src/stores/settings-store";
 
 const mockedInvoke = vi.mocked(invoke);
@@ -95,4 +98,30 @@ describe("the snippet store", () => {
       "pattern-threw",
     ]);
   });
+});
+
+test("variable edits recompile live; identical reloads do not reread the snippet file", async () => {
+  withFile('[{trigger: "(${GREEK})", replacement: "[[0]]", options: "rmA"}]');
+  await useLatexSnippetStore.getState().load();
+  const stop = startLatexSnippetSubscriptions();
+  try {
+    expect(
+      useLatexSnippetStore.getState().getActiveSet().byMode.inline.auto[0]!.pattern.test("phi"),
+    ).toBe(false);
+    useSettingsStore.setState({
+      settings: { "latex.snippet-variables": ["GREEK=alpha|beta|phi"] },
+    });
+    await vi.waitFor(() => {
+      expect(
+        useLatexSnippetStore.getState().getActiveSet().byMode.inline.auto[0]!.pattern.test("phi"),
+      ).toBe(true);
+    });
+    mockedInvoke.mockClear();
+    useSettingsStore.setState({
+      settings: { "latex.snippet-variables": ["GREEK=alpha|beta|phi"] },
+    });
+    expect(mockedInvoke).not.toHaveBeenCalled();
+  } finally {
+    stop();
+  }
 });

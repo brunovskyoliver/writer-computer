@@ -836,6 +836,7 @@ pub fn start_global_config_watcher(
                 continue;
             }
 
+            let mut config_changed = false;
             for event in pending.drain(..) {
                 let Some(kind_str) = event_kind_str(&event.kind) else {
                     continue;
@@ -853,10 +854,17 @@ pub fn start_global_config_watcher(
                                 },
                             );
                         }
-                        // Global settings reload lands here in T047 (US4).
-                        Some("config") => wlog!("global config changed (ignored for now)"),
+                        Some("config") => config_changed = true,
                         _ => {}
                     }
+                }
+            }
+
+            if config_changed {
+                reload_global_settings(app.state::<AppState>().inner());
+                if let Err(error) = app.emit("settings:changed", Option::<WorkspaceIdentity>::None)
+                {
+                    eprintln!("[watcher] failed to emit global settings change: {error}");
                 }
             }
 
@@ -865,6 +873,23 @@ pub fn start_global_config_watcher(
     });
 
     Ok(watcher)
+}
+
+/// Reload every live window before notifying frontends. Use the same locked
+/// path as settings commands so telemetry cannot apply a stale disk snapshot.
+fn reload_global_settings(app_state: &AppState) {
+    for label in app_state.labels() {
+        let Some(state) = app_state.get(&label) else {
+            continue;
+        };
+        if let Err(error) =
+            crate::commands::settings::with_global_settings_mut(app_state, &state, |settings| {
+                settings.reload_global().map_err(Into::into)
+            })
+        {
+            eprintln!("[watcher] failed to reload global settings for {label}: {error}");
+        }
+    }
 }
 
 /// Rebuild the workspace gitignore matcher on a one-shot background thread,
@@ -922,6 +947,51 @@ mod tests {
     use std::path::PathBuf;
 
     const ROOT: &str = "/workspace";
+
+    #[test]
+    fn global_reload_updates_all_windows_and_continues_after_read_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let broken_dir = tempfile::tempdir().unwrap();
+        let app_state = AppState::new();
+        for label in ["first", "second"] {
+            *app_state.get_or_create(label).settings.write() =
+                Some(crate::config::Settings::new(dir.path().to_path_buf()).unwrap());
+        }
+        let mut broken = crate::config::Settings::new(broken_dir.path().to_path_buf()).unwrap();
+        broken
+            .set_global("latex.tab-out", crate::config::ConfigValue::Bool(false))
+            .unwrap();
+        *app_state.get_or_create("broken").settings.write() = Some(broken);
+        std::fs::remove_file(broken_dir.path().join("config")).unwrap();
+        std::fs::create_dir(broken_dir.path().join("config")).unwrap();
+
+        std::fs::write(dir.path().join("config"), "latex.tab-out = false\n").unwrap();
+        reload_global_settings(&app_state);
+        for label in ["first", "second", "broken"] {
+            let state = app_state.get(label).unwrap();
+            let guard = state.settings.read();
+            assert_eq!(
+                guard
+                    .as_ref()
+                    .unwrap()
+                    .get_global_or_default("latex.tab-out"),
+                Some(&crate::config::ConfigValue::Bool(false))
+            );
+        }
+        std::fs::remove_file(dir.path().join("config")).unwrap();
+        reload_global_settings(&app_state);
+        for label in ["first", "second"] {
+            let state = app_state.get(label).unwrap();
+            let guard = state.settings.read();
+            assert_eq!(
+                guard
+                    .as_ref()
+                    .unwrap()
+                    .get_global_or_default("latex.tab-out"),
+                Some(&crate::config::ConfigValue::Bool(true))
+            );
+        }
+    }
 
     #[test]
     fn test_ignores_git_directory() {

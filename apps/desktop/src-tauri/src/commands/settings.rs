@@ -32,14 +32,14 @@ fn with_settings_mut<T>(
     }
 }
 
-/// Run a global-scope mutation under the process-wide settings lock, then push
+/// Run a global-scope mutation or reload under the process-wide settings lock, then push
 /// the resulting telemetry state into the running client before the lock is
 /// released. Doing it here, for every global write, means two windows cannot
 /// interleave "persist A, persist B, apply A" and re-enable telemetry from a
 /// stale snapshot, and a hand-edited `telemetry.enabled` picked up by the
 /// reload inside `set_global`/`reset_global` reaches the client on the next
 /// write to any key instead of at the next launch.
-fn with_global_settings_mut<T>(
+pub(crate) fn with_global_settings_mut<T>(
     app_state: &AppState,
     state: &WorkspaceState,
     f: impl FnOnce(&mut Settings) -> Result<T, AppError>,

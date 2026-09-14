@@ -200,9 +200,13 @@ function handleInput(view: EditorView, from: number, to: number, text: string): 
       })
     : null;
 
+  // The first math line may also contain prose and opening delimiters.
+  // Neither belongs to the operand consumed by auto-fraction.
+  const fractionFrom =
+    context.kind === "prose" ? line.from : Math.max(line.from, context.node.formulaFrom);
   const fraction =
     match === null && text === "/" && setting("latex.auto-fraction") && context.kind !== "prose"
-      ? autoFraction(lineBefore)
+      ? autoFraction(lineBefore.slice(fractionFrom - line.from))
       : null;
 
   if (!match && !fraction) return false;
@@ -217,7 +221,7 @@ function handleInput(view: EditorView, from: number, to: number, text: string): 
     return true;
   }
 
-  const replaceFrom = line.from + fraction!.operandFrom;
+  const replaceFrom = fractionFrom + fraction!.operandFrom;
   view.dispatch({
     changes: { from: replaceFrom, to: caret, insert: fraction!.text },
     selection: EditorSelection.cursor(

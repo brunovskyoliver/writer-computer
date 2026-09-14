@@ -23,7 +23,7 @@ import {
   syntaxTree,
 } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
-import { Compartment, type EditorState, type Extension } from "@codemirror/state";
+import { Compartment, Prec, type EditorState, type Extension } from "@codemirror/state";
 import { Decoration, ViewPlugin } from "@codemirror/view";
 import { parseMixed, type SyntaxNode } from "@lezer/common";
 import { Tag, tags } from "@lezer/highlight";
@@ -118,7 +118,9 @@ const colouredLatexStyle = HighlightStyle.define(
 /** `latex.highlight-source` off: the code font stays, the colours go. */
 const plainLatexStyle = HighlightStyle.define([], {
   scope: latexSourceLanguage,
-  all: codeFont,
+  // General code highlighting also sees these tokens. Explicitly inherit the
+  // editor colour so disabling the LaTeX palette cannot expose that fallback.
+  all: { ...codeFont, color: "inherit" },
 });
 
 function isHighlightOn(): boolean {
@@ -126,7 +128,7 @@ function isHighlightOn(): boolean {
 }
 
 function styleFor(on: boolean): Extension {
-  return syntaxHighlighting(on ? colouredLatexStyle : plainLatexStyle);
+  return Prec.high(syntaxHighlighting(on ? colouredLatexStyle : plainLatexStyle));
 }
 
 /** The enclosing `Math` node, or `null` outside math. The nested LaTeX tree is

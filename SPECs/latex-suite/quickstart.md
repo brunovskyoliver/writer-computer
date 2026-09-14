@@ -72,7 +72,7 @@ Rust (`cargo test`): `latex_snippets_path` creates the file once and never overw
 1. Toggle **Snippets** off → `sin` in math stays literal; Tab behaves as before. On → expands.
 2. Toggle **Highlight math source** off → unfolded math is code-font, delimiters muted, no colours. On → colours return without the caret moving.
 3. Toggle **Tab out** and **Auto fraction** individually and repeat 1.7/1.8.
-4. Add `phi` to `GREEK` in **Snippet variables** → in math `phi` → `\phi` (through the "add backslash before Greek letters" rule).
+4. Remove `phi` from `GREEK` in **Snippet variables** → in math `phi` stays literal. Restore `phi` → `phi` expands to `\phi` (through the "add backslash before Greek letters" rule). The default already includes `phi`, so adding it without first removing it does not test recompilation.
 5. With two windows open, change any LaTeX toggle in A → B reflects it (check B's Settings and behaviour) without restart.
 
 ### 5. Performance (SC-004)

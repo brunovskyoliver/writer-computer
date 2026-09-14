@@ -208,6 +208,14 @@ The editor area is a binary tree of panes (`lib/editor-layout.ts`, owned by `edi
 - **The session is the committed tree.** `lib/session.ts` owns the v2 wire shape and the codec both ways; Rust `session.rs` mirrors it and both run the fixtures in `SPECs/tab-tiling-splits/fixtures/sessions/`. Persistence (`workspace-store.ts`) follows layout or tab identity changes — never edits — through one debounced, ordered writer per window, cancelled on switch and flushed on close. A malformed record is reported and held on disk until a non-empty snapshot for that workspace replaces it; compact windows never persist.
 - **Preview and commit share one candidate.** `buildFileDropCandidate` / `buildTabDropCandidate` return the exact post-transition layout plus its preview rectangle, computed _after_ the source pane collapses. `DropPreview` paints `candidate.previewRect` and nothing else; release re-resolves against the live layout and geometry and the store refuses a candidate whose `expectedRevision` is stale. A drop that would change nothing (same position, own centre, sole tab on its own edge, split below the 240×160 minimum) has no candidate, so no overlay and no commit.
 
+## LaTeX settings and source boundaries
+
+LaTeX input handlers read snippet, tab-out and auto-fraction settings at each input. Variable edits reload the compiled set; highlighting changes only reconfigure its style compartment. Neither path replaces the editor view or its selection.
+
+The scoped LaTeX highlight style must have higher precedence than the general code palette. The off style explicitly inherits the editor colour; omitting a colour exposes the general palette underneath it. Keep both requirements when changing these styles.
+
+Auto-fraction receives only the current line's formula content, starting at the later of the line start and `formulaFrom`. Translate its relative operand offset from that same origin. Passing the full line can consume prose or an opening `$` into the numerator.
+
 ## File map
 
 - `mermaid-decorations.ts` — canonical replace-only block widget with in-widget editing. Reference for live position lookup (`findEnclosingFencedCode`) and writing the fence back from a nested editor.

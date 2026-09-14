@@ -42,6 +42,8 @@ interface SettingWriteQueue {
 // One ordered persistence lane per key. Settings remain optimistic in Zustand
 // and CSS, but an older IPC write can never finish after a newer write.
 const settingWriteQueues = new Map<string, SettingWriteQueue>();
+let mutationVersion = 0;
+let reloadVersion = 0;
 
 function getWriteQueue(key: string, settings: Record<string, unknown>): SettingWriteQueue {
   const existing = settingWriteQueues.get(key);
@@ -98,9 +100,21 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   isLoaded: false,
 
   loadSettings: async () => {
-    const settings = await tauri.getSettings();
-    set({ settings, isLoaded: true });
-    applySettingsSideEffects(settings);
+    const request = ++reloadVersion;
+    while (request === reloadVersion) {
+      // Watcher echoes may arrive while a newer optimistic edit is queued.
+      // Wait for persistence, then retry if another edit overtakes this read.
+      if (settingWriteQueues.size > 0) {
+        await Promise.allSettled([...settingWriteQueues.values()].map((queue) => queue.tail));
+        continue;
+      }
+      const version = mutationVersion;
+      const settings = await tauri.getSettings();
+      if (request !== reloadVersion) return;
+      if (version !== mutationVersion) continue;
+      get().hydrateFromBackend({ settings });
+      return;
+    }
   },
 
   getSetting: <K extends SettingKey>(key: K): SettingsMap[K] | undefined => {
@@ -108,6 +122,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
 
   setSetting: async (key: string, value: unknown, scope: "global" | "workspace" = "global") => {
+    mutationVersion++;
     const queue = getWriteQueue(key, get().settings);
     const version = ++queue.latestVersion;
 
@@ -162,6 +177,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
 
   resetSetting: async (key: string, scope: "global" | "workspace" = "global") => {
+    mutationVersion++;
     const queue = getWriteQueue(key, get().settings);
     const version = ++queue.latestVersion;
     let resetValue = queue.lastPersisted;
@@ -205,6 +221,15 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
 
   hydrateFromBackend: ({ settings }) => {
+    const current = get();
+    if (
+      current.isLoaded &&
+      Object.keys(current.settings).length === Object.keys(settings).length &&
+      Object.keys(settings).every((key) =>
+        settingValueMatches(current.settings, key, { exists: true, value: settings[key] }),
+      )
+    )
+      return;
     set({ settings, isLoaded: true });
     applySettingsSideEffects(settings);
   },

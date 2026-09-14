@@ -194,3 +194,56 @@ describe("settings write ordering", () => {
     expect(useSettingsStore.getState().settings["fonts.editor"]).toBe("Default, serif");
   });
 });
+
+describe("settings reload ordering", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useSettingsStore.setState({ settings: { "latex.tab-out": true }, isLoaded: true });
+  });
+
+  test("waits for pending writes before reading without reverting the optimistic value", async () => {
+    const write = deferred<unknown>();
+    mockedInvoke.mockImplementation((command) => {
+      if (command === "set_setting") return write.promise;
+      return Promise.resolve({ "latex.tab-out": false });
+    });
+    const pendingWrite = useSettingsStore.getState().setSetting("latex.tab-out", false);
+    const reload = useSettingsStore.getState().loadSettings();
+    await flushMicrotasks();
+    expect(mockedInvoke.mock.calls.some(([command]) => command === "get_settings")).toBe(false);
+    expect(useSettingsStore.getState().settings["latex.tab-out"]).toBe(false);
+    write.resolve(false);
+    await Promise.all([pendingWrite, reload]);
+    expect(useSettingsStore.getState().settings["latex.tab-out"]).toBe(false);
+    // The writing window's identical watcher echo causes no second theme pass.
+    expect(applyTheme).toHaveBeenCalledTimes(1);
+  });
+
+  test("retries a read when a newer local write completes before its response", async () => {
+    const read = deferred<Record<string, unknown>>();
+    let reads = 0;
+    mockedInvoke.mockImplementation((command) => {
+      if (command === "set_setting") return Promise.resolve(false);
+      return ++reads === 1 ? read.promise : Promise.resolve({ "latex.tab-out": false });
+    });
+    const reload = useSettingsStore.getState().loadSettings();
+    await flushMicrotasks();
+    await useSettingsStore.getState().setSetting("latex.tab-out", false);
+    read.resolve({ "latex.tab-out": true });
+    await reload;
+    expect(reads).toBe(2);
+    expect(useSettingsStore.getState().settings["latex.tab-out"]).toBe(false);
+    expect(applyTheme).toHaveBeenCalledTimes(1);
+  });
+
+  test("an older reload cannot overwrite a newer reload", async () => {
+    const first = deferred<Record<string, unknown>>();
+    mockedInvoke.mockReturnValueOnce(first.promise).mockResolvedValue({ "latex.tab-out": false });
+    const old = useSettingsStore.getState().loadSettings();
+    await flushMicrotasks();
+    await useSettingsStore.getState().loadSettings();
+    first.resolve({ "latex.tab-out": true });
+    await old;
+    expect(useSettingsStore.getState().settings["latex.tab-out"]).toBe(false);
+  });
+});

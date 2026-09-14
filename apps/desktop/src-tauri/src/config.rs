@@ -920,6 +920,49 @@ mod tests {
     }
 
     #[test]
+    fn reload_global_updates_latex_settings_without_touching_workspace_or_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let mut settings = Settings::new(dir.path().to_path_buf()).unwrap();
+        settings.load_workspace(workspace.path());
+        settings
+            .set_workspace("editor.font-size", ConfigValue::Number(23.0))
+            .unwrap();
+        let defaults = settings.defaults.clone();
+        let workspace_raw = settings.workspace_raw.clone();
+
+        std::fs::write(
+            settings.global_path(),
+            "# external edit\nlatex.tab-out = false\n",
+        )
+        .unwrap();
+        settings.reload_global().unwrap();
+        assert_eq!(
+            settings.get_global_or_default("latex.tab-out"),
+            Some(&ConfigValue::Bool(false))
+        );
+        assert!(settings.global_raw.contains("# external edit"));
+        assert_eq!(
+            settings.get("editor.font-size"),
+            Some(&ConfigValue::Number(23.0))
+        );
+
+        std::fs::remove_file(settings.global_path()).unwrap();
+        settings.reload_global().unwrap();
+        assert_eq!(
+            settings.get_global_or_default("latex.tab-out"),
+            Some(&ConfigValue::Bool(true))
+        );
+        assert!(settings.global_raw.is_empty());
+        assert_eq!(settings.defaults, defaults);
+        assert_eq!(settings.workspace_raw, workspace_raw);
+        assert_eq!(
+            settings.get("editor.font-size"),
+            Some(&ConfigValue::Number(23.0))
+        );
+    }
+
+    #[test]
     fn reload_global_treats_missing_as_empty_and_preserves_memory_on_read_error() {
         let dir = tempfile::tempdir().unwrap();
         let mut settings = Settings::new(dir.path().to_path_buf()).unwrap();
