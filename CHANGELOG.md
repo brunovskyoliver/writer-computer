@@ -2,6 +2,8 @@
 
 ## 2026-09-14
 
+- Keep the current line clear of the pane fade while typing, adding new lines, or moving the cursor. Notes have more room below the final line, including in split panes.
+
 - LaTeX display blocks now render across blank lines, including expressions such as `\sin\left( \frac{\pi}{2} \right)*\cosh(y)=2`. A live preview stays above the source while you edit a `$$...$$` block.
 
 - LaTeX snippets expand as you type. Inside math, `mk` opens inline math, `dm` display math, `sin`/`theta`/`xx` and about two hundred other triggers become the LaTeX they stand for, and `/` after an operand turns it into `\frac{…}{}`. Tab walks the placeholders a snippet leaves behind, and with no placeholder left it jumps past the next closing bracket or out of the formula. Backspace right after an expansion undoes it in one press, leaving the text you typed. Snippets stay out of the way where they should: nothing fires inside code, inside `\text{}`, or mid-way through a control sequence you are still typing, and with Vim on they only fire in Insert and Replace mode. Each of the three behaviours has its own switch under Settings → LaTeX Suite.

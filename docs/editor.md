@@ -41,7 +41,9 @@ When the scrollable element is an ancestor:
 - Scroll it yourself with `scroller.scrollTo({ top, behavior: "auto" })`. `behavior: "smooth"` is async and gets interrupted by rapid keystrokes (e.g. Cmd+G held down).
 - Account for `clientTop` if the ancestor has a border (Writer's container has a 12px transparent border-top to give the mask gradient room).
 
-Reference: `EditorView.scrollHandler.of((view, range) => …)` in `apps/desktop/src/components/editor-area/use-prosemark-editor.ts`.
+Reference: `editorScrollHandler` in `apps/desktop/src/components/editor-area/editor-scroll.ts`. It handles nearest-scroll requests for typing, cursor movement and search. Wheel scrolling does not request caret tracking.
+
+The handler runs during a CodeMirror update, so `coordsAtPos` must be deferred to a `requestMeasure` read. For a wrapped paragraph, use those caret coordinates to track the actual visual line, with `lineBlockAt` as the fallback for virtualized positions. Remeasure after scrolling because newly rendered lines can replace estimated heights. The scroll inset is capped at one third of the pane height for short splits. `EditorScrollContainer` also supplies trailing editor padding from the safe margin and caps the fade length, so the final caret can reach the clear area.
 
 The same rule covers libraries that scroll on their own: `@replit/codemirror-vim`'s CM5 adapter reads and writes `view.scrollDOM` for `Ctrl+D/U/F/B/E/Y`, `zz`/`zt`/`zb` and `H`/`M`/`L`. `vim-scroll.ts` replaces the adapter's `getScrollInfo` / `scrollTo` / `findPosV("page")` on the instance so they measure and move the ancestor scroller instead (inset by `EDITOR_SAFE_SCROLL_MARGIN`, like search navigation).
 

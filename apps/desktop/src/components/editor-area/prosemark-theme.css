@@ -147,9 +147,8 @@
   width: 100%;
   max-width: var(--writer-editor-outer-width, calc(734px + 4rem + 4rem));
   margin: 0 auto;
-  /* A small fixed gap after the last line; the document stops scrolling
-     just above the pane's edge. */
-  padding: 0 var(--writer-editor-side-padding, 4rem) 2.5rem;
+  /* Let the final caret scroll clear of the outer pane's fade and blur. */
+  padding: 0 var(--writer-editor-side-padding, 4rem) var(--writer-editor-bottom-space, 2.5rem);
   font-family: var(
     --writer-editor-font-family,
     -apple-system-body,
