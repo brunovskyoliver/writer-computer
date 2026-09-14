@@ -1,6 +1,6 @@
 # Validation guide
 
-This guide is for the implementation produced from this plan. The tiling UI is not implemented yet.
+This guide is for the implementation produced from this plan. The tiling UI is built; what remains is the runtime acceptance pass recorded at the bottom of this file.
 
 ## Setup and commands
 
@@ -50,3 +50,66 @@ Prefer extending `apps/desktop/tests/stores.test.ts`, `editor-api.test.ts`, and 
 ## Planning validation record
 
 Spec Kit setup resolved the intended feature directory. Existing source and local dependency definitions were inspected, along with the resize library's published v4 declarations. `vp install` succeeded using the repo-local binary because `vp` was absent from the shell PATH. Planning artifacts require link/placeholder/diff checks only; application tests and runtime acceptance remain implementation gates.
+
+## Recorded validation run (T040)
+
+Run from the repository root on macOS 15 (Darwin 25.6.0), 2026-09-14.
+
+| Check                        | Result                                                                                                                                                                                                                                    |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `vp check`                   | pass — 0 errors, 4 pre-existing warnings (`drawing-sessions.test.ts` unused binding, `drawing-sessions.ts` useless spread, `editor-api.test.ts` unbound method, `wdio.conf.js` redundant `any` in a JSDoc type). None are in tiling code. |
+| `vp test`                    | pass — 869 tests in 57 files                                                                                                                                                                                                              |
+| `vp run desktop#build`       | pass                                                                                                                                                                                                                                      |
+| `cargo test`                 | pass — 179 tests, including `session::tests::shared_fixtures_agree_with_the_frontend_codec`                                                                                                                                               |
+| `cargo clippy --all-targets` | pass — 0 errors, 9 pre-existing warnings (dead `workspace_path`, `items_after_test_module` in `shutdown.rs`)                                                                                                                              |
+| `cargo fmt --check`          | pass                                                                                                                                                                                                                                      |
+
+### Test-environment notes
+
+- **`vp` is not on the shell PATH here.** Every command above was run through the
+  repo-local binary at `./node_modules/.bin/vp`. Substitute that for a bare `vp`
+  if the global CLI is missing.
+- **`vp check` stops at the first failing stage.** A formatting problem in an
+  unrelated file (here, `TODOS.md`) masks the lint and type results entirely. Run
+  `vp check --fix` and then re-read the output before concluding anything about
+  types.
+- **`specs/tab-tiling.spec.js` has not been executed.** It requires
+  `cargo install tauri-webdriver --locked`, which is not installed on this
+  machine, plus a full `cargo tauri build --features e2e` (`pnpm run build:app`).
+  The spec is written against the shipped selectors (`[data-pane-id]`,
+  `[data-pane-focused]`, `[data-pane-strip]`, `[data-tab-id]`,
+  `[data-drop-preview]`, `[data-pane-separator]`) but its first green run is
+  still owed. Run it with, from `apps/desktop/e2e/`:
+
+  ```sh
+  pnpm run build:app
+  pnpm run test:wdio -- --spec ./specs/tab-tiling.spec.js
+  ```
+
+  It self-skips on the welcome screen, so it needs a restorable workspace in the
+  isolated `com.writer-computer.e2e` profile.
+
+## What is still owed to a human (T041)
+
+Everything below needs eyes on a running window and is deliberately not
+automated. Record results here as they are done.
+
+- [ ] Light and dark pass over the drop preview: the 18% accent body fill and the
+      denser 4 px strip bar must both read clearly against each theme's editor
+      background, at the window's edges as well as its middle.
+- [ ] Sidebar move isolation: a drag released over the file tree moves on disk
+      only, and the same drag released over the editor opens only. Neither
+      crosses over.
+- [ ] Duplicate Markdown and drawing views: the same note and the same
+      `.excalidraw.svg` open in two panes, edited, undone, saved, and changed
+      externally; independent cursors and scroll, one save/export queue, no
+      remount on a tab move.
+- [ ] Malformed restore diagnostics: corrupt a v2 record in the isolated test
+      profile, confirm the visible report and that the file is left untouched
+      until the layout changes.
+- [ ] Compact-window and Finder-drop regression pass.
+- [ ] Performance: four notes of roughly 20 KB with headings and tables, typing
+      and drag/resize traces compared against a single pane on the same machine.
+      Record the measured document sizes and the trace results here.
+- [ ] A true quit-and-relaunch restore. The automated spec reloads the webview,
+      which exercises the same startup read but not process teardown.
