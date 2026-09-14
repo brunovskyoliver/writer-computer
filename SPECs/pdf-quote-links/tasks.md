@@ -59,7 +59,7 @@ before the `pdf` kind is added.
   - `openFile` (516): `activeTab?.location.kind === "file" || isDrawingPath(path)` — the **left half stays unchanged**; only the right half becomes the predicate.
   - `navigateToFile` (886): match on **the location built from the path** — same `kind` _and_ same `path` — **not** on a boolean. Matching on a boolean is the specific bug that would keep drawings working while letting PDFs open twice.
   - **Branch ordering is load-bearing**: the standalone-surface branch stays _above_ `navigateToFile`'s `if (!activeTab) { openFile(...); return; }` guard, exactly where the drawing branch sits today. Reordering produces an infinite bounce when a standalone surface is opened into an empty window.
-- [~] T010 (partial — PDF half deferred to T012) Add `apps/desktop/tests/editor-store-standalone-surface.test.ts`: a drawing path and (once T012 lands) a PDF path each dispatch to the right location, and `navigateToFile` reuses an open tab of the same kind and path rather than opening a second. Assert existing drawing behavior is unchanged — that is the acceptance bar for T009.
+- [x] T010 Add `apps/desktop/tests/editor-store-standalone-surface.test.ts`: a drawing path and (once T012 lands) a PDF path each dispatch to the right location, and `navigateToFile` reuses an open tab of the same kind and path rather than opening a second. Assert existing drawing behavior is unchanged — that is the acceptance bar for T009.
 
 **Phase 2 implementation notes** (landed):
 
@@ -112,13 +112,43 @@ before the `pdf` kind is added.
 **Independent Test**: Put a PDF in the workspace, open it from the sidebar, split it beside a note, scroll both, toggle the theme, quit and relaunch. No quoting involved.
 
 - [x] T011 [US1] Extend `is_sidebar_file` in `apps/desktop/src-tauri/src/commands/fs.rs:128` to accept `.pdf`, mirroring the `DRAWING_EXTENSION` comment convention already there (FR-001). Leave `is_markdown` alone — a PDF must stay out of the Markdown path and out of the `.md`-filtered fuzzy index in `commands/search.rs:194` (FR-006).
-- [ ] T012 [US1] Create `apps/desktop/src/components/editor-area/page-kinds/pdf.ts` implementing the behavior table in `contracts/page-kind.md`: `kind: "pdf"`; `title` = filename stem (FR-002, no title extraction from contents); `description: "Open PDF"`; `keepAlive: true`; `supportsFileContextMenu: false`; `paths: [path]`; `rewritePath` on path match; `removePath` → `null`; `serialize` → `{ path, page }`. `primaryPath` stays at the default `null` — load-bearing: publishing it would hand the PDF to the markdown editor mount, the save scheduler and the statusbar. `fromPayload` returns `null` unless `path` is a string; a missing or non-numeric `page` restores as `1` rather than failing the tab.
-- [ ] T013 [US1] Register the kind: add `pdfKind` to the `kinds` tuple and `PdfLocation` to the `Location` union in `apps/desktop/src/components/editor-area/page-kinds/index.ts`, and add the `pdf` view entry `{ Component: PdfPane }` (no `renderFooter` — a PDF has no word count, frontmatter or document date) in `apps/desktop/src/components/editor-area/page-kinds/views.tsx`.
-- [ ] T014 [US1] Create `apps/desktop/src/components/editor-area/pdf-pane.tsx`: continuous-scroll virtualized page list rendering only the pages needed for the current view (FR-009), with page navigation and zoom (FR-007). Render tasks are cancelled on scroll-away rather than left racing. The component takes `isVisible` and `isFocused` separately and must respect the difference — a visible but unfocused viewer must not steal the caret or run focus effects.
-- [ ] T015 [US1] Style the viewer chrome in `apps/desktop/src/components/editor-area/pdf-pane.tsx` from the app's existing theme tokens and control styling — toolbar, page background framing, scrollbars — following light/dark changes with no reopen (FR-008). Take chrome from the app theme while keeping pdf.js page rendering, the same accommodation made for the Excalidraw editor.
-- [ ] T016 [US1] Surface load failure in `apps/desktop/src/components/editor-area/pdf-pane.tsx`: a corrupt, encrypted or missing PDF shows an explicit message naming the file, from the T004 result variants. No empty view, no partial render, no retry loop, no hanging tab (FR-012).
-- [ ] T017 [US1] Implement the `page` write-back from `PdfView` into `PdfLocation.page` in `apps/desktop/src/stores/editor-store.ts` under the two rules in data-model.md, both of which are correctness rules, not tuning: (1) a page change is **not a navigation** — it updates the tab's location in place and must never push onto `back`/`forward`, or scrolling would fill the history and break Back; (2) the write is **coalesced on settle** (and on tab close / session save), never per scroll event, because an un-debounced write clones the tab map on an interactive path. FR-005.
+- [x] T012 [US1] Create `apps/desktop/src/components/editor-area/page-kinds/pdf.ts` implementing the behavior table in `contracts/page-kind.md`: `kind: "pdf"`; `title` = filename stem (FR-002, no title extraction from contents); `description: "Open PDF"`; `keepAlive: true`; `supportsFileContextMenu: false`; `paths: [path]`; `rewritePath` on path match; `removePath` → `null`; `serialize` → `{ path, page }`. `primaryPath` stays at the default `null` — load-bearing: publishing it would hand the PDF to the markdown editor mount, the save scheduler and the statusbar. `fromPayload` returns `null` unless `path` is a string; a missing or non-numeric `page` restores as `1` rather than failing the tab.
+- [x] T013 [US1] Register the kind: add `pdfKind` to the `kinds` tuple and `PdfLocation` to the `Location` union in `apps/desktop/src/components/editor-area/page-kinds/index.ts`, and add the `pdf` view entry `{ Component: PdfPane }` (no `renderFooter` — a PDF has no word count, frontmatter or document date) in `apps/desktop/src/components/editor-area/page-kinds/views.tsx`.
+- [x] T014 [US1] Create `apps/desktop/src/components/editor-area/pdf-pane.tsx`: continuous-scroll virtualized page list rendering only the pages needed for the current view (FR-009), with page navigation and zoom (FR-007). Render tasks are cancelled on scroll-away rather than left racing. The component takes `isVisible` and `isFocused` separately and must respect the difference — a visible but unfocused viewer must not steal the caret or run focus effects.
+- [x] T015 [US1] Style the viewer chrome in `apps/desktop/src/components/editor-area/pdf-pane.tsx` from the app's existing theme tokens and control styling — toolbar, page background framing, scrollbars — following light/dark changes with no reopen (FR-008). Take chrome from the app theme while keeping pdf.js page rendering, the same accommodation made for the Excalidraw editor.
+- [x] T016 [US1] Surface load failure in `apps/desktop/src/components/editor-area/pdf-pane.tsx`: a corrupt, encrypted or missing PDF shows an explicit message naming the file, from the T004 result variants. No empty view, no partial render, no retry loop, no hanging tab (FR-012).
+- [x] T017 [US1] Implement the `page` write-back from `PdfView` into `PdfLocation.page` in `apps/desktop/src/stores/editor-store.ts` under the two rules in data-model.md, both of which are correctness rules, not tuning: (1) a page change is **not a navigation** — it updates the tab's location in place and must never push onto `back`/`forward`, or scrolling would fill the history and break Back; (2) the write is **coalesced on settle** (and on tab close / session save), never per scroll event, because an un-debounced write clones the tab map on an interactive path. FR-005.
 - [x] T018 [US1] Add a `#[test]` in the test module of `apps/desktop/src-tauri/src/commands/fs.rs`: `is_sidebar_file` accepts `.pdf`, still rejects a bare `.svg`, and `is_markdown` stays false for a PDF.
+
+**Phase 3 implementation notes** (landed):
+
+- **The CSP gap Phase 2 flagged was real, and the runtime named it.** The first
+  `getDocument` produced `connect-src blocked asset://localhost/...` — pdf.js fetches the
+  asset URL itself, so it is governed by `connect-src`, which did not exist and fell back to
+  `default-src 'self'`. The fix in `src-tauri/tauri.conf.json` is one directive:
+  `connect-src 'self' ipc: http://ipc.localhost asset: https://asset.localhost`. `'self'` and
+  the `ipc:` entries are load-bearing, not decoration: IPC worked before only under the
+  `default-src` fallback, so introducing `connect-src` without them would have broken every
+  `invoke`. No `worker-src` was needed — the pdf.js worker is a Vite-emitted same-origin
+  asset and passes under `'self'`, and no violation named it.
+- `locationForPath` gained the `.pdf` branch. T009 shipped the predicate refactor but not the
+  dispatch; without this line T012/T013 are dead code and a PDF opens in the markdown editor.
+- `isPdfPath` / `pdfName` live in `lib/pdf.ts` beside the lazy pdf.js boundary, mirroring
+  `isDrawingPath` in `lib/drawings.ts`: the store calls the predicate from the main module
+  graph, and everything pdf.js stays behind `await import()`.
+- Page heights are seeded from page 1 and refined per page as each renders. Awaiting all N
+  `getPage` calls to build an exact height map up front is what would break SC-001 on a long
+  document.
+- A cancelled render rejects with `RenderingCancelledException`. That is the expected result
+  of scrolling away and is swallowed deliberately — routing it into T016's error UI would
+  make normal scrolling look like a failed load.
+- `display: none` (copied from `DrawingPane`, and required for the same reason) zeroes the
+  container's `scrollTop`, so the pane keeps its own copy and restores it when the tab comes
+  back. `keepAlive` alone does not preserve scroll.
+- `isFocused` is unused on purpose: a PDF viewer has no caret, so a visible-but-unfocused
+  pane must keep painting and take no focus.
+- `commands/fs.rs` needed no change for FR-002 beyond the filter — title extraction is
+  already gated on `is_markdown`, so a PDF is never read for a title.
 
 **Checkpoint**: A themed, responsive PDF reader that splits beside a note and restores its page. Shippable on its own.
 
