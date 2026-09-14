@@ -593,6 +593,8 @@ pub fn run() {
             commands::workspace::open_file_in_standalone_window,
             commands::workspace::watch_standalone_file,
             commands::fonts::list_system_fonts,
+            commands::latex::latex_snippets_path,
+            commands::latex::reset_latex_snippets,
             commands::recents::record_recent_file,
             commands::recents::remove_recent_file,
             commands::recents::get_recent_files_global,

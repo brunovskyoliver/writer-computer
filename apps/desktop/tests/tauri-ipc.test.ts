@@ -185,6 +185,20 @@ describe("workspace IPC wrappers", () => {
   });
 });
 
+describe("LaTeX snippet IPC wrappers", () => {
+  test("getLatexSnippetsPath calls correct command", async () => {
+    mockedInvoke.mockResolvedValue("/data/latex-snippets.js");
+    await expect(ipc.getLatexSnippetsPath()).resolves.toBe("/data/latex-snippets.js");
+    expect(mockedInvoke).toHaveBeenCalledWith("latex_snippets_path");
+  });
+
+  test("resetLatexSnippets calls correct command", async () => {
+    mockedInvoke.mockResolvedValue("/data/latex-snippets.js");
+    await expect(ipc.resetLatexSnippets()).resolves.toBe("/data/latex-snippets.js");
+    expect(mockedInvoke).toHaveBeenCalledWith("reset_latex_snippets");
+  });
+});
+
 describe("session IPC wrappers", () => {
   const session = {
     version: 2 as const,

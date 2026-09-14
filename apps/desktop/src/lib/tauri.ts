@@ -207,6 +207,16 @@ export function listSystemFonts(): Promise<string[]> {
   return invoke("list_system_fonts");
 }
 
+// LaTeX snippet file. The store in `stores/latex-snippet-store.ts` is the
+// only caller: it owns reading, parsing and compiling the file.
+export function getLatexSnippetsPath(): Promise<string> {
+  return invoke("latex_snippets_path");
+}
+
+export function resetLatexSnippets(): Promise<string> {
+  return invoke("reset_latex_snippets");
+}
+
 // Settings commands
 export function getSettings(): Promise<Record<string, unknown>> {
   return invoke("get_settings");
