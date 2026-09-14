@@ -350,6 +350,57 @@
       "default": 50
     },
     {
+      "key": "latex.snippets-enabled",
+      "label": "Snippets",
+      "description": "Expand LaTeX snippets while typing (automatic) or on Tab",
+      "category": "LaTeX Suite",
+      "type": "boolean",
+      "scope": "global",
+      "default": true
+    },
+    {
+      "key": "latex.tab-out",
+      "label": "Tab out of brackets",
+      "description": "Inside math, Tab jumps past the next closing bracket or the closing $",
+      "category": "LaTeX Suite",
+      "type": "boolean",
+      "scope": "global",
+      "default": true
+    },
+    {
+      "key": "latex.auto-fraction",
+      "label": "Auto fraction",
+      "description": "Inside math, / after an operand turns it into \\frac{…}{}",
+      "category": "LaTeX Suite",
+      "type": "boolean",
+      "scope": "global",
+      "default": true
+    },
+    {
+      "key": "latex.highlight-source",
+      "label": "Highlight math source",
+      "description": "Colour commands, brackets, operators, numbers and comments in unfolded math and latex fences",
+      "category": "LaTeX Suite",
+      "type": "boolean",
+      "scope": "global",
+      "default": true
+    },
+    {
+      "key": "latex.snippet-variables",
+      "label": "Snippet variables",
+      "description": "NAME=alternation pairs referenced as ${NAME} in the snippet file",
+      "category": "LaTeX Suite",
+      "type": "list",
+      "scope": "global",
+      "default": [
+        "GREEK=alpha|beta|gamma|Gamma|delta|Delta|epsilon|varepsilon|zeta|eta|theta|Theta|iota|kappa|lambda|Lambda|mu|nu|omicron|xi|Xi|pi|Pi|rho|sigma|Sigma|tau|upsilon|Upsilon|varphi|phi|Phi|chi|psi|Psi|omega|Omega",
+        "SYMBOL=parallel|perp|partial|nabla|hbar|ell|infty|oplus|ominus|otimes|oslash|square|star|dagger|vee|wedge|subseteq|subset|supseteq|supset|emptyset|exists|nexists|forall|implies|impliedby|iff|setminus|neg|lor|land|bigcup|bigcap|cdot|times|simeq|approx",
+        "MORE_SYMBOLS=leq|geq|neq|gg|ll|equiv|sim|propto|rightarrow|leftarrow|Rightarrow|Leftarrow|leftrightarrow|to|mapsto|cap|cup|in|sum|prod|exp|ln|log|det|dots|vdots|ddots|pm|mp|int|iint|iiint|oint",
+        "ACCENT=hat|bar|dot|ddot|tilde|vec|underline|overline|mathrm|mathbf|boldsymbol",
+        "SYMBOLS=parallel|perp|partial|nabla|hbar|ell|infty|oplus|ominus|otimes|oslash|square|star|dagger|vee|wedge|subseteq|subset|supseteq|supset|emptyset|exists|nexists|forall|implies|impliedby|iff|setminus|neg|lor|land|bigcup|bigcap|cdot|times|simeq|approx"
+      ]
+    },
+    {
       "key": "telemetry.enabled",
       "label": "Share Usage Data",
       "description": "Send usage events (app opened, workspace opened, file and folder created) to help decide what to build next. Off until you turn it on. Never includes your documents, file names, or paths; the full list is in the Telemetry doc in Writer's repository.",

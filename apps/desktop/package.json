@@ -33,6 +33,7 @@
     "@tauri-apps/plugin-dialog": "catalog:",
     "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-store": "catalog:",
+    "acorn": "catalog:",
     "beautiful-mermaid": "catalog:",
     "cmdk": "catalog:",
     "dompurify": "catalog:",

@@ -5,7 +5,14 @@ export default defineConfig({
     "*": "vp check --fix",
   },
   fmt: {
-    ignorePatterns: ["apps/website/src/routeTree.gen.ts", ".wrangler/**"],
+    // The shipped LaTeX snippet set keeps the Obsidian file's own formatting
+    // so it stays diffable against a pasted-in plugin file; it is data, not
+    // source. See SPECs/latex-suite/contracts/snippet-file-format.md.
+    ignorePatterns: [
+      "apps/website/src/routeTree.gen.ts",
+      ".wrangler/**",
+      "apps/desktop/shared/latex-snippets.default.js",
+    ],
   },
   lint: {
     ignorePatterns: ["apps/website/src/routeTree.gen.ts", ".wrangler/**"],

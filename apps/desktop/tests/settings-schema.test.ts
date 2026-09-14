@@ -106,6 +106,41 @@ describe("default terminal setting", () => {
   });
 });
 
+describe("LaTeX Suite settings", () => {
+  test("declare the four toggles and the snippet-variable list as global keys", () => {
+    const defs = SETTINGS_SCHEMA.filter((def) => def.key.startsWith("latex."));
+
+    expect(defs.map((def) => [def.key, def.label, def.type, def.default])).toEqual([
+      ["latex.snippets-enabled", "Snippets", "boolean", true],
+      ["latex.tab-out", "Tab out of brackets", "boolean", true],
+      ["latex.auto-fraction", "Auto fraction", "boolean", true],
+      ["latex.highlight-source", "Highlight math source", "boolean", true],
+      ["latex.snippet-variables", "Snippet variables", "list", defs[4]?.default],
+    ]);
+
+    for (const def of defs) {
+      expect(def.category, def.key).toBe("LaTeX Suite");
+      expect(def.scope, def.key).toBe("global");
+    }
+  });
+
+  test("ship the snippet variables the default snippet file references", () => {
+    const def = SETTINGS_SCHEMA.find((d) => d.key === "latex.snippet-variables");
+    const items = def?.default as string[];
+
+    expect(items.map((item) => item.split("=")[0])).toEqual([
+      "GREEK",
+      "SYMBOL",
+      "MORE_SYMBOLS",
+      "ACCENT",
+      "SYMBOLS",
+    ]);
+    // SYMBOLS is an alias of SYMBOL so a pasted Obsidian file still resolves.
+    expect(items[4]?.slice("SYMBOLS=".length)).toBe(items[1]?.slice("SYMBOL=".length));
+    for (const item of items) expect(item).toMatch(/^[A-Z_]+=[a-zA-Z|]+$/);
+  });
+});
+
 describe("theme presets", () => {
   test("at least one preset file is discovered", () => {
     expect(Object.keys(presetFiles).length).toBeGreaterThan(0);
