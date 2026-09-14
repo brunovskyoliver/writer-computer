@@ -16,6 +16,7 @@ import {
 } from "@/lib/frontmatter";
 import { getDocumentStats, type DocumentStats } from "@/lib/document-stats";
 import { isDrawingPath } from "@/lib/drawings";
+import { isPdfPath } from "@/lib/pdf";
 import { cancelSave, scheduleSave, registerSaveStore } from "@/lib/save";
 import {
   activateTab as activateTabInLayout,
@@ -116,6 +117,7 @@ interface EditorState {
   closeActiveTab: () => void;
   setActiveFile: (path: string) => void;
   setActiveTab: (tabId: string) => void;
+  setPdfPage: (tabId: string, page: number) => void;
   setFocusedPane: (paneId: string) => void;
   /** Commit a finished divider drag. The resize library owns the live
    *  gesture; only the final ratio is layout state. */
@@ -180,14 +182,20 @@ export function createLauncherTab(id = createTabId()): Tab {
  * kind of tab a path opens in is a one-line change in one file rather than a
  * branch repeated at every call site (see SPECs/excalidraw-embed/plan.md).
  *
- * Drawings (`.excalidraw.svg`) dispatch to a `drawing` location; everything
- * else is a `file`. This is the *only* site that dispatches on extension —
+ * Drawings (`.excalidraw.svg`) dispatch to a `drawing` location, PDFs to a
+ * `pdf` one; everything else is a `file`. This is the *only* site that
+ * dispatches on extension —
  * every other question about a path ("is this its own surface?") is answered
  * by asking the registry about the location built here, so adding a page kind
  * is a one-line change in this function.
  */
 export function locationForPath(path: string): Location {
-  return isDrawingPath(path) ? { kind: "drawing", path } : { kind: "file", path };
+  if (isDrawingPath(path)) return { kind: "drawing", path };
+  // Page 1 is the *fresh-open* default only. A restored tab comes back through
+  // `deserializeLocation`, which carries its saved page; nothing that rebuilds
+  // a live tab's location may route through here, or the page would reset.
+  if (isPdfPath(path)) return { kind: "pdf", path, page: 1 };
+  return { kind: "file", path };
 }
 
 export function createFileTab(path: string, id = createTabId()): Tab {
@@ -806,6 +814,36 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const tab = get().tabs.find((candidate) => candidate.id === tabId);
     if (!tab) return;
     set((state) => publish(state.tabs, activateTabInLayout(state.layout, tabId)));
+  },
+
+  /**
+   * Record the page a PDF tab is showing, so the session restores there
+   * (FR-005). `page` is the only mutable field on any location in this
+   * registry, and it comes with two rules — both correctness, not tuning:
+   *
+   * 1. This is **not a navigation**. The tab's location is updated in place
+   *    and nothing is pushed onto `back`/`forward`; scrolling a PDF would
+   *    otherwise fill the history with near-identical entries and break Back.
+   * 2. The caller **coalesces on settle** (and on tab close / session save),
+   *    never per scroll event — see `pdf-pane.tsx`. This function clones the
+   *    tab list, which has no business running on a scroll frame.
+   *
+   * An identical page bails out before any clone: the settle timer fires with
+   * the same value often, and a no-op `set` still re-renders subscribers.
+   */
+  setPdfPage: (tabId: string, page: number) => {
+    const tab = get().tabs.find((candidate) => candidate.id === tabId);
+    if (!tab || tab.location.kind !== "pdf" || tab.location.page === page) return;
+    set((state) =>
+      publish(
+        state.tabs.map((candidate) =>
+          candidate.id === tabId && candidate.location.kind === "pdf"
+            ? { ...candidate, location: { ...candidate.location, page } }
+            : candidate,
+        ),
+        state.layout,
+      ),
+    );
   },
 
   // Focus follows the pane, and the active file follows focus. Selecting a

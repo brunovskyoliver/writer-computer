@@ -2,11 +2,13 @@ import { DrawingPane } from "../drawing-pane";
 import { EditorPane } from "../editor-pane";
 import { DocumentFooter } from "../document-footer";
 import { NewTabPage } from "../new-tab-page";
+import { PdfPane } from "../pdf-pane";
 import { SettingsPanel } from "@/components/settings-panel";
 import type { Location } from "./index";
 import type { DrawingLocation } from "./drawing";
 import type { FileLocation } from "./file";
 import type { LauncherLocation } from "./launcher";
+import type { PdfLocation } from "./pdf";
 import type { SettingsLocation } from "./settings";
 import type { PageKindView } from "./types";
 
@@ -49,6 +51,10 @@ const views = {
   launcher: {
     Component: NewTabPage,
   } satisfies PageKindView<LauncherLocation>,
+  // No footer: a PDF has no word count, frontmatter or document date.
+  pdf: {
+    Component: PdfPane,
+  } satisfies PageKindView<PdfLocation>,
   settings: {
     Component: SettingsPanel,
   } satisfies PageKindView<SettingsLocation>,

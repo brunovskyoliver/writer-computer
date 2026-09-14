@@ -1,5 +1,6 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 import type { PDFDocumentProxy } from "pdfjs-dist";
+import { getFileName } from "./paths";
 
 /**
  * The renderer boundary for pdf.js. See SPECs/pdf-quote-links/.
@@ -14,6 +15,27 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
  * fetches the URL itself, so it streams and range-requests rather than holding
  * a whole document in a `Uint8Array` — which is what keeps SC-003 reachable.
  */
+
+/** Mirrors `PDF_EXTENSION` in `apps/desktop/src-tauri/src/commands/fs.rs` —
+ *  the sidebar filter and this predicate must agree on what a PDF is. */
+export const PDF_EXTENSION = ".pdf";
+
+/**
+ * True for a `.pdf` file. Called from the editor store, which is in the main
+ * module graph — which is why every pdf.js touch below is behind
+ * `await import()`, exactly as `isDrawingPath` sits beside the lazy Excalidraw
+ * boundary in `lib/drawings.ts`. A file whose whole name is `.pdf` has no stem
+ * and is not a document.
+ */
+export function isPdfPath(path: string): boolean {
+  const name = getFileName(path);
+  return name.length > PDF_EXTENSION.length && name.toLowerCase().endsWith(PDF_EXTENSION);
+}
+
+/** Tab title: the filename stem. FR-002 — never extracted from the contents. */
+export function pdfName(path: string): string {
+  return getFileName(path).slice(0, -PDF_EXTENSION.length);
+}
 
 /** A loaded document. Runtime only — never serialized. */
 export type PdfDocument = {
