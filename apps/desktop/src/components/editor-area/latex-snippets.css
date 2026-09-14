@@ -1,0 +1,16 @@
+/* Tabstops left behind by a snippet expansion. Not scoped to math: `t`-mode
+   snippets place stops in ordinary prose too. */
+.cm-latex-tabstop {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-radius: 2px;
+}
+
+/* Bracket matching is only switched on inside math source and latex fences,
+   so the marks stay scoped to them (US3 reuses these rules). */
+.cm-latex-source .cm-matchingBracket {
+  outline: 1px solid color-mix(in srgb, var(--accent) 60%, transparent);
+}
+
+.cm-latex-source .cm-nonmatchingBracket {
+  color: var(--pm-syntax-invalid);
+}

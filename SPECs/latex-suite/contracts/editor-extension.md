@@ -19,18 +19,19 @@ if view.composing                                   → false (default insert)
 if selection.ranges.length > 1                       → false
 if vim on and tab mode ∉ {insert, replace}           → false
 if !settings["latex.snippets-enabled"] and !settings["latex.auto-fraction"] → false
+ctx = mathContext(state, from)                       // pre-insert, after ensureSyntaxTree(lineEnd, 20ms)
+if ctx.kind ∈ {code, text}                           → false
+lineBefore = text of [line.from, from) + typed text  // the document as it will read
+m       = snippets-enabled ? match(lineBefore, ctx, set, "auto") : null
+frac    = !m and typed === "/" and auto-fraction on and ctx is math ? autoFraction(lineBefore) : null
+if !m and !frac                                      → false (default insert; other handlers still run)
 dispatch(insert())                                   // keystroke lands as its own "input.type"
-ctx = mathContext(state, caret)                      // post-insert, after ensureSyntaxTree(lineEnd, 20ms)
-if ctx.kind ∈ {code, text}                           → true (done)
-if snippets-enabled:
-  m = match(lineBefore, ctx, set, "auto", selection-before-insert)
-  if m → dispatch(expansion(m)) ; return true
-if auto-fraction enabled and typed text === "/" and ctx is math:
-  spec = autoFraction(state, caret) ; if spec → dispatch(spec) ; return true
-return true
+dispatch(expansion(m ?? frac)) ; return true
 ```
 
-The expansion transaction: `{ changes, selection, effects: [pushFrame], userEvent: "input.snippet", annotations: isolateHistory.of("full") }`. Visual snippets replace the selection instead of the trigger; the selection captured _before_ the insert is used because the insert already replaced it.
+Nothing is dispatched on a miss. Returning `true` from an `inputHandler` suppresses every lower-precedence one — `closeBrackets()` among them — so the decision is made against the _pre-insert_ document (where the trigger already is) and the insert only happens once the expansion is certain.
+
+The expansion transaction: `{ changes, selection, effects: [setFrames], userEvent: "input.snippet", annotations: isolateHistory.of("full") }`. Visual snippets replace the selection instead of the trigger; the selection captured _before_ the insert is used because the insert already replaced it.
 
 ## Tab / Shift-Tab / Escape / Backspace (Prec.highest keymap)
 
@@ -45,9 +46,10 @@ All four return `false` in vim Normal/Visual modes. Tab-to-next-stop dispatches 
 
 ## Tabstop state field
 
-- `pushFrame(frame)` effect: stack push; the first group is selected in the same transaction.
-- Mapping: each frame's `DecorationSet.map(tr.changes)`; frames whose set becomes empty are dropped.
-- Cleared on: `Escape`, transaction with `isUserEvent("writer")` (swap/reload), vim mode leaving insert (a `ViewPlugin` watching `vim-store` for the tab), `clearFrames` effect.
+- One `setFrames(frames)` effect carries the whole stack: push, advance and clear are all "here is the new stack", so the pop-and-advance rule lives in a single pure helper instead of three effects. The expansion transaction pushes a frame and selects its first group together.
+- A frame holds `RangeSet<TabstopRange>` (plain range values, not decorations): a `Decoration.mark` may not be empty and most stops are.
+- Mapping: each frame's `marks.map(tr.changes)`; frames whose set becomes empty are dropped.
+- Cleared on: `Escape`, transaction with `isUserEvent("writer")` (swap/reload), vim mode leaving insert (a `ViewPlugin` watching `vim-store` for the tab), `setFrames([])`.
 - Decorations: `Decoration.mark({ class: "cm-latex-tabstop" })` for non-empty ranges; zero-width stops are not drawn.
 
 ## Math context rules

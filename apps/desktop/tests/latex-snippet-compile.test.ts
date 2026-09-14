@@ -151,8 +151,9 @@ describe("the compiled set", () => {
       entry({ trigger: { kind: "string", value: "prose" }, options: "tA" }),
     ]);
 
-    expect(set.byMode.inline.auto.map((s) => s.triggerText)).toEqual(["auto", "inline"]);
-    expect(set.byMode.display.auto.map((s) => s.triggerText)).toEqual(["auto", "display"]);
+    // Same priority, so the longer trigger sorts first.
+    expect(set.byMode.inline.auto.map((s) => s.triggerText)).toEqual(["inline", "auto"]);
+    expect(set.byMode.display.auto.map((s) => s.triggerText)).toEqual(["display", "auto"]);
     expect(set.byMode.inline.tab.map((s) => s.triggerText)).toEqual(["tab"]);
     expect(set.byMode.text.auto.map((s) => s.triggerText)).toEqual(["prose"]);
     expect(set.count).toBe(5);

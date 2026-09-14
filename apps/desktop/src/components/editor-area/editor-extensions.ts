@@ -27,6 +27,7 @@ import { useEditorSearchStore } from "./editor-search-store";
 import { headingDecorations } from "./heading-decorations";
 import { htmlBlockDecorations, htmlBlockParserExtension } from "./html-block-decorations";
 import { imageSrcResolver } from "./image-src-resolver";
+import { latexSnippetsExtension } from "./latex-snippets-extension";
 import { linkNavigationExtension } from "./link-navigation";
 import { markdownFormatting } from "./markdown-formatting";
 import { mathDecorations } from "./math-decorations";
@@ -153,6 +154,7 @@ export function createEditorExtensions(
     dragFreezeExtensions,
     drawSelection(),
     prosemarkBaseThemeSetup(),
+    latexSnippetsExtension(getTabId),
     headingWeightHighlight,
     viewportParsePlugin,
     tableDecorations(),

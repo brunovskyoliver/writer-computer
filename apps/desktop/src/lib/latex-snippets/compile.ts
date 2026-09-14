@@ -34,6 +34,10 @@ export type CompiledSnippet = {
   visual: boolean;
   priority: number;
   captureCount: number;
+  /** Length of the trigger's source. Longer triggers are scanned first so a
+   *  short trigger that is a suffix of a longer one (`iint` in `iiint`) cannot
+   *  steal the match. */
+  triggerLength: number;
   description?: string;
   /** Set by the matcher when this snippet's regex times out or throws; a
    *  disabled snippet is skipped until the next reload. */
@@ -206,6 +210,7 @@ function compileEntry(
     visual: hasVisual(template),
     priority: entry.priority ?? 0,
     captureCount,
+    triggerLength: triggerSource.text.length,
     ...(entry.description === undefined ? {} : { description: entry.description }),
     disabled: null,
   };
@@ -261,8 +266,10 @@ export function compileSnippetSet(
     }
   }
 
+  // Priority is the author's explicit override; within one priority the
+  // longest trigger wins, and only then does file order decide.
   const byPriority = (a: CompiledSnippet, b: CompiledSnippet) =>
-    b.priority - a.priority || a.id - b.id;
+    b.priority - a.priority || b.triggerLength - a.triggerLength || a.id - b.id;
   for (const mode of ["text", "inline", "display"] as const) {
     set.byMode[mode].auto.sort(byPriority);
     set.byMode[mode].tab.sort(byPriority);

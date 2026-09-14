@@ -2,6 +2,8 @@
 
 ## 2026-09-14
 
+- LaTeX snippets expand as you type. Inside math, `mk` opens inline math, `dm` display math, `sin`/`theta`/`xx` and about two hundred other triggers become the LaTeX they stand for, and `/` after an operand turns it into `\frac{…}{}`. Tab walks the placeholders a snippet leaves behind, and with no placeholder left it jumps past the next closing bracket or out of the formula. Backspace right after an expansion undoes it in one press, leaving the text you typed. Snippets stay out of the way where they should: nothing fires inside code, inside `\text{}`, or mid-way through a control sequence you are still typing, and with Vim on they only fire in Insert and Replace mode. Each of the three behaviours has its own switch under Settings → LaTeX Suite.
+
 - Drawings save on Cmd+S, tab/window close, or app quit. Drawing events no longer schedule SVG exports or file writes, and the single-view path does no scene or asset scans. Reopening or moving drawing tabs keeps the live scene without exporting. Closing waits for saves, failed saves keep changes in memory, and pending writes cannot recreate a drawing deleted from the sidebar.
 
 ## 2026-09-13
