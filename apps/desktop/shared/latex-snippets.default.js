@@ -124,7 +124,7 @@ export default [
 	},
 	// x_{3}4 -> x_{34}, \alpha_{3}4 -> \alpha_{34}
 	{
-	  trigger: "(\\\\${GREEK}|[A-Za-z])_{(\\d+)}(\\d)",
+	  trigger: "(\\\\${GREEK}|[A-Za-z])_\\{(\\d+)\\}(\\d)",
 	  replacement: "[[0]]_{[[1]][[2]]}",
 	  options: "rmA",
 	  priority: -1,
@@ -245,7 +245,7 @@ export default [
 	{
 		trigger: "\\\\(${SYMBOL}|${MORE_SYMBOLS})([0-9])",
 		replacement: "\\[[0]] [[1]]",
-		options: "mA",
+		options: "rmA",
 		description: "Add space after symbols when followed by a number.",
 	},
 

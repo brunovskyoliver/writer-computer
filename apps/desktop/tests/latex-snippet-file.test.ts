@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
 import { parseSnippetFile } from "../src/lib/latex-snippets/parse-snippet-file";
+import { compileSnippetSet, parseVariables } from "../src/lib/latex-snippets/compile";
+import { SETTINGS_SCHEMA } from "../src/lib/settings-schema";
 
 function read(relative: string): string {
   return readFileSync(new URL(relative, import.meta.url), "utf8");
@@ -34,6 +36,19 @@ describe("the shipped default set", () => {
 
     expect(errors).toEqual([]);
     expect(entries.length).toBeGreaterThan(180);
+  });
+
+  test("compiles without a single error against the shipped snippet variables", async () => {
+    const { entries } = await parse(read("../shared/latex-snippets.default.js"));
+    const definition = SETTINGS_SCHEMA.find((def) => def.key === "latex.snippet-variables");
+    const { variables, errors: variableErrors } = parseVariables(
+      definition?.default as unknown as string[],
+    );
+    const { set, errors } = compileSnippetSet(entries, variables);
+
+    expect(variableErrors).toEqual([]);
+    expect(errors).toEqual([]);
+    expect(set.count).toBeGreaterThan(180);
   });
 });
 
