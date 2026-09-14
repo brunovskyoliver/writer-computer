@@ -165,3 +165,71 @@ describe("mathDecorations fold behavior", () => {
     expect(count).toBe(0);
   });
 });
+
+describe("editing display math", () => {
+  const formula = String.raw`\sin\left( \frac{\pi}{2} \right)*\cosh(y)=2`;
+  const doc = `before\n\n$$\n\n${formula}\n\n$$\n\nafter`;
+  function stateAt(anchor: number) {
+    return EditorState.create({
+      doc,
+      selection: { anchor },
+      extensions: [
+        markdown({ extensions: [GFM, prosemarkMarkdownSyntaxExtensions, latexMathNesting] }),
+        mathDecorations(),
+      ],
+    });
+  }
+  test("parses and renders the trigonometric expression intact", () => {
+    expect(mathNodes(doc)).toEqual([`$$\n\n${formula}\n\n$$`]);
+    const result = renderMath(formula, true);
+    expect(result.error).toBeUndefined();
+    expect(result.html).toContain("katex-display");
+    expect(result.html).not.toContain("katex-error");
+  });
+  test("keeps a live preview above editable display source", () => {
+    const state = stateAt(doc.indexOf(formula) + 3);
+    const previews: string[] = [];
+    state.field(foldExtension).between(0, doc.length, (from, to, decoration) => {
+      if (decoration.spec.widget) {
+        expect(from).toBe(doc.indexOf("$$"));
+        expect(to).toBe(from);
+        expect(decoration.spec.block).toBe(true);
+        previews.push(decoration.spec.widget.formula);
+      }
+    });
+    expect(previews).toEqual([`\n\n${formula}\n\n`]);
+  });
+});
+
+test("display block keeps mixed closing layout and container boundaries", () => {
+  expect(mathNodes("$$\nx$$\n\nafter")).toEqual(["$$\nx$$"]);
+  expect(mathNodes("> $$\n> x\n\n# Outside\n\n$$\ny\n$$")).toEqual(["$$\ny\n$$"]);
+});
+
+test("display preview updates and refolds after editing", () => {
+  let state = EditorState.create({
+    doc: "before\n\n$$\nx\n$$\n\nafter",
+    selection: { anchor: 11 },
+    extensions: [
+      markdown({ extensions: [prosemarkMarkdownSyntaxExtensions, latexMathNesting] }),
+      mathDecorations(),
+    ],
+  });
+  state = state.update({ changes: { from: 11, to: 12, insert: "y^2" } }).state;
+  const previews: string[] = [];
+  state.field(foldExtension).between(0, state.doc.length, (_from, _to, deco) => {
+    if (deco.spec.widget?.preview) previews.push(deco.spec.widget.formula);
+  });
+  expect(previews).toEqual(["\ny^2\n"]);
+  state = state.update({ selection: { anchor: 0 } }).state;
+  let replacements = 0;
+  state.field(foldExtension).between(0, state.doc.length, (from, to) => {
+    if (to > from) replacements++;
+  });
+  expect(replacements).toBe(1);
+});
+
+test("display closer preserves following prose and separate formulas", () => {
+  expect(mathNodes("$$\nx$$ after\n\n# Heading")).toEqual(["$$\nx$$"]);
+  expect(mathNodes("$$\nx$$ and $$y$$")).toEqual(["$$\nx$$", "$$y$$"]);
+});

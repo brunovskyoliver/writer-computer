@@ -20,3 +20,10 @@
   border-radius: 0.4rem;
   padding: 0.1rem 0.3rem;
 }
+
+.cm-math-preview {
+  cursor: default;
+  overflow-x: auto;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--pm-code-background-color);
+}

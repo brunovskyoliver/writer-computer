@@ -63,6 +63,55 @@ export const mathMarkdownSyntaxExtension: MarkdownConfig = {
       MathFormula: mathFormulaTag,
     }),
   ],
+  parseBlock: [
+    {
+      name: "DisplayMath",
+      before: "FencedCode",
+      parse(cx, line) {
+        if (cx.depth > 1 || line.text.slice(line.pos).trimEnd() !== "$$") return false;
+        const from = cx.lineStart + line.pos;
+        const marks = [cx.elt("MathMark", from, from + 2)];
+        while (cx.nextLine()) {
+          const text = line.text;
+          let offset = -1;
+          for (let at = line.pos; at < text.length - 1; at++) {
+            if (text.slice(at, at + 2) !== "$$") continue;
+            let slashes = 0;
+            for (let p = at - 1; p >= 0 && text[p] === "\\"; p--) slashes++;
+            if (slashes % 2 === 0) {
+              offset = at;
+              break;
+            }
+          }
+          if (offset < 0) continue;
+          const close = cx.lineStart + offset;
+          const suffix = text.slice(offset + 2);
+          marks.push(cx.elt("MathFormula", from + 2, close));
+          marks.push(cx.elt("MathMark", close, close + 2));
+          cx.nextLine();
+          cx.addElement(cx.elt("Math", from, close + 2, marks));
+          if (suffix.trim()) {
+            cx.addElement(
+              cx.elt(
+                "Paragraph",
+                close + 2,
+                close + 2 + suffix.length,
+                cx.parser.parseInline(suffix, close + 2),
+              ),
+            );
+          }
+          return true;
+        }
+        // Like an unclosed code fence, keep the remaining source together.
+        // One mark means mathFormulaSpan refuses to fold incomplete math.
+        cx.addElement(cx.elt("Math", from, cx.prevLineEnd(), marks));
+        return true;
+      },
+      endLeaf(cx, line) {
+        return cx.depth === 1 && line.text.slice(line.pos).trimEnd() === "$$";
+      },
+    },
+  ],
   parseInline: [
     {
       name: "Math",

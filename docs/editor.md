@@ -221,3 +221,7 @@ The editor area is a binary tree of panes (`lib/editor-layout.ts`, owned by `edi
 - `vim-store.ts` — per-tab `{ mode, pending, recording }` and the footer `dialogHost`; only `vim-mode.ts` writes `byTab`, only `document-footer.tsx` writes `dialogHost`. `useVimFooterModel(tabId)` is the one selector.
 - `vim-clipboard.ts` / `vim-scroll.ts` — the unnamed-register ↔ system-clipboard bridge (module singleton, one per app), and the redirect of the CM5 adapter's scroll geometry to the ancestor scroller so `Ctrl+D` / `zz` / `H M L` move `EditorScrollContainer` rather than `.cm-scroller`.
 - `node_modules/@prosemark/core/dist/main.js:30` — `selectionTouchesRange` semantics.
+
+## Math editing previews
+
+Display math keeps a rendered preview above its opening source line while selected, using `keepDecorationOnUnfold` and a block widget with `side: -1`. Inline math unfolds without a preview. Preview widgets use a separate class from clickable folded formulas, so clicking a preview does not reset the source selection. Standalone root-level `$$` blocks parse across blank lines; nested containers retain the inline parser. An unclosed root math block stays visible as source through the end of the document.

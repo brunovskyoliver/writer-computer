@@ -14,17 +14,30 @@ class MathWidget extends WidgetType {
   constructor(
     public formula: string,
     public display: boolean,
+    public preview = false,
   ) {
     super();
   }
 
   eq(other: MathWidget): boolean {
-    return this.formula === other.formula && this.display === other.display;
+    return (
+      this.formula === other.formula &&
+      this.display === other.display &&
+      this.preview === other.preview
+    );
   }
 
   toDOM() {
-    const span = document.createElement("span");
-    span.className = this.display ? "cm-math-widget cm-math-display" : "cm-math-widget";
+    const span = document.createElement(this.preview ? "div" : "span");
+    span.className = this.preview
+      ? "cm-math-preview cm-math-display"
+      : this.display
+        ? "cm-math-widget cm-math-display"
+        : "cm-math-widget";
+
+    if (this.preview) {
+      span.setAttribute("aria-label", "Math preview");
+    }
 
     const result = renderMath(this.formula, this.display);
     if (result.error !== undefined) {
@@ -44,7 +57,7 @@ class MathWidget extends WidgetType {
 
   // Let mousedown reach the editor so the click-to-edit selection handler runs.
   ignoreEvent(_event: Event) {
-    return false;
+    return this.preview;
   }
 }
 
@@ -56,7 +69,8 @@ export function mathDecorations() {
   return [
     foldableSyntaxFacet.of({
       nodePath: "Math",
-      buildDecorations: (state: EditorState, node: SyntaxNodeRef) => {
+      keepDecorationOnUnfold: true,
+      buildDecorations: (state: EditorState, node: SyntaxNodeRef, editing: boolean) => {
         const range = mathFormulaRange(node);
         if (!range) return;
 
@@ -64,6 +78,14 @@ export function mathDecorations() {
         if (formula.trim() === "") return; // nothing to render — keep the source visible
 
         const display = state.doc.sliceString(node.from, node.from + 2) === "$$";
+        if (editing) {
+          if (!display) return;
+          return Decoration.widget({
+            widget: new MathWidget(formula, true, true),
+            block: true,
+            side: -1,
+          }).range(state.doc.lineAt(node.from).from);
+        }
         return Decoration.replace({
           widget: new MathWidget(formula, display),
         }).range(node.from, node.to);
