@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useSettingsStore } from "@/stores/settings-store";
+import { startLatexSnippetSubscriptions } from "@/stores/latex-snippet-store";
 import * as editorApi from "./editor-api";
 import * as tauri from "@/lib/tauri";
 import { cancelSave, isSaveInFlight } from "@/lib/save";
@@ -95,7 +96,12 @@ export function useFileWatcher() {
       }
     });
 
+    // The snippet store owns its own file and settings subscriptions; this
+    // hook only decides how long they live.
+    const stopSnippetSubscriptions = startLatexSnippetSubscriptions();
+
     return () => {
+      stopSnippetSubscriptions();
       void unlistenFile.then((fn) => fn());
       void unlistenIndexComplete.then((fn) => fn());
       void unlistenSidebarMetadata.then((fn) => fn());

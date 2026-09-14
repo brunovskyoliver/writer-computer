@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useEditorStore } from "@/stores/editor-store";
 import { useSettingsStore } from "@/stores/settings-store";
+import { useLatexSnippetStore } from "@/stores/latex-snippet-store";
 import { mark } from "@/lib/startup-metrics";
 import type { PendingOpenPayload } from "@/lib/tauri";
 import type { FileContent } from "@/types/fs";
@@ -127,6 +128,10 @@ async function resolveStartup() {
     useSettingsStore.getState().hydrateFromBackend({
       settings: startup.settings,
     });
+
+    // Snippets are never on the critical path: kick the first load off and let
+    // the editor stay inert until it lands.
+    void useLatexSnippetStore.getState().load();
 
     useWorkspaceStore.setState({
       recentWorkspaces: startup.recent_workspaces,
