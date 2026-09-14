@@ -543,7 +543,21 @@ pub fn run() {
                     .expect("failed to get app data dir");
                 app.handle()
                     .plugin(tauri_plugin_updater::Builder::new().build())?;
-                install_app_menu(app.handle(), config_dir)?;
+                install_app_menu(app.handle(), config_dir.clone())?;
+
+                // Watch the shared app data dir so the snippet file (and, from
+                // US4, the global config) hot-reloads in every window. A
+                // failure here costs hot reload, not startup.
+                match std::fs::create_dir_all(&config_dir)
+                    .map_err(notify::Error::io)
+                    .and_then(|()| {
+                        watcher::start_global_config_watcher(app.handle().clone(), config_dir)
+                    }) {
+                    Ok(handle) => {
+                        *app.state::<AppState>().global_config_watcher.lock() = Some(handle);
+                    }
+                    Err(err) => eprintln!("global config watcher failed to start: {err:?}"),
+                }
                 #[cfg(target_os = "macos")]
                 dock_menu::install(app.handle());
 

@@ -360,9 +360,9 @@ function vimWatcher(getTabId: () => string) {
 
 export function latexSnippetsExtension(getTabId: () => string): Extension {
   return [
-    // A repeated tabstop (`$1 … $1`) selects every copy at once. Side effect:
-    // multi-cursor editing is now on for ordinary Markdown views too.
-    EditorState.allowMultipleSelections.of(true),
+    // A repeated tabstop (`$1 … $1`) selects every copy at once; the facet
+    // that allows it lives in `codeMirrorBaseSetup` (prosemark-core), next to
+    // the `Mod-d` binding that also needs it.
     latexTabstopState,
     Prec.high(
       EditorView.inputHandler.of((view, from, to, text) => {

@@ -11,6 +11,7 @@ import { clampSelectionToHeadings } from "./heading-decorations";
 import * as editorApi from "@/hooks/editor-api";
 import { useReloadVersion } from "@/hooks/use-tabs";
 import { getFileName } from "@/lib/paths";
+import { editorFlavorForPath } from "@/lib/editor-flavor";
 import { consumePendingAnchor } from "@/lib/pending-anchor";
 import { logTimeline, mark } from "@/lib/startup-metrics";
 import { showEditorNotice } from "./editor-notice-store";
@@ -121,6 +122,10 @@ export function useProsemarkEditor(
           () => tabIdRef.current,
           () => disposedRef.current,
           historyCompartmentRef.current!,
+          // The flavor is fixed for the life of the view: `editor-pane` keys
+          // the component by flavor, so a swap to a different one remounts
+          // instead of reusing this view.
+          editorFlavorForPath(currentPath),
         ),
       }),
     });

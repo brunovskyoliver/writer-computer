@@ -1,14 +1,18 @@
-import { useMemo } from "react";
+import { useMemo, type ComponentType } from "react";
 import { useAllSettings, useResetSetting, useSetSetting } from "@/hooks/use-settings";
 import { SETTINGS_SCHEMA, type SettingDef } from "@/lib/settings-schema";
 import { SettingControl } from "./setting-control";
 import { ThemesSection } from "./themes-section";
+import { LatexSuiteExtras } from "./latex-suite-extras";
 import { EditorScrollContainer } from "@/components/editor-area/editor-scroll-container";
 
 /** Section that renders above the Themes block. The schema-driven section
  *  list is rendered in two passes — these come first, the Themes section
  *  comes next, and everything else is rendered after. */
 const SECTIONS_BEFORE_THEMES = ["Appearance", "Typography"] as const;
+
+/** Extra, non-schema UI rendered under a section's generated controls. */
+const SECTION_EXTRAS: Record<string, ComponentType> = { "LaTeX Suite": LatexSuiteExtras };
 
 export function SettingsPanel({ isVisible }: { isVisible: boolean }) {
   const settings = useAllSettings();
@@ -32,6 +36,7 @@ export function SettingsPanel({ isVisible }: { isVisible: boolean }) {
   }
 
   function renderSection(category: string, defs: SettingDef[]) {
+    const Extras = SECTION_EXTRAS[category];
     return (
       <section key={category} className="mb-10">
         <h2 className="mb-3 text-[13px] font-medium text-[var(--text-muted)]">{category}</h2>
@@ -51,6 +56,7 @@ export function SettingsPanel({ isVisible }: { isVisible: boolean }) {
             </div>
           ))}
         </div>
+        {Extras && <Extras />}
       </section>
     );
   }

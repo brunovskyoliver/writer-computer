@@ -337,6 +337,10 @@ pub struct AppState {
     /// so concurrent recents updates from multiple windows don't drop each
     /// other's entries. Held only for the load→save span.
     pub recent_files_lock: Mutex<()>,
+    /// Watches the app data directory for changes to the files every window
+    /// shares (the LaTeX snippet file, the global config). Started once in
+    /// `setup`; held here only so it is not dropped.
+    pub global_config_watcher: Mutex<Option<RecommendedWatcher>>,
 }
 
 impl AppState {
@@ -346,6 +350,7 @@ impl AppState {
             global_settings_file_lock: Mutex::new(()),
             sessions_file_lock: Mutex::new(()),
             recent_files_lock: Mutex::new(()),
+            global_config_watcher: Mutex::new(None),
         }
     }
 

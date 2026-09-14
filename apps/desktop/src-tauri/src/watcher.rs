@@ -11,6 +11,9 @@ use tauri::{AppHandle, Emitter, Manager};
 const SELF_WRITE_TTL: Duration = Duration::from_secs(2);
 const DEBOUNCE_MS: u64 = 300;
 
+/// The one file in the app data dir the frontend watches as an editor tab.
+const LATEX_SNIPPETS_FILE: &str = "latex-snippets.js";
+
 /// Runtime-gated diagnostic logging. Set `WRITER_WATCHER_LOG=1` before
 /// launching to dump every event, filter decision, and emit to stderr —
 /// the SPEC's investigation plan for residual "external change missed"
@@ -779,6 +782,81 @@ pub fn start_file_watcher(
                             workspace: None,
                         },
                     );
+                }
+            }
+
+            last_emit = Instant::now();
+        }
+    });
+
+    Ok(watcher)
+}
+
+/// Watch the app data directory (non-recursive) for changes to the two files
+/// every window shares: the LaTeX snippet file and the global `config`.
+///
+/// Started once in `setup`; the handle lives on `AppState` for the process, so
+/// there is no window label and no epoch to invalidate against — the loop ends
+/// only when the watcher is dropped and the channel disconnects.
+///
+/// No self-write suppression: both consumers are idempotent on a reload of
+/// content they already hold (SPECs/latex-suite/contracts/ipc-and-events.md).
+pub fn start_global_config_watcher(
+    app: AppHandle,
+    dir: std::path::PathBuf,
+) -> notify::Result<RecommendedWatcher> {
+    let (tx, rx) = std::sync::mpsc::channel::<notify::Result<Event>>();
+
+    let mut watcher = RecommendedWatcher::new(
+        move |res| {
+            let _ = tx.send(res);
+        },
+        notify::Config::default().with_poll_interval(Duration::from_millis(DEBOUNCE_MS)),
+    )?;
+
+    watcher.watch(&dir, RecursiveMode::NonRecursive)?;
+    wlog!("global config watcher started for {}", dir.display());
+
+    std::thread::spawn(move || {
+        let mut last_emit = Instant::now();
+        let mut pending: Vec<Event> = Vec::new();
+
+        loop {
+            match rx.recv_timeout(Duration::from_millis(DEBOUNCE_MS)) {
+                Ok(Ok(event)) => pending.push(event),
+                Ok(Err(err)) => {
+                    wlog!("global config watcher recv err: {err:?}");
+                    continue;
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+
+            if pending.is_empty() || last_emit.elapsed() < Duration::from_millis(DEBOUNCE_MS) {
+                continue;
+            }
+
+            for event in pending.drain(..) {
+                let Some(kind_str) = event_kind_str(&event.kind) else {
+                    continue;
+                };
+                for path in &event.paths {
+                    match path.file_name().and_then(|name| name.to_str()) {
+                        Some(LATEX_SNIPPETS_FILE) => {
+                            wlog!("emit fs:file-changed (global) {}", path.display());
+                            let _ = app.emit(
+                                "fs:file-changed",
+                                &FileChangeEvent {
+                                    path: path.to_string_lossy().to_string(),
+                                    kind: kind_str.to_string(),
+                                    workspace: None,
+                                },
+                            );
+                        }
+                        // Global settings reload lands here in T047 (US4).
+                        Some("config") => wlog!("global config changed (ignored for now)"),
+                        _ => {}
+                    }
                 }
             }
 

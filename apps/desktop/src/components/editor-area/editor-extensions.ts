@@ -1,7 +1,7 @@
 import { EditorView, ViewPlugin, drawSelection } from "@codemirror/view";
 import {
   type ChangeSet,
-  type Compartment,
+  Compartment,
   type EditorState,
   type Extension,
   Prec,
@@ -14,10 +14,12 @@ import { languages } from "@codemirror/language-data";
 import { tags } from "@lezer/highlight";
 import { GFM } from "@lezer/markdown";
 import {
+  codeMirrorBaseSetup,
   prosemarkBasicSetup,
   prosemarkBaseThemeSetup,
   prosemarkMarkdownSyntaxExtensions,
 } from "@/lib/prosemark-core/main";
+import type { EditorFlavor } from "@/lib/editor-flavor";
 import * as editorApi from "@/hooks/editor-api";
 import { dragFreezeExtensions } from "./drag-selection-gate";
 import { editorBodyContextMenuExtension } from "./editor-body-menu";
@@ -125,12 +127,60 @@ function storeSyncExtension(getFilePath: () => string, getTabId: () => string): 
   );
 }
 
-export function createEditorExtensions(
+/** A code tab: plain CodeMirror plus the host wiring (store sync, clipboard,
+ *  search, focus-on-reveal) and nothing Markdown-specific. The language may
+ *  need loading, so it arrives through a compartment that starts empty. */
+function codeFlavorExtensions(
+  language: Exclude<EditorFlavor, "markdown">["language"],
   getFilePath: () => string,
   getTabId: () => string,
   isDisposed: () => boolean,
   historyCompartment: Compartment,
 ): Extension[] {
+  const languageCompartment = new Compartment();
+  const loaded = language.support;
+
+  return [
+    vimModeExtension(getTabId),
+    historyCompartment.of(history()),
+    codeMirrorBaseSetup(),
+    drawSelection(),
+    languageCompartment.of(loaded ?? []),
+    loaded
+      ? []
+      : ViewPlugin.define((view) => {
+          void language.load().then((support) => {
+            if (isDisposed()) return;
+            view.dispatch({ effects: languageCompartment.reconfigure(support) });
+          });
+          return {};
+        }),
+    // Includes generalSyntaxHighlights, so code tokens are coloured.
+    prosemarkBaseThemeSetup(),
+    editorSearchExtensions,
+    storeSyncExtension(getFilePath, getTabId),
+    editorClipboardExtension(getFilePath, isDisposed),
+    focusOnRevealExtension(isDisposed),
+  ];
+}
+
+export function createEditorExtensions(
+  getFilePath: () => string,
+  getTabId: () => string,
+  isDisposed: () => boolean,
+  historyCompartment: Compartment,
+  flavor: EditorFlavor,
+): Extension[] {
+  if (flavor !== "markdown") {
+    return codeFlavorExtensions(
+      flavor.language,
+      getFilePath,
+      getTabId,
+      isDisposed,
+      historyCompartment,
+    );
+  }
+
   return [
     // Vim must precede every other keymap so its Normal-mode bindings win;
     // the compartment is empty until the setting turns it on.

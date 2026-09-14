@@ -6,6 +6,7 @@ import { EditorSearchOverview } from "./editor-search-overview";
 import { SectionRail } from "./section-rail";
 import { useCloseEditorSearchWhenInactive } from "./use-close-editor-search-when-inactive";
 import { useIsFileLoading } from "@/hooks/use-tabs";
+import { editorFlavorKey } from "@/lib/editor-flavor";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -77,6 +78,11 @@ export const EditorPane = memo(function EditorPane({
           <FrontmatterPanel filePath={path} />
         </div>
         <ProseMarkEditor
+          // Markdown and code tabs are built from different extension sets, so
+          // a switch between the two must rebuild the view rather than swap the
+          // document into it. Every note shares the "markdown" key, so ordinary
+          // tab switches still reuse the view.
+          key={editorFlavorKey(path)}
           tabId={tabId}
           filePath={path}
           getScrollContainer={getScrollContainer}

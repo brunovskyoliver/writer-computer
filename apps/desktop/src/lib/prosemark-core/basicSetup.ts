@@ -1,5 +1,5 @@
 import { keymap, dropCursor, EditorView } from "@codemirror/view";
-import { type Extension } from "@codemirror/state";
+import { EditorState, type Extension } from "@codemirror/state";
 import { defaultKeymap, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { selectNextOccurrence, selectSelectionMatches } from "@codemirror/search";
 import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
@@ -24,19 +24,14 @@ export { prosemarkMarkdownSyntaxExtensions } from "./markdown";
 // autocompletion sources, and the markdown formatting keymap. Code-editor
 // defaults that make no sense for prose (fold gutter, bracket matching,
 // indent-on-input, lint) are deliberately absent.
-export const prosemarkBasicSetup = (): Extension => [
-  // ProseMark Setup
-  defaultHideExtensions,
-  defaultFoldableSyntaxExtensions,
-  revealBlockOnArrowExtension,
-  urlClassExtension,
-  listExtension,
-  fixedTabWidthExtension,
-  codeBlockDecorationsExtension,
-
-  // Basic CodeMirror Setup
+/** The plain-CodeMirror half: everything a code editor also wants, with no
+ *  prose decorations. Used on its own by the code editor flavor
+ *  (`lib/editor-flavor.ts`). */
+export const codeMirrorBaseSetup = (): Extension => [
   dropCursor(),
   closeBrackets(),
+  // `Mod-d` below builds a real second cursor, which needs this.
+  EditorState.allowMultipleSelections.of(true),
   keymap.of([
     ...closeBracketsKeymap,
     ...defaultKeymap,
@@ -48,6 +43,19 @@ export const prosemarkBasicSetup = (): Extension => [
     indentWithTab,
   ]),
   EditorView.lineWrapping,
+];
+
+export const prosemarkBasicSetup = (): Extension => [
+  // ProseMark Setup
+  defaultHideExtensions,
+  defaultFoldableSyntaxExtensions,
+  revealBlockOnArrowExtension,
+  urlClassExtension,
+  listExtension,
+  fixedTabWidthExtension,
+  codeBlockDecorationsExtension,
+
+  codeMirrorBaseSetup(),
 ];
 
 export const prosemarkBaseThemeSetup = (): Extension => [

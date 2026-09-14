@@ -18,4 +18,11 @@ describe("workspace watcher event routing", () => {
   test("keeps unscoped standalone-file events", () => {
     expect(isWorkspaceEventCurrent(null, null)).toBe(true);
   });
+
+  test("keeps unscoped global events while a workspace is open", () => {
+    // The global config watcher emits `workspace: null` for the LaTeX snippet
+    // file to every window, including ones showing a workspace; those windows
+    // must still reload the open tab (SPECs/latex-suite, US2).
+    expect(isWorkspaceEventCurrent(null, { root: "/workspace-a", epoch: 1 })).toBe(true);
+  });
 });
