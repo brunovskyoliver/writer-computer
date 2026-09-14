@@ -2,6 +2,8 @@
 
 ## 2026-09-15
 
+- Keep pane tabs visible with animated opening and closing, rounded corners, and stronger active-tab contrast. Show the current Markdown file’s relative path below the tabs while scrolling; omit file extensions from the path and ordinary file tab labels.
+
 - Reduce document-stat calculation time and temporary allocations for large notes while preserving word, character and paragraph counts.
 
 ## 2026-09-14

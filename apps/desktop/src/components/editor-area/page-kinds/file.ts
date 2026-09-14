@@ -1,4 +1,4 @@
-import { getFileName } from "@/lib/paths";
+import { getFileStem } from "@/lib/paths";
 import { definePageKind } from "./types";
 
 export type FileLocation = { kind: "file"; path: string };
@@ -7,7 +7,7 @@ export type FileLocation = { kind: "file"; path: string };
 // registered in `./views` so the data layer never imports the editor UI.
 export const fileKind = definePageKind<"file", FileLocation>({
   kind: "file",
-  title: (l) => getFileName(l.path),
+  title: (l) => getFileStem(l.path),
   description: "Open file",
   keepAlive: true,
   supportsFileContextMenu: true,

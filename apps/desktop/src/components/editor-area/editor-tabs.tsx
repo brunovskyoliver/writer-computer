@@ -25,10 +25,12 @@ import { usePaneActiveTabId } from "@/hooks/use-editor-layout";
 import { ScrollFade } from "@/components/scroll-fade";
 import { useScrollActiveTabIntoView } from "@/hooks/use-scroll-active-tab-into-view";
 import { editorDrag } from "@/hooks/use-editor-drag";
-import { getRelativePath } from "@/lib/paths";
+import { getFileExtension, getFileStem, getRelativePath } from "@/lib/paths";
 import { pageKind } from "./page-kinds";
 import { buildTabMenuItemsSpec, showNativeContextMenu } from "./editor-context-menu";
 import { registerPaneStrip } from "./pane-bounds";
+import { TAB_MOTION_MS, useTabStripPresentation } from "./use-tab-strip-presentation";
+import "./editor-tabs.css";
 import { FileIcon } from "@/components/sidebar/file-tree-icons";
 
 /** What the tab ghost needs, captured at press time: the tab, its box, and
@@ -103,6 +105,7 @@ function EditorTabButton({
       onPointerDown={(event) => onPointerDown(event, tab)}
       onClick={() => onSelect(tab.id)}
       onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return;
         if (event.key !== "Enter" && event.key !== " ") return;
         event.preventDefault();
         onSelect(tab.id);
@@ -112,7 +115,7 @@ function EditorTabButton({
         event.preventDefault();
         onContextMenu(event, tab);
       }}
-      className={` group relative flex shrink-0 items-center overflow-hidden whitespace-nowrap rounded-[8px] px-3.5 text-[13px] leading-[1.15] select-none cursor-default max-w-[180px] h-[var(--chrome-control-height)] data-[dragging]:opacity-40 ${
+      className={`editor-tab group relative flex shrink-0 items-center overflow-hidden whitespace-nowrap rounded-[8px] px-3.5 text-[13px] leading-[1.15] select-none cursor-default max-w-[180px] h-[var(--chrome-control-height)] data-[dragging]:opacity-40 ${
         isActive
           ? "bg-[var(--tab-active-bg)] text-[var(--text-secondary)] backdrop-blur-2xl"
           : "bg-transparent text-[var(--text-muted)] hover:bg-[var(--tab-active-bg)] hover:text-[var(--text-secondary)] hover:backdrop-blur-2xl"
@@ -131,13 +134,24 @@ function EditorTabButton({
         {title}
       </span>
       <div
-        className="pointer-events-none absolute inset-y-0 right-0 flex translate-x-full items-center justify-end pr-1 opacity-0 group-hover:translate-x-0 group-hover:opacity-100"
+        className="pointer-events-none absolute inset-y-0 right-0 flex translate-x-full items-center justify-end pr-1 opacity-0 group-hover:translate-x-0 group-hover:opacity-100 group-focus-within:translate-x-0 group-focus-within:opacity-100"
         style={{ width: 40 }}
       >
         <button
           type="button"
           onClick={(event) => {
             event.stopPropagation();
+            const slot = event.currentTarget.closest<HTMLElement>(".editor-tab-slot");
+            if (slot?.contains(document.activeElement)) {
+              const area = slot.closest(".editor-tab-rail")!;
+              const liveSlots = Array.from(area.querySelectorAll<HTMLElement>("[data-tab-id]"));
+              const index = liveSlots.indexOf(slot);
+              const neighbor = liveSlots[index + 1] ?? liveSlots[index - 1];
+              const target =
+                neighbor?.querySelector<HTMLElement>('[role="button"]') ??
+                area.querySelector<HTMLElement>('[aria-label="New tab"]');
+              target?.focus({ preventScroll: true });
+            }
             onClose(tab.id);
           }}
           className="pointer-events-auto flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[13px] leading-none text-[var(--text-icon-muted)] hover:text-[var(--text-secondary)]"
@@ -170,6 +184,7 @@ export function EditorTabs({
 }) {
   const tabs = usePaneTabs(paneId);
   const activeTabId = usePaneActiveTabId(paneId);
+  const presentedTabs = useTabStripPresentation(tabs);
   const setActiveTab = useSetActiveTab();
   const closeTab = useCloseTab();
   const { back: canNavigateBack, forward: canNavigateForward } = usePaneCanNavigate(paneId);
@@ -183,7 +198,21 @@ export function EditorTabs({
   const ghostRef = useRef<HTMLDivElement | null>(null);
   const stripRef = useRef<HTMLDivElement | null>(null);
   const unregisterStrip = useRef<() => void>(() => {});
-  useScrollActiveTabIntoView(paneId, stripRef);
+  useScrollActiveTabIntoView(paneId, stripRef, tabs.length, TAB_MOTION_MS);
+  const activeTab = tabs.find((tab) => tab.id === activeTabId);
+  const activePath = activeTab?.location.kind === "file" ? activeTab.location.path : null;
+  const isMarkdown = activePath && /^(md|markdown)$/i.test(getFileExtension(activePath));
+  const relativePath =
+    activePath && isMarkdown
+      ? workspaceRoot
+        ? getRelativePath(activePath, workspaceRoot)
+        : activePath.split(/[\\/]/).pop()!
+      : null;
+  const pathLabel = relativePath
+    ? relativePath.slice(0, relativePath.length - getFileExtension(relativePath).length - 1)
+    : null;
+  const pathName = activePath ? getFileStem(activePath) : "";
+  const pathDirectory = pathLabel ? pathLabel.slice(0, -pathName.length) : "";
 
   // `ScrollFade` forwards the ref without returning its cleanup, so this
   // handles the `null` call on unmount itself rather than returning one.
@@ -272,95 +301,116 @@ export function EditorTabs({
   );
 
   return (
-    <div
-      data-tauri-drag-region
-      className="group/tabs flex min-w-0 items-center gap-3"
-      style={{
-        height: "calc(var(--chrome-control-height) + var(--chrome-control-padding) * 2)",
-        paddingBlock: "var(--chrome-control-padding)",
-        // The top-left strip sits behind the macOS traffic lights and the
-        // sidebar toggle when the sidebar is collapsed; leave them room.
-        paddingLeft: clearTrafficLights ? 132 : 12,
-        paddingRight: 12,
-      }}
-    >
-      <div className="flex shrink-0 items-center gap-0.5">
-        <button
-          type="button"
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={() => void navigateBack()}
-          disabled={!canNavigateBack}
-          className="flex h-[var(--chrome-control-height)] w-7 items-center justify-center rounded-lg text-base text-[var(--text-icon-muted)] transition-colors enabled:hover:bg-[var(--surface-subtle)] enabled:hover:text-[var(--text-secondary)] disabled:opacity-30"
-          title="Back"
-          aria-label="Back"
-        >
-          ←
-        </button>
-        <button
-          type="button"
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={() => void navigateForward()}
-          disabled={!canNavigateForward}
-          className="flex h-[var(--chrome-control-height)] w-7 items-center justify-center rounded-lg text-base text-[var(--text-icon-muted)] transition-colors enabled:hover:bg-[var(--surface-subtle)] enabled:hover:text-[var(--text-secondary)] disabled:opacity-30"
-          title="Forward"
-          aria-label="Forward"
-        >
-          →
-        </button>
-      </div>
-
-      <div data-tauri-drag-region className="relative flex min-w-0 flex-1 items-center">
-        <ScrollFade
-          axis="horizontal"
-          data-tab-strip
-          data-tauri-drag-region
-          ref={stripRefCallback}
-          className="flex min-w-0 items-center overflow-x-auto scrollbar-none"
-        >
-          <div data-tauri-drag-region className="flex min-w-max items-center gap-1">
-            {tabs.map((tab) => {
-              const isActive = tab.id === activeTabId;
-
-              return (
-                <div key={tab.id} data-tab-id={tab.id} className="flex items-center">
-                  <EditorTabButton
-                    tab={tab}
-                    isActive={isActive}
-                    isDragging={tab.id === draggingTabId}
-                    onSelect={(tabId) => startTransition(() => setActiveTab(tabId))}
-                    onClose={closeTab}
-                    onPointerDown={handleTabPointerDown}
-                    onContextMenu={handleTabContextMenu}
-                  />
-                </div>
-              );
-            })}
-          </div>
-        </ScrollFade>
-        <button
-          type="button"
-          onClick={openNewTab}
-          className="ml-1 flex h-[var(--chrome-control-height)] w-9 shrink-0 items-center justify-center rounded-lg text-base text-[var(--text-icon-muted)] transition-colors hover:bg-[var(--surface-subtle)] hover:text-[var(--text-secondary)]"
-          title="New tab"
-          aria-label="New tab"
-        >
-          +
-        </button>
-      </div>
-      {dragGhost &&
-        createPortal(
-          <div
-            ref={ghostRef}
-            aria-hidden="true"
-            className="pointer-events-none fixed left-0 top-0 z-50"
-            // Invisible until the first frame places it, so it never flashes
-            // at the corner of the window.
-            style={{ opacity: 0 }}
+    <>
+      <div
+        data-tauri-drag-region
+        className="editor-tab-header group/tabs flex min-w-0 items-center gap-3"
+        style={{
+          height: "calc(var(--chrome-control-height) + var(--chrome-control-padding) * 2)",
+          paddingBlock: "var(--chrome-control-padding)",
+          // The top-left strip sits behind the macOS traffic lights and the
+          // sidebar toggle when the sidebar is collapsed; leave them room.
+          paddingLeft: clearTrafficLights ? 132 : 12,
+          paddingRight: 12,
+        }}
+      >
+        <div className="flex shrink-0 items-center gap-0.5">
+          <button
+            type="button"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => void navigateBack()}
+            disabled={!canNavigateBack}
+            className="flex h-[var(--chrome-control-height)] w-7 items-center justify-center rounded-lg text-base text-[var(--text-icon-muted)] transition-colors enabled:hover:bg-[var(--surface-subtle)] enabled:hover:text-[var(--text-secondary)] disabled:opacity-30"
+            title="Back"
+            aria-label="Back"
           >
-            <TabDragGhostView ghost={dragGhost} />
-          </div>,
-          document.body,
-        )}
-    </div>
+            ←
+          </button>
+          <button
+            type="button"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => void navigateForward()}
+            disabled={!canNavigateForward}
+            className="flex h-[var(--chrome-control-height)] w-7 items-center justify-center rounded-lg text-base text-[var(--text-icon-muted)] transition-colors enabled:hover:bg-[var(--surface-subtle)] enabled:hover:text-[var(--text-secondary)] disabled:opacity-30"
+            title="Forward"
+            aria-label="Forward"
+          >
+            →
+          </button>
+        </div>
+
+        <div data-tauri-drag-region className="editor-tab-rail">
+          <ScrollFade
+            axis="horizontal"
+            data-tab-strip
+            data-tauri-drag-region
+            ref={stripRefCallback}
+            className="relative flex min-w-0 items-center overflow-x-auto scrollbar-none"
+          >
+            <div data-tauri-drag-region className="flex min-w-max items-center">
+              {presentedTabs.map(({ tab, exiting, exitLeft }) => {
+                const isActive = tab.id === activeTabId;
+
+                return (
+                  <div
+                    key={tab.id}
+                    data-tab-id={exiting ? undefined : tab.id}
+                    data-active={isActive || undefined}
+                    data-exiting={exiting || undefined}
+                    data-exit-left={(exiting && exitLeft) || undefined}
+                    inert={exiting}
+                    aria-hidden={exiting || undefined}
+                    className="editor-tab-slot"
+                  >
+                    <EditorTabButton
+                      tab={tab}
+                      isActive={isActive}
+                      isDragging={tab.id === draggingTabId}
+                      onSelect={(tabId) => startTransition(() => setActiveTab(tabId))}
+                      onClose={closeTab}
+                      onPointerDown={handleTabPointerDown}
+                      onContextMenu={handleTabContextMenu}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          </ScrollFade>
+          <button
+            type="button"
+            onClick={openNewTab}
+            className="relative ml-1 flex h-[var(--chrome-control-height)] w-9 shrink-0 items-center justify-center rounded-lg text-base text-[var(--text-icon-muted)] transition-colors hover:bg-[var(--surface-subtle)] hover:text-[var(--text-secondary)]"
+            title="New tab"
+            aria-label="New tab"
+          >
+            +
+          </button>
+        </div>
+        {dragGhost &&
+          createPortal(
+            <div
+              ref={ghostRef}
+              aria-hidden="true"
+              className="pointer-events-none fixed left-0 top-0 z-50"
+              // Invisible until the first frame places it, so it never flashes
+              // at the corner of the window.
+              style={{ opacity: 0 }}
+            >
+              <TabDragGhostView ghost={dragGhost} />
+            </div>,
+            document.body,
+          )}
+      </div>
+      {pathLabel && (
+        <div className="editor-file-path" aria-label="Current file path" title={pathLabel}>
+          <span className="editor-file-path-label">
+            <span className="editor-file-path-directory">
+              {pathDirectory.replace(/\//g, " / ")}
+            </span>
+            <span>{pathName}</span>
+          </span>
+        </div>
+      )}
+    </>
   );
 }
