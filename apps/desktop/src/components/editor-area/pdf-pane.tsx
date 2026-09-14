@@ -46,10 +46,15 @@ function pageOffsets(sizes: PageSize[], scale: number): number[] {
   const offsets: number[] = new Array(sizes.length + 1);
   let y = 0;
   for (let i = 0; i < sizes.length; i++) {
-    offsets[i] = y;
+    // Whole pixels, because these values are both written to and read back
+    // from `scrollTop`, and the browser stores that as an integer. Scrolling to
+    // a page top of 2899.2 reads back 2899, which lands one page *earlier* in
+    // the lookup below — so zoom appeared to move the document even when it had
+    // correctly re-anchored.
+    offsets[i] = Math.round(y);
     y += sizes[i].height * scale + PAGE_GAP;
   }
-  offsets[sizes.length] = y;
+  offsets[sizes.length] = Math.round(y);
   return offsets;
 }
 
@@ -144,12 +149,17 @@ export function PdfPane({
   const [scale, setScale] = useState(1);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(0);
+  const [viewportWidth, setViewportWidth] = useState(0);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   // The container is `display: none` while the tab is in the background, which
   // zeroes its `scrollTop`. Keeping our own copy is what restores the reading
   // position when the tab comes back.
   const scrollTopRef = useRef(0);
   const restoredRef = useRef(false);
+  // Which page zoom should keep under the viewport, and the scale the scroll
+  // position currently belongs to.
+  const zoomAnchorRef = useRef(1);
+  const scaleRef = useRef(scale);
 
   useEffect(() => {
     let active = true;
@@ -196,6 +206,10 @@ export function PdfPane({
   const sizes = state.status === "ready" ? state.sizes : null;
   const offsets = useMemo(() => (sizes ? pageOffsets(sizes, scale) : null), [sizes, scale]);
   const pageCount = sizes?.length ?? 0;
+  const widestPage = useMemo(
+    () => (sizes ? sizes.reduce((widest, size) => Math.max(widest, size.width), 0) : 0),
+    [sizes],
+  );
 
   const firstVisible = offsets ? pageAt(offsets, scrollTop) : 0;
   const lastVisible = offsets ? pageAt(offsets, scrollTop + viewportHeight) : 0;
@@ -227,8 +241,12 @@ export function PdfPane({
   useEffect(() => {
     const container = scrollRef.current;
     if (!container) return;
-    setViewportHeight(container.clientHeight);
-    const observer = new ResizeObserver(() => setViewportHeight(container.clientHeight));
+    const measure = () => {
+      setViewportHeight(container.clientHeight);
+      setViewportWidth(container.clientWidth);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
     observer.observe(container);
     return () => observer.disconnect();
   }, [state.status]);
@@ -253,6 +271,21 @@ export function PdfPane({
     if (container) container.scrollTop = scrollTopRef.current;
   }, [isVisible]);
 
+  // Zoom keeps the page you were reading. Changing the scale rescales every
+  // offset, so leaving `scrollTop` alone silently moves the document: zooming
+  // in from page 20 lands near page 10, and the settle timer then writes that
+  // wrong page into the location — zoom would corrupt the restore value.
+  useLayoutEffect(() => {
+    if (scaleRef.current === scale) return;
+    scaleRef.current = scale;
+    const container = scrollRef.current;
+    if (!container || !offsets) return;
+    const target = offsets[Math.min(Math.max(zoomAnchorRef.current, 1), pageCount) - 1] ?? 0;
+    container.scrollTop = target;
+    scrollTopRef.current = target;
+    setScrollTop(target);
+  }, [scale, offsets, pageCount]);
+
   // Write the page back on settle, never per scroll event: `setPdfPage` clones
   // the tab list, which has no business running on a scroll frame. The store
   // drops an unchanged page, so a settle that lands on the same page is free.
@@ -261,6 +294,16 @@ export function PdfPane({
     const timer = setTimeout(() => setPdfPage(tabId, currentPage), PAGE_SETTLE_MS);
     return () => clearTimeout(timer);
   }, [currentPage, setPdfPage, tabId, state.status]);
+
+  // T017 also asks for a write on tab close. The settle timer is cancelled by
+  // the cleanup above, so without this a scroll in the last 400 ms before the
+  // pane goes away is lost. The store drops the write if the tab is already
+  // gone, so this is only ever a flush, never a resurrection.
+  const pageRef = useRef(currentPage);
+  pageRef.current = currentPage;
+  useEffect(() => {
+    return () => setPdfPage(tabId, pageRef.current);
+  }, [setPdfPage, tabId]);
 
   const goToPage = useCallback(
     (page: number) => {
@@ -292,18 +335,33 @@ export function PdfPane({
             scale={scale}
             disabled={state.status !== "ready"}
             onGoToPage={goToPage}
-            onZoom={(next) => setScale(Math.min(Math.max(next, ZOOM_MIN), ZOOM_MAX))}
+            onZoom={(next) => {
+              zoomAnchorRef.current = currentPage;
+              setScale(Math.min(Math.max(next, ZOOM_MIN), ZOOM_MAX));
+            }}
           />
           <div ref={scrollRef} className="flex-1 overflow-auto bg-[var(--surface-subtle)]">
             {state.status === "ready" && offsets ? (
-              <div className="relative mx-auto" style={{ height: offsets[pageCount] }}>
+              // A page wider than the viewport must stay reachable. Centring
+              // with `left: 50%` + a negative translate overflows to the left,
+              // and browsers give no scrollbar for that: past fit-width the
+              // left edge of the page becomes unreachable. Sizing the canvas
+              // area to the widest page and centring with auto margins keeps
+              // the overflow on the scrollable side.
+              <div
+                className="relative"
+                style={{
+                  height: offsets[pageCount],
+                  width: Math.max(viewportWidth, widestPage * scale),
+                }}
+              >
                 {Array.from({ length: renderTo - renderFrom + 1 }, (_, i) => {
                   const index = renderFrom + i;
                   const size = state.sizes[index];
                   return (
                     <div
                       key={index}
-                      className="absolute left-1/2 -translate-x-1/2"
+                      className="absolute right-0 left-0 mx-auto"
                       style={{ top: offsets[index], width: size.width * scale }}
                     >
                       <PdfPageCanvas

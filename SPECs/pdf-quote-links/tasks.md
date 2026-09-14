@@ -147,6 +147,22 @@ before the `pdf` kind is added.
   back. `keepAlive` alone does not preserve scroll.
 - `isFocused` is unused on purpose: a PDF viewer has no caret, so a visible-but-unfocused
   pane must keep painting and take no focus.
+- **Zoom anchors on the page you were reading.** Changing the scale rescales every offset, so
+  leaving `scrollTop` alone moves the document — and the settle timer then writes that wrong
+  page into the location, meaning zoom would corrupt the FR-005 restore value. The pane stashes
+  the current page before the scale change and re-anchors in a layout effect.
+- **Page offsets are rounded to whole pixels.** They are both written to and read back from
+  `scrollTop`, which the browser stores as an integer: a page top of 2899.2 reads back 2899 and
+  lands one page earlier in the lookup. This was observed, not predicted — zoom re-anchored
+  correctly and the page counter still went 4 → 3 → 2, and the fix came from the instrumented
+  numbers rather than a second guess.
+- **Wide pages stay reachable.** Centring with `left: 50%` plus a negative translate overflows
+  to the left, which browsers give no scrollbar for, so past fit-width the left edge of the page
+  was unreachable. The canvas area is sized to the widest page and centred with auto margins.
+- T017's "on tab close" clause is implemented as a flush on pane unmount. There is no flush on
+  _session save_ specifically: the pane is still mounted then, so a scroll in the last 400 ms
+  before a quit is lost. Recorded rather than fixed — a settle window that small is not worth a
+  second write path, and the page is only ever one off.
 - `commands/fs.rs` needed no change for FR-002 beyond the filter — title extraction is
   already gated on `is_markdown`, so a PDF is never read for a title.
 
