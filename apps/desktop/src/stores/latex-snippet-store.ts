@@ -116,7 +116,23 @@ export const useLatexSnippetStore = create<LatexSnippetState>((setState, get) =>
   openInEditor: async () => {
     const filePath = get().filePath ?? (await tauri.getLatexSnippetsPath());
     setState({ filePath });
-    await useEditorStore.getState().openFileInNewTab(filePath);
+
+    // Pressing "Edit snippets" twice must focus the tab it opened, not stack a
+    // second copy of the same file (quickstart §2 step 1). `openOrFocus` is the
+    // store's dedupe primitive but its factory path never loads the document,
+    // so an unopened file still has to go through `openFileInNewTab`; this is
+    // the same find `closeFile` uses. An already-open tab is already loaded and
+    // the watcher keeps it fresh, so the early return needs no reload.
+    const editor = useEditorStore.getState();
+    const existing = editor.tabs.find(
+      (tab) => tab.location.kind === "file" && tab.location.path === filePath,
+    );
+    if (existing) {
+      editor.setActiveTab(existing.id);
+      return;
+    }
+
+    await editor.openFileInNewTab(filePath);
   },
 
   getActiveSet: () => {
