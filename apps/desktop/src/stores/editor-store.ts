@@ -181,7 +181,10 @@ export function createLauncherTab(id = createTabId()): Tab {
  * branch repeated at every call site (see SPECs/excalidraw-embed/plan.md).
  *
  * Drawings (`.excalidraw.svg`) dispatch to a `drawing` location; everything
- * else is a `file`.
+ * else is a `file`. This is the *only* site that dispatches on extension —
+ * every other question about a path ("is this its own surface?") is answered
+ * by asking the registry about the location built here, so adding a page kind
+ * is a one-line change in this function.
  */
 export function locationForPath(path: string): Location {
   return isDrawingPath(path) ? { kind: "drawing", path } : { kind: "file", path };
@@ -262,6 +265,20 @@ function locationPaths(location: Location): string[] {
 
 function locationPrimaryPath(location: Location): string | null {
   return locationBehavior(location).primaryPath(location);
+}
+
+/**
+ * A *standalone surface*: a tab that owns its own I/O and is not an open
+ * markdown file. It never enters `openFiles`, never reaches the save
+ * scheduler, and never becomes `activeFilePath`.
+ *
+ * The registry already carries this distinction — a kind whose `primaryPath`
+ * is `null` is saying exactly that (see the comment on `drawingKind`) — so the
+ * rule is derived from it rather than re-encoded as a list of extensions at
+ * every call site (research.md R4, `docs/consolidation.md`).
+ */
+function isStandaloneSurface(location: Location): boolean {
+  return locationPrimaryPath(location) === null;
 }
 
 function deriveActiveFilePath(tabs: Tab[], activeTabId: string | null): string | null {
@@ -411,13 +428,13 @@ function applyRewriteToTab(tab: Tab, rewrite: (loc: Location) => Location | null
 }
 
 async function ensureFileLoaded(path: string, set: EditorStateSetter, get: () => EditorState) {
-  // A drawing is not markdown and `drawing-pane` owns its own I/O. Reading one
-  // in here would park an SVG in `openFiles` with the save machinery attached,
-  // and the next autosave would overwrite the drawing with its own text.
+  // A standalone surface is not markdown and owns its own I/O. Reading one in
+  // here would park its bytes in `openFiles` with the save machinery attached,
+  // and the next autosave would overwrite the file with its own text.
   // Guarding here rather than at the call sites covers all of them, including
   // session restore, and drops the optimistic placeholder the callers insert
   // before they await.
-  if (isDrawingPath(path)) {
+  if (isStandaloneSurface(locationForPath(path))) {
     set((state) => {
       if (!state.openFiles.has(path)) return state;
       const files = new Map(state.openFiles);
@@ -510,10 +527,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       return;
     }
 
-    // Reuse the active file tab by navigating in-place. Drawings go the same
-    // way whatever the active tab is: `navigateToFile` owns the rule that they
-    // open in a tab of their own.
-    if (activeTab?.location.kind === "file" || isDrawingPath(path)) {
+    // Reuse the active file tab by navigating in-place. Standalone surfaces go
+    // the same way whatever the active tab is: `navigateToFile` owns the rule
+    // that they open in a tab of their own. Only the right half is a question
+    // about the path — the left half is about the *active tab* and stays.
+    if (activeTab?.location.kind === "file" || isStandaloneSurface(locationForPath(path))) {
       await state.navigateToFile(path, { paneId: targetPaneId, tabId: activeTab?.id });
       return;
     }
@@ -876,23 +894,34 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       return;
     }
 
-    // A drawing is a surface of its own, not a document you navigate to, so it
-    // never takes over the tab it was opened from: the note stays in the tab
-    // bar behind it. Every route into a drawing lands here — the sidebar and
+    // A standalone surface is a surface of its own, not a document you navigate
+    // to, so it never takes over the tab it was opened from: the note stays in
+    // the tab bar behind it. Every route into one lands here — the sidebar and
     // the New Drawing command through `openFile`, a double-clicked inline
-    // embed directly — so this is the one place the rule lives. A drawing
-    // already open is focused rather than opened twice; `openFileInNewTab` is
-    // still the explicit "give me a second copy" action.
-    if (isDrawingPath(path)) {
+    // embed directly — so this is the one place the rule lives. One already
+    // open is focused rather than opened twice; `openFileInNewTab` is still
+    // the explicit "give me a second copy" action.
+    //
+    // The reuse match is on the *location* this path builds — same kind and
+    // same path — not on a boolean about the path. A boolean would find the
+    // first standalone tab of any kind, which keeps drawings working while
+    // letting a second PDF open beside an unrelated drawing.
+    //
+    // This branch must stay above the `if (!activeTab)` guard below: sending a
+    // standalone surface to `openFile` in an empty window bounces it straight
+    // back here.
+    const surfaceLocation = locationForPath(path);
+    if (isStandaloneSurface(surfaceLocation)) {
       const existing = state.tabs.find(
-        (tab) => tab.location.kind === "drawing" && tab.location.path === path,
+        (tab) =>
+          tab.location.kind === surfaceLocation.kind && locationPaths(tab.location).includes(path),
       );
       if (existing) {
         get().setActiveTab(existing.id);
         return;
       }
-      const drawingTab = createFileTab(path);
-      set((currentState) => appendTab(currentState, drawingTab, paneId));
+      const surfaceTab = createFileTab(path);
+      set((currentState) => appendTab(currentState, surfaceTab, paneId));
       return;
     }
 
