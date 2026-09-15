@@ -32,6 +32,13 @@ let globalListeners: AbortController | null = null;
 /** The previous selection, used only to work out which end of it is moving. */
 let previousRange: Range | null = null;
 
+/** Whether a pointer button is currently held. The block's only job is to
+ *  absorb the pointer while a drag is in flight, so it may arm itself only
+ *  while this is true: left expanded and selectable once the button is up,
+ *  it covers the whole page, steals every gap click's position resolution,
+ *  and a multi-click that lands inside it selects degenerately. */
+let pointerDown = false;
+
 /** Park the block back below the page and stop treating the layer as active. */
 function reset(end: HTMLElement, layer: HTMLElement) {
   layer.append(end);
@@ -66,7 +73,7 @@ function previousPopulatedNode(from: Node): Node | null {
 
 function onSelectionChange() {
   const selection = document.getSelection();
-  if (!selection || selection.rangeCount === 0) {
+  if (!selection || selection.rangeCount === 0 || !pointerDown) {
     resetAll();
     return;
   }
@@ -126,7 +133,6 @@ function installGlobalListeners() {
   // A key-driven selection change (shift+arrow) should park the block as soon
   // as the key is released; a pointer drag should not, because the pointer is
   // still down and the drag is still going.
-  let pointerDown = false;
   document.addEventListener("pointerdown", () => (pointerDown = true), { signal });
   document.addEventListener(
     "pointerup",
@@ -159,7 +165,14 @@ export function bindTextLayerSelection(layer: HTMLElement): () => void {
   layer.append(end);
   layers.set(layer, end);
 
-  const onMouseDown = () => layer.classList.add("selecting");
+  const onMouseDown = (event: MouseEvent) => {
+    layer.classList.add("selecting");
+    // Word/paragraph expansion on a multi-click resolves positions against
+    // this pile of absolutely positioned spans unpredictably — a double-click
+    // can select most of the page. Selection here is meant to come from
+    // deliberate drags only, so the second click's default action is dropped.
+    if (event.detail > 1) event.preventDefault();
+  };
   layer.addEventListener("mousedown", onMouseDown);
   installGlobalListeners();
 
@@ -171,6 +184,7 @@ export function bindTextLayerSelection(layer: HTMLElement): () => void {
       globalListeners?.abort();
       globalListeners = null;
       previousRange = null;
+      pointerDown = false;
     }
   };
 }

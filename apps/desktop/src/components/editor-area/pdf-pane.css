@@ -124,6 +124,13 @@
   top: 0;
 }
 
+/* The block is empty and page-sized: if a selection ever contains it (a
+   select-all reaches it parked below the page), its box must not paint a
+   selection rectangle of its own. */
+.pdf-text-layer .endOfContent::selection {
+  background: transparent;
+}
+
 /* A quote link's highlight (FR-022). The text layer's spans already sit exactly
    over their glyphs at every zoom, so emphasis is a background on the spans
    themselves rather than an overlay with its own geometry to keep in step.
@@ -138,4 +145,46 @@
 .pdf-text-layer span.pdf-hit {
   background-color: color-mix(in srgb, var(--accent) 38%, transparent);
   border-radius: 2px;
+}
+
+/* A region: the rubber band while it is being drawn, the settled rect sitting
+   behind the quote button, and the outline a resolved region link leaves
+   behind (FR-022). All three are fractions of the page box painted as an
+   overlay, so the mark follows zoom for free and never intercepts the
+   pointer. */
+.pdf-region {
+  position: absolute;
+  z-index: 2; /* over the text layer's spans (z-index: 1) */
+  box-sizing: border-box;
+  border: 1.5px solid var(--accent);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  pointer-events: none;
+}
+
+/* The resolved-link variant fades rather than cutting, mirroring the span
+   transition above (FR-023): `.fading` starts the fade while the box is still
+   mounted, and the state drops it once the transition has run. */
+.pdf-region-hint {
+  transition: opacity 600ms ease-out;
+}
+
+.pdf-region-hint.fading {
+  opacity: 0;
+}
+
+/* A page whose text layer produced no spans has nothing a plain drag can
+   select — there dragging *is* the region gesture (scenario 4.4), and the
+   cursor says so before the first pixel moves. `endOfContent` is a div, so
+   "no span" is exactly "no text layer". */
+.pdf-text-layer:not(:has(span)) {
+  cursor: crosshair;
+}
+
+/* Held on the scroll container for the duration of a region drag, so the
+   gesture keeps its feedback cursor over the text layer's spans (which set
+   their own `cursor: text`) and the parked selection sentinel. */
+.pdf-region-drag,
+.pdf-region-drag * {
+  cursor: crosshair !important;
 }
