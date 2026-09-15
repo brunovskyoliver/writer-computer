@@ -71,7 +71,7 @@
   padding: 0 24px;
   background: var(--bg-base);
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: calc(var(--writer-editor-font-size, 16px) * 0.9);
   line-height: 1.4;
 }
 
@@ -102,4 +102,22 @@
   .editor-tab-slot > .editor-tab {
     transition: none;
   }
+}
+
+.editor-file-path-folder {
+  border-radius: 4px;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.editor-file-path-folder:hover,
+.editor-file-path-folder:focus-visible {
+  color: var(--fg-base);
+  background: var(--surface-selected);
+}
+
+.editor-file-path-folder:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }

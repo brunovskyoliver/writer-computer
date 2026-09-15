@@ -213,6 +213,10 @@ export function EditorTabs({
     : null;
   const pathName = activePath ? getFileStem(activePath) : "";
   const pathDirectory = pathLabel ? pathLabel.slice(0, -pathName.length) : "";
+  const folderNames = pathDirectory.split("/").filter(Boolean);
+  const canRevealFolders = Boolean(
+    workspaceRoot && activePath?.startsWith(`${workspaceRoot.replace(/\/$/, "")}/`),
+  );
 
   // `ScrollFade` forwards the ref without returning its cleanup, so this
   // handles the `null` call on unmount itself rather than returning one.
@@ -405,7 +409,28 @@ export function EditorTabs({
         <div className="editor-file-path" aria-label="Current file path" title={pathLabel}>
           <span className="editor-file-path-label">
             <span className="editor-file-path-directory">
-              {pathDirectory.replace(/\//g, " / ")}
+              {folderNames.map((name, index) => {
+                const folderPath = `${workspaceRoot?.replace(/\/$/, "")}/${folderNames.slice(0, index + 1).join("/")}`;
+                return (
+                  <span key={folderPath}>
+                    {canRevealFolders ? (
+                      <button
+                        type="button"
+                        className="editor-file-path-folder"
+                        aria-label={`Reveal ${folderNames.slice(0, index + 1).join(" / ")} in sidebar`}
+                        onClick={() =>
+                          void revealPathInSidebar(folderPath, { showSidebar: true, focus: true })
+                        }
+                      >
+                        {name}
+                      </button>
+                    ) : (
+                      name
+                    )}
+                    <span aria-hidden="true"> / </span>
+                  </span>
+                );
+              })}
             </span>
             <span>{pathName}</span>
           </span>

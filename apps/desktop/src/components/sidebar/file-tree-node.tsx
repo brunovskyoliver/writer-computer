@@ -133,6 +133,7 @@ export const FileTreeNode = memo(function FileTreeNode({
       data-tree-path={entry.path}
       aria-selected={isActive}
       aria-expanded={entry.is_dir ? isExpanded : undefined}
+      data-tree-folder={entry.is_dir || undefined}
       aria-label={entry.is_dir ? `${entry.name} folder` : displayName}
       onMouseDown={(e) => e.preventDefault()}
       onPointerDown={onPointerDown ? (event) => onPointerDown(event, entry) : undefined}

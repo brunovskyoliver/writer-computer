@@ -9,6 +9,8 @@
 
 ## Done
 
+- Clickable, font-scaled path folders: [spec](SPECs/tab-chrome.md).
+
 - Animated tab chrome and fixed Markdown path row: [spec](SPECs/tab-chrome.md).
 
 - Reviewed five performance suggestions; reduced document-stats allocations with equivalent counts: [spec](SPECs/document-stats-performance.md).

@@ -5,6 +5,8 @@ interface RevealOptions {
   /** If the sidebar is currently hidden, flip the setting back on before
    *  scrolling. Used by the explicit "Reveal in sidebar" menu action. */
   showSidebar?: boolean;
+  /** Focus the revealed row, including its theme-colored focus highlight. */
+  focus?: boolean;
 }
 
 const FRAME_BUDGET = 5;
@@ -79,4 +81,5 @@ export async function revealPathInSidebar(path: string, opts: RevealOptions = {}
   const row = await waitForRow(path);
   if (token !== latestToken) return;
   row?.scrollIntoView({ behavior: "auto", block: "nearest" });
+  if (opts.focus) row?.focus({ preventScroll: true });
 }

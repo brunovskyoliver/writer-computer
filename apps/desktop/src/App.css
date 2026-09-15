@@ -613,3 +613,14 @@ body.editor-dragging [data-tab-host] {
   transform: translateZ(0);
   will-change: transform;
 }
+
+/* Breadcrumb reveals focus the folder without opening it or changing the note. */
+[data-tree-folder]:focus {
+  background: color-mix(in srgb, var(--accent) 25%, transparent);
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+[data-tree-folder]:focus > span {
+  opacity: 1;
+}
