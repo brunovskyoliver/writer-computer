@@ -10,6 +10,7 @@ import {
   type PdfQuoteCapture,
 } from "./pdf-quote-button";
 import type { PdfLocation } from "./page-kinds/pdf";
+import { bindTextLayerSelection } from "./pdf-text-selection";
 import { useEscKey } from "./use-esc-key";
 import "./pdf-pane.css";
 
@@ -217,6 +218,7 @@ function PdfPageCanvas({
     let cancelled = false;
     let task: RenderTask | null = null;
     let textLayer: { cancel: () => void } | null = null;
+    let unbindSelection: (() => void) | null = null;
     const textContainer = textRef.current;
 
     void (async () => {
@@ -254,6 +256,9 @@ function PdfPageCanvas({
         // A page with no text layer (a scan) yields zero items and an empty
         // container. That is the correct outcome, not a case to special-case.
         await layer.render();
+        // Bound only after the spans exist: the sentinel it appends has to be
+        // the last child of the layer to start parked below the page.
+        if (!cancelled) unbindSelection = bindTextLayerSelection(textContainer);
       }
 
       await task.promise;
@@ -272,6 +277,7 @@ function PdfPageCanvas({
     return () => {
       cancelled = true;
       task?.cancel();
+      unbindSelection?.();
       textLayer?.cancel();
       // `TextLayer` appends to the container and never clears it, so a scale
       // change would stack a second set of spans on top of the first —

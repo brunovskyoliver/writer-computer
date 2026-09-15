@@ -101,3 +101,25 @@
 .pdf-text-layer br::selection {
   background: transparent;
 }
+
+/* The selection sentinel, created by `pdf-text-selection.ts`. Parked below the
+   page at rest; during a drag it is moved next to the span the selection ends
+   at and grown to cover the page, so empty space near the pointer is absorbed
+   by a node adjacent in DOM order instead of the browser reaching for a distant
+   span and selecting everything in between.
+
+   Deliberately declares no `user-select`: at rest it inherits App.css's blanket
+   `none`, and during a drag `pdf-text-selection.ts` sets `text` inline, which
+   outranks any stylesheet rule. An `!important` here would beat that inline
+   style and break the mechanism. */
+.pdf-text-layer .endOfContent {
+  display: block;
+  position: absolute;
+  inset: 100% 0 0;
+  z-index: 0;
+  cursor: default;
+}
+
+.pdf-text-layer.selecting .endOfContent {
+  top: 0;
+}
