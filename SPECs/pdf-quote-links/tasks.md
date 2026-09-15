@@ -406,10 +406,44 @@ passage"` and never found. Every quote link therefore reported "no longer in
 
 **Depends on**: US2 (the button and insert path) and US3 (the jump path).
 
-- [ ] T032 [US4] Add the region overlay and drag gesture to `apps/desktop/src/components/editor-area/pdf-pane.tsx` (FR-014): a modifier-held drag draws a rectangle on any page, and the drawn rectangle is shown while dragging. On a page with **no text layer at all**, a plain drag is a region gesture by default with visible feedback — the user is never left with a dead text-selection gesture (scenario 4.4).
-- [ ] T033 [US4] Convert the drawn rectangle to a region anchor via `apps/desktop/src/lib/pdf-anchor.ts`: page-relative fractions `x,y,w,h` in `[0,1]` of the page's unrotated crop box, zoom- and DPR-independent (FR-020). A zero-area rect raises no button and is never encoded.
-- [ ] T034 [US4] Extend `apps/desktop/src/components/editor-area/pdf-quote-button.tsx` to appear beside a drawn region and insert a region quote: an editable placeholder caption as the blockquote plus a `#page=..&rect=x,y,w,h` link (FR-016, scenario 4.2). Same single-undo insertion and same no-target-note handling as T022/T023.
-- [ ] T035 [US4] Render the region highlight on resolution in `apps/desktop/src/components/editor-area/pdf-pane.tsx`: outline the stored fractions multiplied by the _current_ viewport, so the same part of the page is outlined after a zoom change rather than a rectangle scaled to the wrong place (scenario 4.5). A region anchor in a changed PDF uses the recorded page and rect as-is, with no claim of correctness and no re-find attempt.
+- [x] T032 [US4] Add the region overlay and drag gesture to `apps/desktop/src/components/editor-area/pdf-pane.tsx` (FR-014): a modifier-held drag draws a rectangle on any page, and the drawn rectangle is shown while dragging. On a page with **no text layer at all**, a plain drag is a region gesture by default with visible feedback — the user is never left with a dead text-selection gesture (scenario 4.4).
+- [x] T033 [US4] Convert the drawn rectangle to a region anchor via `apps/desktop/src/lib/pdf-anchor.ts`: page-relative fractions `x,y,w,h` in `[0,1]` of the page's unrotated crop box, zoom- and DPR-independent (FR-020). A zero-area rect raises no button and is never encoded.
+- [x] T034 [US4] Extend `apps/desktop/src/components/editor-area/pdf-quote-button.tsx` to appear beside a drawn region and insert a region quote: an editable placeholder caption as the blockquote plus a `#page=..&rect=x,y,w,h` link (FR-016, scenario 4.2). Same single-undo insertion and same no-target-note handling as T022/T023.
+- [x] T035 [US4] Render the region highlight on resolution in `apps/desktop/src/components/editor-area/pdf-pane.tsx`: outline the stored fractions multiplied by the _current_ viewport, so the same part of the page is outlined after a zoom change rather than a rectangle scaled to the wrong place (scenario 4.5). A region anchor in a changed PDF uses the recorded page and rect as-is, with no claim of correctness and no re-find attempt.
+
+**Implementation notes**:
+
+- The modifier is **Alt**: nothing else binds it, and it mirrors rectangular
+  selection elsewhere. On a page whose `.pdf-text-layer` has no `span`, a
+  plain drag is the region gesture and the layer shows a crosshair cursor
+  (`:not(:has(span))` — `endOfContent` is a div, so "no span" is exactly "no
+  text layer").
+- The gesture tracks the page element's live box on every mousemove, so a
+  scroll mid-drag keeps the fractions honest; pointer cleanup covers release
+  outside the page, pointer cancellation, and window blur.
+- The contract stores fractions of the page's **unrotated** crop box, but the
+  rendered box already has `page.rotate` applied — `viewRectToPage` /
+  `pageRectToView` in `pdf-anchor.ts` do the quarter-turn mapping, verified
+  against `PageViewport`'s transform in `build/pdf.mjs`.
+- A region capture is the same `PdfQuoteCapture` shape a text selection
+  produces — `quoteMarkdown` was already anchor-agnostic, so insertion, undo,
+  path checks and the no-target-note path needed no changes. The body is the
+  editable placeholder caption; the `rect` parameter carries the geometry.
+- Region highlight is `.pdf-region`: stored fractions × the current page box,
+  so zoom re-renders it correctly for free, and it fades on the same timer as
+  text hits (FR-023).
+- **Adjacent fix — double-click mass selection.** A double-click could
+  highlight most of a page. The ported pdf.js `endOfContent` sentinel stayed
+  expanded and selectable while a selection lived, so it covered the whole
+  page as a hit target for click position resolution. Now it arms only while
+  a pointer drag is in flight (`pointerDown` gate in `onSelectionChange`),
+  multi-click (`detail > 1`) selection gestures are `preventDefault`ed —
+  highlighting comes from deliberate drags only — and `.endOfContent` gets a
+  transparent `::selection` so its page-sized box can never paint.
+- Runtime-verified with real `CGEvent`s against a CUPS-generated text-layer
+  PDF: double-click leaves at most a caret, plain drag still selects, and the
+  sentinel stays parked at rest. `vp check` (0 errors) and `vp test` (1056
+  passing) are clean.
 
 **Checkpoint**: All four stories functional.
 

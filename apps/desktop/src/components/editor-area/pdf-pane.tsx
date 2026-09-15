@@ -4,9 +4,14 @@ import { acquirePdf, pdfjsTextLayer, releasePdf, type PdfLoadError } from "@/lib
 import {
   compactPageText,
   normalizePageText,
+  pageRectToView,
   parseAnchorFragment,
+  rectToViewport,
   refindPassage,
+  regionAnchor,
   textAnchor,
+  viewRectToPage,
+  type PdfRect,
 } from "@/lib/pdf-anchor";
 import { useEditorStore } from "@/stores/editor-store";
 import { usePdfAnchorStore } from "@/stores/pdf-anchor-store";
@@ -45,13 +50,38 @@ const CANCEL_ERRORS = new Set(["RenderingCancelledException", "AbortException"])
  *  readable (FR-023). */
 const HIGHLIGHT_LINGER_MS = 2600;
 
+/** The fade itself. The CSS transition runs 600 ms; the state drops a beat
+ *  after that so the element is still mounted while it animates. */
+const HIGHLIGHT_FADE_MS = 700;
+
+/** A drag shorter than this on either axis is a stray click-drag, not a
+ *  region (FR-015) — the same guard the text path gets for free when a tiny
+ *  drag collapses into no selection. In screen pixels, because it is about
+ *  the gesture, not the document. */
+const REGION_MIN_DRAG_PX = 4;
+
 const ZOOM_STEP = 0.2;
 const ZOOM_MIN = 0.4;
 const ZOOM_MAX = 4;
 
-/** Unscaled page dimensions, in PDF units. Pages in one document are usually
- *  but not always the same size, so each is refined once it has been read. */
-type PageSize = { width: number; height: number };
+/** Unscaled page dimensions, in PDF units, plus the viewport's rotation —
+ *  needed to map stored region anchors back onto the rendered box. Pages in
+ *  one document are usually but not always the same size, so each is refined
+ *  once it has been read. */
+type PageSize = { width: number; height: number; rotation: number };
+
+/** What the pane is emphasising after a quote jump: a found text passage, or
+ *  a stored region painted back onto the current page box. `fading` is the
+ *  second half of FR-023 — the mark fades out, then the state drops. */
+type PaneHighlight =
+  | { kind: "text"; page: number; text: string; align: ScrollLogicalPosition; fading: boolean }
+  | {
+      kind: "region";
+      page: number;
+      rect: PdfRect;
+      align: ScrollLogicalPosition;
+      fading: boolean;
+    };
 
 type ViewerState =
   | { status: "loading" }
@@ -231,7 +261,11 @@ function PdfPageCanvas({
       const page = await doc.getPage(pageNumber);
       if (cancelled) return;
       const unscaled = page.getViewport({ scale: 1 });
-      onMeasure(pageNumber, { width: unscaled.width, height: unscaled.height });
+      onMeasure(pageNumber, {
+        width: unscaled.width,
+        height: unscaled.height,
+        rotation: unscaled.rotation,
+      });
 
       const canvas = canvasRef.current;
       if (!canvas) return;
@@ -378,11 +412,11 @@ export function PdfPane({
       // height map is what would break SC-001 on a long document.
       void result.doc.proxy.getPage(1).then((page) => {
         if (!active) return;
-        const { width, height } = page.getViewport({ scale: 1 });
+        const { width, height, rotation } = page.getViewport({ scale: 1 });
         setState({
           status: "ready",
           doc: result.doc.proxy,
-          sizes: new Array(result.doc.pageCount).fill({ width, height }),
+          sizes: new Array(result.doc.pageCount).fill({ width, height, rotation }),
         });
       });
     });
@@ -397,7 +431,12 @@ export function PdfPane({
     setState((current) => {
       if (current.status !== "ready") return current;
       const existing = current.sizes[pageNumber - 1];
-      if (existing && existing.width === size.width && existing.height === size.height) {
+      if (
+        existing &&
+        existing.width === size.width &&
+        existing.height === size.height &&
+        existing.rotation === size.rotation
+      ) {
         return current;
       }
       const sizes = current.sizes.slice();
@@ -413,6 +452,7 @@ export function PdfPane({
     () => (sizes ? sizes.reduce((widest, size) => Math.max(widest, size.width), 0) : 0),
     [sizes],
   );
+  const contentWidth = Math.max(viewportWidth, widestPage * scale);
 
   const firstVisible = offsets ? pageAt(offsets, scrollTop) : 0;
   const lastVisible = offsets ? pageAt(offsets, scrollTop + viewportHeight) : 0;
@@ -537,6 +577,132 @@ export function PdfPane({
     setCapture(null);
   });
 
+  // --- drawing a region (FR-014) -------------------------------------------
+
+  /** The in-progress region drag, in fractions of the rendered page box —
+   *  view space, so it paints with one multiply and converts to the stored
+   *  unrotated form only at the moment it becomes an anchor. */
+  const [regionDraft, setRegionDraft] = useState<{ page: number; rect: PdfRect } | null>(null);
+  const cancelRegionDragRef = useRef<(() => void) | null>(null);
+  useEffect(() => () => cancelRegionDragRef.current?.(), []);
+
+  /** A region's rect — view-space fractions — in the scroll content's
+   *  coordinates, which is where the quote button positions itself. Derived
+   *  from the fractions rather than stored at capture time, so a zoom change
+   *  keeps the button glued to the region instead of a stale pixel box. */
+  const regionContentBounds = useCallback(
+    (page: number, view: PdfRect) => {
+      const pageW = (sizes?.[page - 1].width ?? 0) * scale;
+      const pageH = (sizes?.[page - 1].height ?? 0) * scale;
+      return {
+        left: (contentWidth - pageW) / 2 + view.x * pageW,
+        top: (offsets?.[page - 1] ?? 0) + view.y * pageH,
+        width: view.w * pageW,
+        height: view.h * pageH,
+      };
+    },
+    [sizes, scale, offsets, contentWidth],
+  );
+
+  /**
+   * The region gesture (FR-014): Alt+drag draws a rectangle on any page, and
+   * on a page with no text layer at all a plain drag already *is* the region
+   * gesture — the user is never left with a dead text-selection gesture
+   * (scenario 4.4).
+   *
+   * Lives on the content div rather than per page, and tracks the page
+   * element's live box rather than a snapshot, so a scroll mid-drag keeps the
+   * fractions honest. If the page unmounts anyway (left the render window),
+   * the last live box is kept — the gesture freezes rather than computing
+   * NaN fractions off a detached element.
+   */
+  const onRegionMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    // Any real click dismisses a pending capture. A *text* capture would also
+    // die to the next selectionchange, but a click on dead space fires none —
+    // and a region capture has no DOM selection to notice it (scenario 2.6).
+    // The quote button survives this because its own mousedown is prevented.
+    if (!event.defaultPrevented) setCapture(null);
+    if (!offsets || !sizes) return;
+    const pageEl = event.target instanceof Element ? event.target.closest("[data-pdf-page]") : null;
+    if (!(pageEl instanceof HTMLElement)) return;
+
+    const pageNumber = Number(pageEl.getAttribute("data-pdf-page"));
+    // `endOfContent` is a div, so "no span" is exactly "no text layer".
+    const hasText = pageEl.querySelector(".pdf-text-layer span") !== null;
+    if (!event.altKey && hasText) return;
+
+    // preventDefault, not just listener ordering: this is what stops the drag
+    // starting a text selection over the spans.
+    event.preventDefault();
+    window.getSelection()?.removeAllRanges();
+
+    const rotation = sizes[pageNumber - 1].rotation;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    let box = pageEl.getBoundingClientRect();
+
+    const fractions = (clientX: number, clientY: number): PdfRect => {
+      if (pageEl.isConnected) box = pageEl.getBoundingClientRect();
+      const fx = (v: number) =>
+        box.width > 0 ? Math.min(1, Math.max(0, (v - box.left) / box.width)) : 0;
+      const fy = (v: number) =>
+        box.height > 0 ? Math.min(1, Math.max(0, (v - box.top) / box.height)) : 0;
+      const x0 = fx(startX);
+      const y0 = fy(startY);
+      const x1 = fx(clientX);
+      const y1 = fy(clientY);
+      return {
+        x: Math.min(x0, x1),
+        y: Math.min(y0, y1),
+        w: Math.abs(x1 - x0),
+        h: Math.abs(y1 - y0),
+      };
+    };
+
+    const scrollEl = scrollRef.current;
+    scrollEl?.classList.add("pdf-region-drag");
+
+    const detach = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      window.removeEventListener("blur", onCancel);
+      scrollEl?.classList.remove("pdf-region-drag");
+      cancelRegionDragRef.current = null;
+    };
+    const onMove = (e: MouseEvent) => {
+      setRegionDraft({ page: pageNumber, rect: fractions(e.clientX, e.clientY) });
+    };
+    const onCancel = () => {
+      detach();
+      setRegionDraft(null);
+    };
+    const onUp = (e: MouseEvent) => {
+      detach();
+      setRegionDraft(null);
+      // The same guard the text path gets from selection collapse: a stray
+      // click-drag is an accident, not a region (FR-015, spec edge case).
+      const deliberate =
+        Math.abs(e.clientX - startX) >= REGION_MIN_DRAG_PX &&
+        Math.abs(e.clientY - startY) >= REGION_MIN_DRAG_PX;
+      const view = fractions(e.clientX, e.clientY);
+      const anchor = deliberate ? regionAnchor(pageNumber, viewRectToPage(view, rotation)) : null;
+      if (!anchor || anchor.kind !== "region") return;
+      setCapture({
+        anchor,
+        // The editable placeholder caption (FR-016); the link's `rect`
+        // parameter is what carries the real geometry.
+        body: "Selected region",
+        ...regionContentBounds(pageNumber, view),
+      });
+    };
+
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+    window.addEventListener("blur", onCancel);
+    cancelRegionDragRef.current = onCancel;
+  };
+
   const goToPage = useCallback(
     (page: number) => {
       const container = scrollRef.current;
@@ -549,14 +715,10 @@ export function PdfPane({
 
   // --- arriving from a quote link (FR-021–FR-026) --------------------------
 
-  /** The passage this pane is emphasising, and the page it is on. Cleared by
-   *  the fade timer below, so a highlight is a moment, not a state the
-   *  document stays in. */
-  const [highlight, setHighlight] = useState<{
-    page: number;
-    text: string;
-    align: ScrollLogicalPosition;
-  } | null>(null);
+  /** The passage or region this pane is emphasising, and the page it is on.
+   *  Cleared by the fade timer below, so a highlight is a moment, not a state
+   *  the document stays in. */
+  const [highlight, setHighlight] = useState<PaneHighlight | null>(null);
   const pendingFragment = usePdfAnchorStore((store) => store.requests[tabId]);
 
   /**
@@ -636,19 +798,39 @@ export function PdfPane({
           // nudged at most, per FR-024.
           const jumped = revealPage(found.page);
           setHighlight({
+            kind: "text",
             page: found.page,
             text: found.text,
             align: jumped ? "center" : "nearest",
+            fading: false,
           });
           return;
         }
         showEditorNotice("The quoted passage is no longer in this PDF.", tabId);
       }
 
+      // A region anchor paints exactly what was recorded — there is no text
+      // to re-find, and a changed PDF gets no claim of correctness (spec edge
+      // case). Only while the recorded page exists, though: outlining the rect
+      // on the last page of a shortened document is the guessed highlight
+      // FR-025 forbids, so the clamped case falls through like any other.
+      if (parsed.kind === "anchor" && parsed.anchor.kind === "region" && page === recorded) {
+        if (cancelled) return;
+        const jumped = revealPage(page);
+        setHighlight({
+          kind: "region",
+          page,
+          rect: parsed.anchor.rect,
+          align: jumped ? "center" : "nearest",
+          fading: false,
+        });
+        return;
+      }
+
       // Everything else lands on the recorded page with nothing highlighted: a
       // plain page link, an unreadable fragment (reported above), a passage
-      // that could not be re-found, and a region anchor (whose painting is
-      // T035's, in US4). Never a guessed highlight — FR-025.
+      // that could not be re-found, and a region anchor whose page is gone.
+      // Never a guessed highlight — FR-025.
       if (cancelled) return;
       revealPage(page);
       setHighlight(null);
@@ -659,13 +841,24 @@ export function PdfPane({
     };
   }, [pendingFragment, doc, offsets, pageCount, revealPage, tabId]);
 
-  // The highlight is temporary emphasis, not a mark on the document (FR-023):
-  // it fades out on its own and the page is left readable.
+  // The highlight is temporary emphasis, not a mark on the document (FR-023).
+  // Two steps because the fade is a CSS transition: `fading` starts the
+  // animation while the mark is still mounted (for the text variant it is the
+  // `pdf-hit` class coming off that fades), and the state drops a beat later.
   useEffect(() => {
-    if (!highlight) return;
-    const timer = setTimeout(() => setHighlight(null), HIGHLIGHT_LINGER_MS);
+    if (!highlight || highlight.fading) return;
+    const timer = setTimeout(
+      () => setHighlight((current) => (current ? { ...current, fading: true } : current)),
+      HIGHLIGHT_LINGER_MS,
+    );
     return () => clearTimeout(timer);
   }, [highlight]);
+
+  useEffect(() => {
+    if (!highlight?.fading) return;
+    const timer = setTimeout(() => setHighlight(null), HIGHLIGHT_FADE_MS);
+    return () => clearTimeout(timer);
+  }, [highlight?.fading]);
 
   return (
     // Matches `DrawingPane`: the tab is `keepAlive`, and `display: none` (not
@@ -703,14 +896,24 @@ export function PdfPane({
               <div
                 ref={contentRef}
                 className="relative"
+                onMouseDown={onRegionMouseDown}
                 style={{
                   height: offsets[pageCount],
-                  width: Math.max(viewportWidth, widestPage * scale),
+                  width: contentWidth,
                 }}
               >
                 {Array.from({ length: renderTo - renderFrom + 1 }, (_, i) => {
                   const index = renderFrom + i;
                   const size = state.sizes[index];
+                  const pageBox = { width: size.width * scale, height: size.height * scale };
+                  // The in-progress rubber band, or the settled region sitting
+                  // behind the quote button — the same box at two moments.
+                  const drawn =
+                    regionDraft?.page === index + 1
+                      ? regionDraft.rect
+                      : capture?.anchor.kind === "region" && capture.anchor.page === index + 1
+                        ? pageRectToView(capture.anchor.rect, size.rotation)
+                        : null;
                   return (
                     <div
                       key={index}
@@ -719,23 +922,64 @@ export function PdfPane({
                       // itself is a DOM fact, and the two must not disagree.
                       data-pdf-page={index + 1}
                       className="absolute right-0 left-0 mx-auto"
-                      style={{ top: offsets[index], width: size.width * scale }}
+                      // The height is explicit rather than the canvas's, so a
+                      // region box positioned from `sizes` is right before the
+                      // canvas has sized itself.
+                      style={{
+                        top: offsets[index],
+                        width: pageBox.width,
+                        height: pageBox.height,
+                      }}
                     >
                       <PdfPageCanvas
                         doc={state.doc}
                         pageNumber={index + 1}
                         scale={scale}
                         onMeasure={onMeasure}
-                        highlight={highlight?.page === index + 1 ? highlight.text : null}
+                        highlight={
+                          highlight?.kind === "text" &&
+                          !highlight.fading &&
+                          highlight.page === index + 1
+                            ? highlight.text
+                            : null
+                        }
                         highlightAlign={highlight?.align ?? "nearest"}
                         onHighlightMissed={reportHighlightMissed}
                       />
+                      {drawn ? (
+                        <div className="pdf-region" style={rectToViewport(drawn, pageBox)} />
+                      ) : null}
+                      {highlight?.kind === "region" && highlight.page === index + 1 ? (
+                        <PdfRegionHint
+                          rect={pageRectToView(highlight.rect, size.rotation)}
+                          box={pageBox}
+                          align={highlight.align}
+                          fading={highlight.fading}
+                        />
+                      ) : null}
                     </div>
                   );
                 })}
                 {capture ? (
                   <PdfQuoteButton
-                    capture={capture}
+                    // A region's bounds are recomputed per render from its
+                    // fractions, so the button stays glued through a zoom
+                    // change. A text capture's bounds are a DOM fact and are
+                    // kept as measured.
+                    capture={
+                      capture.anchor.kind === "region"
+                        ? {
+                            ...capture,
+                            ...regionContentBounds(
+                              capture.anchor.page,
+                              pageRectToView(
+                                capture.anchor.rect,
+                                state.sizes[capture.anchor.page - 1].rotation,
+                              ),
+                            ),
+                          }
+                        : capture
+                    }
                     pdfPath={location.path}
                     pdfTabId={tabId}
                     onQuoted={() => {
@@ -823,6 +1067,42 @@ function ToolbarButton({
     >
       {children}
     </button>
+  );
+}
+
+/**
+ * The outline a resolved region quote leaves on the page (FR-022). The stored
+ * fractions are mapped onto the *current* rendered box, so the same part of
+ * the page is outlined after a zoom change rather than a rect scaled to the
+ * wrong place (scenario 4.5).
+ */
+function PdfRegionHint({
+  rect,
+  box,
+  align,
+  fading,
+}: {
+  /** View-space fractions — the stored crop-box fractions already run through
+   *  `pageRectToView`. */
+  rect: PdfRect;
+  box: { width: number; height: number };
+  align: ScrollLogicalPosition;
+  fading: boolean;
+}) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  // The second half of the reveal, mirroring the text path: the pane can only
+  // scroll to a *page* — where on that page the region sits is only known once
+  // this box exists. `nearest` is the FR-024 case — already in view, nudge at
+  // most.
+  useLayoutEffect(() => {
+    ref.current?.scrollIntoView({ block: align, inline: "nearest" });
+  }, [align]);
+  return (
+    <div
+      ref={ref}
+      className={`pdf-region pdf-region-hint${fading ? " fading" : ""}`}
+      style={rectToViewport(rect, box)}
+    />
   );
 }
 

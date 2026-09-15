@@ -4,13 +4,16 @@ import {
   TEXT_HINT_MAX,
   encodeAnchorFragment,
   normalizePageText,
+  pageRectToView,
   parseAnchorFragment,
   rectToViewport,
   refindPassage,
   quoteMarkdown,
   regionAnchor,
   textAnchor,
+  viewRectToPage,
   type PdfAnchor,
+  type PdfRect,
 } from "../src/lib/pdf-anchor";
 import { parseWikiLink } from "../src/lib/wiki-links";
 
@@ -129,6 +132,66 @@ describe("rectToViewport", () => {
     expect(small).toEqual({ left: 100, top: 300, width: 200, height: 150 });
     expect(large.left / large.width).toBeCloseTo(small.left / small.width);
     expect(large.top / large.height).toBeCloseTo(small.top / small.height);
+  });
+});
+
+describe("region rotation mapping", () => {
+  const expectRect = (actual: PdfRect, expected: PdfRect) => {
+    for (const key of ["x", "y", "w", "h"] as const) {
+      expect(actual[key]).toBeCloseTo(expected[key]);
+    }
+  };
+
+  test("view and page rects round-trip at every quarter-turn", () => {
+    const rect = { x: 0.2, y: 0.1, w: 0.3, h: 0.4 };
+    for (const rotation of [0, 90, 180, 270]) {
+      expectRect(pageRectToView(viewRectToPage(rect, rotation), rotation), rect);
+    }
+  });
+
+  test("an unrotated page maps identically", () => {
+    const rect = { x: 0.1, y: 0.2, w: 0.3, h: 0.4 };
+    expect(viewRectToPage(rect, 0)).toBe(rect);
+    expect(pageRectToView(rect, 0)).toBe(rect);
+  });
+
+  // Ground truth, worked from `PageViewport`'s transform: at rotation 90 the
+  // view is the page turned clockwise, so the view's top-left corner is the
+  // page's bottom-left.
+  test("rotation 90: the view's top-left is the page's bottom-left", () => {
+    expectRect(viewRectToPage({ x: 0, y: 0, w: 0.25, h: 0.5 }, 90), {
+      x: 0,
+      y: 0.75,
+      w: 0.5,
+      h: 0.25,
+    });
+  });
+
+  test("rotation 270: the view's top-left is the page's top-right", () => {
+    expectRect(viewRectToPage({ x: 0, y: 0, w: 0.25, h: 0.5 }, 270), {
+      x: 0.5,
+      y: 0,
+      w: 0.5,
+      h: 0.25,
+    });
+  });
+
+  test("rotation 180 flips both axes", () => {
+    expectRect(viewRectToPage({ x: 0.1, y: 0.2, w: 0.3, h: 0.4 }, 180), {
+      x: 0.6,
+      y: 0.4,
+      w: 0.3,
+      h: 0.4,
+    });
+  });
+
+  test("a region captured on a rotated view paints back where it was drawn", () => {
+    const view = { x: 0, y: 0, w: 0.25, h: 0.5 };
+    const anchor = regionAnchor(2, viewRectToPage(view, 90));
+    expect(anchor).toMatchObject({ kind: "region", page: 2 });
+    if (anchor?.kind === "region") {
+      expectRect(pageRectToView(anchor.rect, 90), view);
+    }
   });
 });
 

@@ -175,6 +175,59 @@ export function parseAnchorFragment(fragment: string | null | undefined): PdfAnc
   return { kind: "page", page };
 }
 
+/**
+ * The only rotations a page can carry. `PageViewport` throws on anything that
+ * is not a quarter-turn, so a non-multiple here means "we were handed a value
+ * that is not a viewport rotation" — treat it as no rotation rather than snap
+ * to an arbitrary one.
+ */
+function normalizedRotation(rotation: number): number {
+  const r = ((rotation % 360) + 360) % 360;
+  return r % 90 === 0 ? r : 0;
+}
+
+/**
+ * The box a region is **drawn** on is the rendered viewport, which already has
+ * the page's `/Rotate` applied — but the link grammar stores fractions of the
+ * *unrotated* crop box (contracts/quote-link.md, FR-020). These two convert
+ * between them. `rotation` is the viewport's, in degrees clockwise
+ * (`PageViewport.rotation`); both sides use the same convention — x from the
+ * left edge, y from the top — so a 0° page maps identically.
+ *
+ * Derived from `PageViewport`'s transform, not guessed: at rotation 90 the
+ * viewport maps PDF user space `(x, y)` to view `(y, x)`, which is a clockwise
+ * turn of the page — the view's top-left corner is the page's bottom-left.
+ */
+export function viewRectToPage(rect: PdfRect, rotation: number): PdfRect {
+  const { x, y, w, h } = rect;
+  switch (normalizedRotation(rotation)) {
+    case 90:
+      return { x: y, y: 1 - x - w, w: h, h: w };
+    case 180:
+      return { x: 1 - x - w, y: 1 - y - h, w, h };
+    case 270:
+      return { x: 1 - y - h, y: x, w: h, h: w };
+    default:
+      return rect;
+  }
+}
+
+/** The inverse of `viewRectToPage`, for painting a stored anchor back onto the
+ *  rendered box. */
+export function pageRectToView(rect: PdfRect, rotation: number): PdfRect {
+  const { x, y, w, h } = rect;
+  switch (normalizedRotation(rotation)) {
+    case 90:
+      return { x: 1 - y - h, y: x, w: h, h: w };
+    case 180:
+      return { x: 1 - x - w, y: 1 - y - h, w, h };
+    case 270:
+      return { x: y, y: 1 - x - w, w: h, h: w };
+    default:
+      return rect;
+  }
+}
+
 /** Where a region anchor lands on a page rendered at `viewport`, in CSS pixels
  *  relative to the page element. One multiply, done at paint time — which is
  *  what makes the same rect follow a zoom change (scenario 4.5). */
