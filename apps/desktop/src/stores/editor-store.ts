@@ -878,39 +878,53 @@ export const useEditorStore = create<EditorState>((set, get) => ({
    * created for one.
    */
   revealPdfAnchor: (path: string, fragment: string, fromTabId: string | null) => {
-    const state = get();
-    const isTarget = (tabId: string | null) => {
-      const tab = tabId ? state.tabs.find((candidate) => candidate.id === tabId) : null;
-      return tab?.location.kind === "pdf" && tab.location.path === path;
-    };
-    const allPanes = panes(state.layout);
-
-    const showing = allPanes.find((pane) => isTarget(pane.activeTabId));
-    if (showing?.activeTabId) {
-      requestPdfAnchor(showing.activeTabId, fragment);
-      return;
-    }
-
-    for (const pane of allPanes) {
-      const backgroundTabId = pane.tabIds.find((tabId) => isTarget(tabId));
-      if (backgroundTabId) {
-        requestPdfAnchor(backgroundTabId, fragment);
-        set((current) =>
-          publish(current.tabs, activateTabInLayout(current.layout, backgroundTabId)),
-        );
-        return;
-      }
-    }
-
-    const tab = createFileTab(path);
-    requestPdfAnchor(tab.id, fragment);
+    // The whole decision runs inside one `set`, against `current` — not against
+    // a snapshot taken before it. `followPdfQuoteLink` awaits a filesystem
+    // probe before calling this, so the layout genuinely can move underneath:
+    // a tab found in a stale snapshot might no longer be in the tree, the
+    // activation would quietly no-op, and the anchor would be left queued for a
+    // tab that never appears — to be replayed the next time that id mounts.
+    //
+    // The anchor is therefore queued from inside the updater, on the branch
+    // actually taken. That is a write to a *different* store, and it has to
+    // happen before this one commits: a pane mounting in the same commit must
+    // already find its anchor, or a first arrival at a freshly opened PDF would
+    // silently never scroll.
     set((current) => {
-      // The pane the link was clicked in, falling back to focus if it has gone
-      // (the same rule `appendTab` uses). An unknown pane id would make
-      // `insertTab` a no-op and `publish` then drop the tab entirely.
+      const isTarget = (tabId: string | null) => {
+        const tab = tabId ? current.tabs.find((candidate) => candidate.id === tabId) : null;
+        return tab?.location.kind === "pdf" && tab.location.path === path;
+      };
+      const allPanes = panes(current.layout);
+
+      // (a) Already visible. Reuse it, open no tab, make no split — and take no
+      // focus: the view is there, so anchoring it is the whole job, and moving
+      // focus out of the note would cost the caret for nothing.
+      const showing = allPanes.find((pane) => isTarget(pane.activeTabId));
+      if (showing?.activeTabId) {
+        requestPdfAnchor(showing.activeTabId, fragment);
+        return current;
+      }
+
+      // (b) Open behind something else: bring that tab forward where it is.
+      for (const pane of allPanes) {
+        const backgroundTabId = pane.tabIds.find((tabId) => isTarget(tabId));
+        if (backgroundTabId) {
+          requestPdfAnchor(backgroundTabId, fragment);
+          return publish(current.tabs, activateTabInLayout(current.layout, backgroundTabId));
+        }
+      }
+
+      // (c) Not open: a split beside the note, so the quote and its source are
+      // visible together — which is the point of the round trip. The pane falls
+      // back to focus if the one the link was clicked in has gone (the same
+      // rule `appendTab` uses): an unknown pane id would make `insertTab` a
+      // no-op, and `publish` would then drop the new tab entirely.
       const origin = fromTabId ? paneOfTab(current.layout, fromTabId) : null;
       const notePaneId =
         origin && findPane(current.layout, origin.id) ? origin.id : current.layout.focusedPaneId;
+      const tab = createFileTab(path);
+      requestPdfAnchor(tab.id, fragment);
       // Two steps because `splitPaneWithTab` moves a tab the layout already
       // owns: it is the app's one "open beside this" transition, and reusing it
       // keeps split geometry and focus rules in a single place.

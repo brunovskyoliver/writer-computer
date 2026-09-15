@@ -323,7 +323,11 @@ before the `pdf` kind is added.
   with `--total-scale-factor`.
 - **Two searches, one joining rule.** `refindPassage` searches
   `getTextContent().items.map(str).join(" ")`; the highlight searches the
-  rendered spans' normalized text joined with `" "`. They must join identically
+  rendered spans' normalized text joined with `" "`. The agreement rests on
+  `refindPassage` normalizing its whole haystack (an empty `hasEOL` item joins
+  in a double space that only the collapse removes) — if anyone later
+  pre-normalizes `getPageText` and drops that call, the two diverge. They must
+  agree
   or a passage can be reported found on a page where the highlight then finds
   nothing — a silent failure. Both go through `normalizePageText`. If the span
   scan misses anyway, that is reported rather than swallowed: FR-025 forbids
@@ -338,6 +342,15 @@ before the `pdf` kind is added.
   whole. That over-marks by at most a partial span at each end and avoids
   mapping a whitespace-normalized offset back onto un-normalized DOM text, which
   is the part that would go quietly wrong.
+- **The whole FR-021 decision runs inside one `set`, against the current state.**
+  A snapshot taken before it can be stale — the resolver awaits a filesystem
+  probe first — and a tab found in a stale snapshot may no longer be in the
+  tree, so the activation would no-op while the anchor stayed queued for a tab
+  that never appears, to be replayed the next time that id mounts. The anchor is
+  queued from inside the updater, on the branch actually taken.
+- An unreadable fragment is **reported, not just navigated past**:
+  `parseAnchorFragment` carries a `reason` for exactly that, and landing on the
+  page in silence is indistinguishable from a link that did nothing.
 - **Region anchors navigate to the recorded page and highlight nothing here.**
   T035 (US4) owns region painting and specifies behaviour this phase would have
   had to guess at ("multiplied by the _current_ viewport", no re-find, no claim

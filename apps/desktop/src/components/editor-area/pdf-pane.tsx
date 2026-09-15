@@ -602,6 +602,13 @@ export function PdfPane({
         page = pageCount;
       }
 
+      if (parsed.kind === "unreadable") {
+        // The grammar carries a reason precisely so this can be said out loud.
+        // Landing on the page in silence is indistinguishable from a link that
+        // did nothing at all.
+        showEditorNotice(`This quote link's anchor could not be read (${parsed.reason}).`, tabId);
+      }
+
       if (parsed.kind === "anchor" && parsed.anchor.kind === "text") {
         const found = await refindPassage(parsed.anchor.text, page, pageCount, (target) =>
           pageText(doc, target),
@@ -616,8 +623,9 @@ export function PdfPane({
       }
 
       // Everything else lands on the recorded page with nothing highlighted: a
-      // plain page link, an unreadable fragment, a passage that could not be
-      // re-found, and a region anchor (whose painting is T035's, in US4).
+      // plain page link, an unreadable fragment (reported above), a passage
+      // that could not be re-found, and a region anchor (whose painting is
+      // T035's, in US4). Never a guessed highlight — FR-025.
       if (cancelled) return;
       revealPage(page);
       setHighlight(null);
