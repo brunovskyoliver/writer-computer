@@ -77,7 +77,7 @@ pub fn fuzzy_search(
     fuzzy_search_from(&query, &index, limit)
 }
 
-fn fuzzy_search_from(
+pub(crate) fn fuzzy_search_from(
     query: &str,
     index: &[IndexedFile],
     limit: usize,

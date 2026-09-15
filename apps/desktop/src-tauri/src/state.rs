@@ -341,6 +341,14 @@ pub struct AppState {
     /// shares (the LaTeX snippet file, the global config). Started once in
     /// `setup`; held here only so it is not dropped.
     pub global_config_watcher: Mutex<Option<RecommendedWatcher>>,
+    /// MCP server runtime: listener task, per-connection tasks, server
+    /// status for `mcp_status`, and the pending map bridging webview-forwarded
+    /// tool calls. See `mcp/mod.rs`.
+    pub mcp: Mutex<crate::mcp::McpServerState>,
+    /// The process `AppHandle`, stored at setup so `AppState`-only call sites
+    /// (settings writes, shutdown) can reach emit/spawn capabilities without
+    /// threading the handle through every signature. `None` in tests.
+    app_handle: RwLock<Option<tauri::AppHandle>>,
 }
 
 impl AppState {
@@ -351,7 +359,19 @@ impl AppState {
             sessions_file_lock: Mutex::new(()),
             recent_files_lock: Mutex::new(()),
             global_config_watcher: Mutex::new(None),
+            mcp: Mutex::new(crate::mcp::McpServerState::default()),
+            app_handle: RwLock::new(None),
         }
+    }
+
+    /// Called once in `setup` before anything reads the handle.
+    pub fn set_app_handle(&self, handle: tauri::AppHandle) {
+        *self.app_handle.write() = Some(handle);
+    }
+
+    /// `None` only in tests, where no Tauri runtime exists.
+    pub fn app_handle(&self) -> Option<tauri::AppHandle> {
+        self.app_handle.read().clone()
     }
 
     /// Return the window's state, creating a fresh `WorkspaceState` if this
@@ -376,9 +396,13 @@ impl AppState {
 
     /// Remove and return a window's state. Called from the window-close
     /// event handler so the watcher's `Drop` runs (stopping FSEvents /
-    /// inotify subscriptions) and the index memory is reclaimed.
+    /// inotify subscriptions) and the index memory is reclaimed. Any MCP tool
+    /// calls forwarded to the departing window are failed — the webview can
+    /// no longer answer them.
     pub fn remove(&self, label: &str) -> Option<Arc<WorkspaceState>> {
-        self.windows.write().remove(label)
+        let removed = self.windows.write().remove(label);
+        crate::mcp::fail_pending_for_label(self, label);
+        removed
     }
 
     /// Find an existing window already hosting or opening `path`. Used to
@@ -427,6 +451,23 @@ impl AppState {
     /// broadcast-style events without hard-coding labels.
     pub fn labels(&self) -> Vec<String> {
         self.windows.read().keys().cloned().collect()
+    }
+
+    /// Snapshot of every window's workspace target: `(label, workspace_root,
+    /// standalone_file)`. A window with neither is open but not yet hosting
+    /// anything (e.g. the launcher); callers filter those out.
+    pub fn workspace_targets(&self) -> Vec<(String, Option<PathBuf>, Option<PathBuf>)> {
+        self.windows
+            .read()
+            .iter()
+            .map(|(label, state)| {
+                (
+                    label.clone(),
+                    state.workspace_root.read().clone(),
+                    state.standalone_file.read().clone(),
+                )
+            })
+            .collect()
     }
 }
 

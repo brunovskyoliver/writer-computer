@@ -419,6 +419,15 @@
       "normalize": "trim",
       "scope": "global",
       "default": ""
+    },
+    {
+      "key": "mcp.enabled",
+      "label": "MCP Server",
+      "description": "Let local AI agents (Claude Code, Codex, scripts) connect to this app over the `writer mcp` bridge to list, search and read open workspaces. Local-only; nothing leaves the machine.",
+      "category": "Privacy",
+      "type": "boolean",
+      "scope": "global",
+      "default": false
     }
   ]
 }

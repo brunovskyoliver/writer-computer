@@ -7,6 +7,7 @@ import { useIsStartupResolved } from "./hooks/use-workspace";
 import { useFileWatcher } from "./hooks/use-file-watcher";
 import { useKeyboardShortcuts } from "./hooks/use-keyboard-shortcuts";
 import { useMenuEvents } from "./hooks/use-menu-events";
+import { useMcpRequests } from "./hooks/use-mcp-requests";
 import { useOpenDrop } from "./hooks/use-open-drop";
 import "./lib/global-recents";
 import "./lib/standalone-watch";
@@ -19,6 +20,7 @@ function App() {
   useFileWatcher();
   useKeyboardShortcuts();
   useMenuEvents();
+  useMcpRequests();
   useOpenDrop();
 
   if (!isStartupResolved || !shutdownReady) {

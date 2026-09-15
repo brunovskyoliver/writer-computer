@@ -131,7 +131,7 @@ const PDF_EXTENSION: &str = ".pdf";
 /// The file kinds the sidebar surfaces: Markdown notes, drawings and PDFs. One
 /// predicate so listing and folder visibility cannot drift apart — a drawing
 /// visible in a folder that the tree hides is the failure this prevents.
-fn is_sidebar_file(path: &Path) -> bool {
+pub(crate) fn is_sidebar_file(path: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
         return false;
     };

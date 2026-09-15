@@ -52,6 +52,9 @@ pub(crate) fn with_global_settings_mut<T>(
     let result = f(settings)?;
     let (enabled, email) = crate::telemetry::settings_snapshot(settings);
     crate::telemetry::apply_settings(enabled, email);
+    // MCP lifecycle follows the same rule: apply the new flag under the
+    // global lock so two windows' writes can't interleave start/stop.
+    crate::mcp::apply_settings(app_state, settings);
     Ok(result)
 }
 

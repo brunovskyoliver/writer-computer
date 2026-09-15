@@ -6,6 +6,7 @@ mod error;
 mod ignore;
 #[cfg(target_os = "macos")]
 mod macos;
+mod mcp;
 pub mod open_target;
 mod session;
 mod shutdown;
@@ -504,6 +505,9 @@ pub fn run() {
             // Initialize the main window's per-window state (settings layer,
             // pending-open queue). `get_or_create` lazily builds the
             // `WorkspaceState` for the `"main"` label.
+            // Store the handle first: `AppState`-only call sites (settings
+            // writes, shutdown) reach emit/spawn through it.
+            app.state::<AppState>().set_app_handle(app.handle().clone());
             let main_state = app.state::<AppState>().get_or_create(MAIN_WINDOW_LABEL);
             init_window_settings(app.handle(), &main_state)?;
 
@@ -519,6 +523,12 @@ pub fn run() {
                     .unwrap_or((false, None));
                 telemetry::init(app.handle(), enabled, email);
                 telemetry::report_app_opened();
+            }
+
+            // The MCP listener reads `mcp.enabled` out of the same settings
+            // layer; a bind failure lands in `mcp_status`, never in startup.
+            if let Some(settings) = main_state.settings.read().as_ref() {
+                crate::mcp::apply_settings(app.state::<AppState>().inner(), settings);
             }
 
             // On macOS, `open -a Writer /path` delivers the path via
@@ -620,6 +630,8 @@ pub fn run() {
             commands::settings::get_setting,
             commands::settings::set_setting,
             commands::settings::reset_setting,
+            commands::mcp::mcp_respond,
+            commands::mcp::mcp_status,
             telemetry::telemetry_should_prompt,
             telemetry::telemetry_mark_prompted,
             telemetry::telemetry_report_declined,
@@ -638,6 +650,10 @@ pub fn run() {
                 if shutdown::request(_app, None) {
                     api.prevent_exit();
                 }
+            }
+            // All quit paths funnel here — clean up the socket file.
+            if let tauri::RunEvent::Exit = &_event {
+                crate::mcp::shutdown(_app.state::<AppState>().inner());
             }
             // On macOS, dragging a folder/file to the dock icon sends file:// URLs
             // via the RunEvent::Opened event. The variant only exists in the

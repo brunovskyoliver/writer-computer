@@ -29,7 +29,7 @@ fontdb = "0.23"
 ignore = "0.4"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 uuid = { version = "1", features = ["v4"] }
-tokio = { version = "1", features = ["fs", "sync"] }
+tokio = { version = "1", features = ["fs", "io-util", "net", "sync", "time"] }
 parking_lot = "0.12"
 thiserror = "2"
 trash = "5"
@@ -42,6 +42,8 @@ tauri-plugin-webdriver = { version = "0.2", optional = true }
 # dependency graph does not grow — both are already resolved in Cargo.lock.
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
+rmcp = { version = "3.4.0", features = ["server", "transport-async-rw", "schemars"] }
+schemars = "1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6.4"

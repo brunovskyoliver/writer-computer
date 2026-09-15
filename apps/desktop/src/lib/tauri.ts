@@ -285,6 +285,30 @@ export function getStartupState(): Promise<StartupState> {
   return invoke("get_startup_state");
 }
 
+// MCP commands. `mcpRespond` is the reply channel for tool calls forwarded
+// through `mcp:request` (dispatcher in `lib/mcp.ts`); `mcpStatus` backs the
+// settings surface.
+export interface McpStatus {
+  enabled: boolean;
+  state: "stopped" | "running" | "failed";
+  error: string | null;
+  socket_path: string;
+}
+
+export function mcpStatus(): Promise<McpStatus> {
+  return invoke("mcp_status");
+}
+
+/** Complete one forwarded tool call. Exactly one of `result` / `error` is
+ *  set — the dispatcher decides which before calling. */
+export function mcpRespond(
+  requestId: number,
+  result: unknown,
+  error: { kind: string; detail: string } | null,
+): Promise<void> {
+  return invoke("mcp_respond", { requestId, result, error });
+}
+
 // Window commands
 export function showMainWindow(): Promise<void> {
   return getCurrentWindow().show();

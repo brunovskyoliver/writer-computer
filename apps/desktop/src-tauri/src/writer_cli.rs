@@ -16,12 +16,18 @@ const EXIT_RUNTIME: u8 = 3;
 
 pub const USAGE: &str = "\
 Usage: writer [PATH]
+       writer mcp
 
 Open a folder or markdown file in the Writer desktop app.
 
 Arguments:
   PATH              Directory or .md/.markdown file to open. If omitted,
                     Writer launches with no target.
+
+Commands:
+  mcp               Bridge stdin/stdout to the running app's MCP server.
+                    Does not launch Writer; exits 3 when the server is
+                    unreachable (disabled or Writer not running).
 
 Options:
   -h, --help        Print this help and exit.
@@ -40,6 +46,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 enum ParsedArgs {
     Help,
     Version,
+    Mcp,
     Open { path: Option<PathBuf> },
 }
 
@@ -59,7 +66,14 @@ impl std::fmt::Display for ParseError {
 }
 
 fn parse_args(argv: &[OsString]) -> Result<ParsedArgs, ParseError> {
-    // argv[0] is the program name.
+    // argv[0] is the program name. `mcp` is a subcommand, never a path.
+    if argv.get(1).and_then(|arg| arg.to_str()) == Some("mcp") {
+        return match argv.len() {
+            2 => Ok(ParsedArgs::Mcp),
+            _ => Err(ParseError::TooManyArgs),
+        };
+    }
+
     let mut positional: Option<PathBuf> = None;
 
     for arg in argv.iter().skip(1) {
@@ -199,6 +213,7 @@ pub fn run<L: Launcher>(argv: Vec<OsString>, cwd: &Path, launcher: &L) -> ExitCo
             println!("writer {VERSION}");
             ExitCode::from(EXIT_SUCCESS)
         }
+        Ok(ParsedArgs::Mcp) => run_mcp(),
         Ok(ParsedArgs::Open { path }) => run_open(path, cwd, launcher),
         Err(err) => {
             fail_usage(err);
@@ -240,6 +255,90 @@ fn canonical_target(payload: &PendingOpenPayload) -> PathBuf {
         .or(payload.workspace.as_deref())
         .map(PathBuf::from)
         .expect("classify always sets exactly one of file or workspace")
+}
+
+/// `writer mcp`: connect to the running app's Unix socket, do the one-line
+/// version handshake, then pipe stdin→socket and socket→stdout until either
+/// side hangs up. Deliberately never launches Writer — an MCP client must
+/// fail fast when no server is listening (exit 3).
+#[cfg(unix)]
+fn run_mcp() -> ExitCode {
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::UnixStream;
+
+    let stream = match UnixStream::connect(crate::mcp::socket_path()) {
+        Ok(stream) => stream,
+        Err(_) => {
+            eprintln!(
+                "writer: could not reach the MCP server — Writer is not running \
+                 or MCP is disabled in Settings"
+            );
+            return ExitCode::from(EXIT_RUNTIME);
+        }
+    };
+    // A live server answers the handshake immediately; a read deadline keeps
+    // a wedged peer from hanging the client forever.
+    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(10)));
+    let mut writer = match stream.try_clone() {
+        Ok(clone) => clone,
+        Err(err) => {
+            eprintln!("writer: could not open MCP socket: {err}");
+            return ExitCode::from(EXIT_RUNTIME);
+        }
+    };
+
+    let hello = format!("{{\"writer_bridge_hello\":{{\"version\":\"{VERSION}\"}}}}\n");
+    if let Err(err) = writer
+        .write_all(hello.as_bytes())
+        .and_then(|_| writer.flush())
+    {
+        eprintln!("writer: MCP handshake failed: {err}");
+        return ExitCode::from(EXIT_RUNTIME);
+    }
+
+    let mut reader = BufReader::new(stream);
+    let mut reply = String::new();
+    match reader.read_line(&mut reply) {
+        Ok(0) | Err(_) => {
+            eprintln!("writer: MCP server closed the connection during handshake");
+            return ExitCode::from(EXIT_RUNTIME);
+        }
+        Ok(_) => {}
+    }
+    let _ = reader.get_ref().set_read_timeout(None);
+
+    let parsed: serde_json::Value = serde_json::from_str(&reply).unwrap_or_default();
+    if let Some(error) = parsed.get("writer_bridge_error") {
+        let message = error
+            .get("message")
+            .and_then(|m| m.as_str())
+            .unwrap_or("MCP handshake rejected");
+        eprintln!("writer: {message}");
+        return ExitCode::from(EXIT_RUNTIME);
+    }
+    if parsed.get("writer_bridge_ready").is_none() {
+        eprintln!("writer: unrecognized MCP handshake reply");
+        return ExitCode::from(EXIT_RUNTIME);
+    }
+
+    // stdin → socket on a worker; socket → stdout on this thread so process
+    // exit follows the server closing the connection.
+    let mut stdin_writer = writer;
+    std::thread::spawn(move || {
+        let mut stdin = std::io::stdin().lock();
+        let _ = std::io::copy(&mut stdin, &mut stdin_writer);
+        let _ = stdin_writer.shutdown(std::net::Shutdown::Write);
+    });
+    let mut stdout = std::io::stdout().lock();
+    let _ = std::io::copy(&mut reader, &mut stdout);
+    let _ = stdout.flush();
+    ExitCode::from(EXIT_SUCCESS)
+}
+
+#[cfg(not(unix))]
+fn run_mcp() -> ExitCode {
+    eprintln!("writer: the MCP bridge is not supported on this platform");
+    ExitCode::from(EXIT_RUNTIME)
 }
 
 fn fail_usage(err: ParseError) {
@@ -322,6 +421,18 @@ mod tests {
             parse_args(&argv(&["writer", "-V"])).unwrap(),
             ParsedArgs::Version
         );
+    }
+
+    #[test]
+    fn parse_mcp_subcommand() {
+        assert_eq!(
+            parse_args(&argv(&["writer", "mcp"])).unwrap(),
+            ParsedArgs::Mcp
+        );
+        assert!(matches!(
+            parse_args(&argv(&["writer", "mcp", "extra"])),
+            Err(ParseError::TooManyArgs)
+        ));
     }
 
     #[test]
