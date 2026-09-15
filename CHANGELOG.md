@@ -2,7 +2,7 @@
 
 ## 2026-09-15
 
-- Select text in a PDF and a Quote button appears beside it. Pressing it inserts the passage into the visible note as a blockquote followed by a link back to the PDF and page, as one undoable edit. Pressing Escape or clicking elsewhere dismisses the button, and with no note visible it says so instead of inserting anywhere.
+- Select text in a PDF and a Cite button appears beside it. Pressing it inserts the passage into the visible note as a blockquote followed by a link back to the PDF and page, as one undoable edit. Pressing Escape or clicking elsewhere dismisses the button, and with no note visible it says so instead of inserting anywhere.
 
 - Add 8px of space above the file path beneath the tabs.
 

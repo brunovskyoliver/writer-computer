@@ -29,20 +29,13 @@ export interface PdfQuoteCapture {
   top: number;
   width: number;
   height: number;
-  /** How bright the page is where the button will sit, sampled from the
-   *  rendered canvas. A PDF page is not always white — figures, dark plates
-   *  and slide decks are common — so the button's colours are derived from the
-   *  paper rather than assumed. */
-  onDarkPage: boolean;
 }
 
 /** Space between the selection and the button. */
-export const QUOTE_BUTTON_OFFSET = 8;
-/** Enough room above the selection to sit there rather than below it. Exported
- *  because `pdf-pane.tsx` samples the page's brightness over exactly the area
- *  the button will occupy; if the two numbers drift, it samples the wrong
- *  pixels and the button can invert against the paper it is not on. */
-export const QUOTE_BUTTON_HEIGHT = 28;
+const QUOTE_BUTTON_OFFSET = 8;
+/** Enough room above the selection to sit there rather than below it. Also the
+ *  rendered height, so the placement maths and the box agree. */
+const QUOTE_BUTTON_HEIGHT = 26;
 
 /**
  * The note the quote lands in: the **active tab of a visible pane**, not any
@@ -170,35 +163,37 @@ export function PdfQuoteButton({
     ? capture.top - QUOTE_BUTTON_HEIGHT - QUOTE_BUTTON_OFFSET
     : capture.top + capture.height + QUOTE_BUTTON_OFFSET;
 
-  // Taken from the paper, not from the app theme. The previous version used
-  // `--surface-card`, which is near-white in light mode and so vanished against
-  // a white page — the button was there, just invisible. Inverting against the
-  // sampled page keeps it legible on white paper, on a dark figure, and on a
-  // slide deck, and it stays correct when the app theme changes because it
-  // never depended on the theme.
-  const ink = capture.onDarkPage ? "#ffffff" : "#1a1a1a";
-  const paper = capture.onDarkPage ? "rgba(20, 20, 20, 0.92)" : "rgba(255, 255, 255, 0.94)";
-
   return (
     <button
       type="button"
+      aria-label="Cite this passage in the note"
       // The selection is cleared by any mousedown outside it, including on
       // this button — which would unmount it before the click ever lands.
       onMouseDown={(event) => event.preventDefault()}
       onClick={() => {
         if (insertQuote(capture, pdfPath, pdfTabId)) onQuoted();
       }}
-      className="absolute z-20 flex h-[24px] cursor-pointer items-center rounded-md px-2 text-[12px] font-medium"
+      // Solid accent rather than a page-coloured chip. The accent is saturated
+      // enough to read on white paper and on a dark figure alike, which is why
+      // this no longer samples the canvas underneath: one colour is correct
+      // everywhere, and it is the colour the rest of the app already uses for
+      // "this is the action".
+      className="absolute z-20 flex cursor-pointer items-center gap-1.5 rounded-lg border-0 pr-2.5 pl-2 text-[12px] font-medium text-white transition-[filter] hover:brightness-110"
       style={{
         left: capture.left,
         top,
-        background: paper,
-        border: `1px solid ${ink}`,
-        boxShadow: "0 2px 8px rgba(0, 0, 0, 0.28)",
-        color: ink,
+        height: QUOTE_BUTTON_HEIGHT,
+        background: "var(--accent)",
+        boxShadow: "0 3px 10px rgba(0, 0, 0, 0.22)",
       }}
     >
-      Quote
+      <svg width="12" height="10" viewBox="0 0 12 10" fill="none" aria-hidden="true">
+        <path
+          d="M0 10V5.4C0 2.5 1.6 0.6 4.4 0v1.8C3 2.2 2.3 3.1 2.3 4.4h2.2V10H0zm7 0V5.4C7 2.5 8.6 0.6 11.4 0v1.8C10 2.2 9.3 3.1 9.3 4.4h2.2V10H7z"
+          fill="currentColor"
+        />
+      </svg>
+      Cite
     </button>
   );
 }

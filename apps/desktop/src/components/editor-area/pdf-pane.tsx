@@ -3,12 +3,7 @@ import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import { acquirePdf, pdfjsTextLayer, releasePdf, type PdfLoadError } from "@/lib/pdf";
 import { normalizePageText, textAnchor } from "@/lib/pdf-anchor";
 import { useEditorStore } from "@/stores/editor-store";
-import {
-  PdfQuoteButton,
-  QUOTE_BUTTON_HEIGHT,
-  QUOTE_BUTTON_OFFSET,
-  type PdfQuoteCapture,
-} from "./pdf-quote-button";
+import { PdfQuoteButton, type PdfQuoteCapture } from "./pdf-quote-button";
 import type { PdfLocation } from "./page-kinds/pdf";
 import { bindTextLayerSelection } from "./pdf-text-selection";
 import { useEscKey } from "./use-esc-key";
@@ -85,60 +80,6 @@ function pageAt(offsets: number[], y: number): number {
 }
 
 /**
- * Average brightness of the rendered page in a band around the selection —
- * where the quote button is about to be drawn.
- *
- * Read off the canvas rather than assumed, because a PDF page is not reliably
- * white: figures, dark plates and slide decks are all common, and a button
- * coloured from the app theme is invisible on whichever of those it guesses
- * wrong. The canvas is drawn locally by pdf.js and is not tainted, so
- * `getImageData` is available.
- *
- * Sampled on a coarse stride: this runs on every selection change, and the
- * question is only "light paper or dark paper", which a few hundred pixels
- * answer as well as a few hundred thousand.
- */
-function pageIsDark(canvas: HTMLCanvasElement, bounds: DOMRect): boolean {
-  const rect = canvas.getBoundingClientRect();
-  if (rect.width === 0 || rect.height === 0) return false;
-  const context = canvas.getContext("2d", { willReadFrequently: true });
-  if (!context) return false;
-
-  // CSS pixels to canvas pixels: the canvas is rasterized at device resolution
-  // and scaled down in CSS, so the two coordinate spaces differ by the dpr.
-  const ratioX = canvas.width / rect.width;
-  const ratioY = canvas.height / rect.height;
-  // A band tall enough to cover the button whether it lands above or below the
-  // selection, clamped to the page.
-  const pad = (QUOTE_BUTTON_HEIGHT + QUOTE_BUTTON_OFFSET) * ratioY;
-  const left = Math.max(0, Math.round((bounds.left - rect.left) * ratioX));
-  const top = Math.max(0, Math.round((bounds.top - rect.top) * ratioY - pad));
-  const width = Math.min(canvas.width - left, Math.max(1, Math.round(bounds.width * ratioX)));
-  const height = Math.min(
-    canvas.height - top,
-    Math.max(1, Math.round(bounds.height * ratioY + pad * 2)),
-  );
-  if (width <= 0 || height <= 0) return false;
-
-  let total = 0;
-  let samples = 0;
-  try {
-    const { data } = context.getImageData(left, top, width, height);
-    const stride = Math.max(1, Math.floor(Math.sqrt((width * height) / 400))) * 4;
-    for (let i = 0; i < data.length; i += stride) {
-      // Rec. 601 luma. Alpha is ignored: pdf.js paints an opaque page.
-      total += 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-      samples += 1;
-    }
-  } catch {
-    // A zero-area or not-yet-painted canvas. Light paper is the safe default:
-    // it is what the overwhelming majority of pages are.
-    return false;
-  }
-  return samples > 0 && total / samples < 128;
-}
-
-/**
  * Read the live DOM selection as a quote capture, or `null` if there is
  * nothing quotable.
  *
@@ -175,7 +116,6 @@ function captureSelection(content: HTMLElement): PdfQuoteCapture | null {
 
   const bounds = range.getBoundingClientRect();
   const origin = content.getBoundingClientRect();
-  const canvas = pageElement?.querySelector("canvas");
   return {
     anchor,
     body,
@@ -183,7 +123,6 @@ function captureSelection(content: HTMLElement): PdfQuoteCapture | null {
     top: bounds.top - origin.top,
     width: bounds.width,
     height: bounds.height,
-    onDarkPage: canvas instanceof HTMLCanvasElement ? pageIsDark(canvas, bounds) : false,
   };
 }
 
