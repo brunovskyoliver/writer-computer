@@ -35,6 +35,25 @@
   --min-font-size-inv: calc(1 / var(--min-font-size));
 }
 
+/* `!important` is load-bearing, not laziness. `App.css` blanket-disables
+   selection with
+
+     *:not(.cm-editor):not(.cm-content):not(.cm-line):not(textarea):not(input)
+
+   — five chained `:not(.class)` selectors, which is specificity 0,5,0. No
+   practical class-based selector here can outrank that, and the rule cannot
+   allow-list a subtree (its exclusions are per-element, so text-layer *spans*
+   would match it even if the container were added to the list). Without this,
+   the spans still take `cursor: text` — that property is not contested — so the
+   pointer looks like it should select and nothing does. That was the observed
+   symptom, and it is what this overrides. */
+.pdf-text-layer,
+.pdf-text-layer span,
+.pdf-text-layer br {
+  -webkit-user-select: text !important;
+  user-select: text !important;
+}
+
 .pdf-text-layer span,
 .pdf-text-layer br {
   /* Transparent, not hidden: the glyphs are painted by the canvas underneath.
@@ -44,7 +63,6 @@
   white-space: pre;
   cursor: text;
   transform-origin: 0% 0%;
-  user-select: text;
 }
 
 .pdf-text-layer > :not(.markedContent),
@@ -62,7 +80,8 @@
 }
 
 .pdf-text-layer span[role="img"] {
-  user-select: none;
+  -webkit-user-select: none !important;
+  user-select: none !important;
   cursor: default;
 }
 
@@ -84,7 +103,8 @@
   inset: 100% 0 0;
   z-index: 0;
   cursor: default;
-  user-select: none;
+  -webkit-user-select: none !important;
+  user-select: none !important;
 }
 
 .pdf-text-layer.selecting .endOfContent {
