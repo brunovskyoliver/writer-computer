@@ -4,6 +4,8 @@
 
 - Agents and scripts can now inspect Writer over MCP. Enable "MCP server" in Settings, then point any MCP client at `writer mcp` — the CLI bridges stdio to a private Unix socket in Writer's app-data folder. Read-only for now: agents can list open workspaces and their files, fuzzy-search paths, and read note contents including frontmatter.
 
+- Agents can now also write through MCP: `create_file`, `write_file`, and `create_folder` let a connected agent create notes and folders or replace a note's content in full. Writes go through Writer's own save path — they appear in the sidebar and search index exactly like an editor save, a note open with unsaved edits refuses the write instead of losing the user's text, and a clean open tab shows the new content immediately.
+
 - Select text in a PDF and a Cite button appears beside it. Pressing it inserts the passage into the visible note as a blockquote followed by a link back to the PDF and page, as one undoable edit. Pressing Escape or clicking elsewhere dismisses the button, and with no note visible it says so instead of inserting anywhere.
 
 - Add 8px of space above the file path beneath the tabs.

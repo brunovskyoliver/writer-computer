@@ -427,9 +427,7 @@ pub fn resolve_path(scope: &Scope, path: &str) -> Result<(PathBuf, String), McpT
 }
 
 /// Same boundary check for `create_*` targets, which may not exist yet:
-/// canonicalize the parent and re-attach the file name (FR-025). Part of the
-/// shared resolution API (T010); the write tools that call it land with US2.
-#[allow(dead_code)]
+/// canonicalize the parent and re-attach the file name (FR-025).
 pub fn resolve_create_path(scope: &Scope, path: &str) -> Result<(PathBuf, String), McpToolError> {
     let candidate = candidate_path(scope, path);
     let parent = candidate

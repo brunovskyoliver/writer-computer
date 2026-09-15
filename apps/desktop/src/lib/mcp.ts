@@ -1,4 +1,4 @@
-import { mcpRespond } from "@/lib/tauri";
+import * as tauri from "@/lib/tauri";
 import { locationBehavior } from "@/components/editor-area/page-kinds";
 import { useEditorStore } from "@/stores/editor-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
@@ -22,8 +22,50 @@ export type McpDispatch =
   | { ok: true; result: unknown }
   | { ok: false; error: { kind: string; detail: string } };
 
+/** A handler's typed failure: surfaced to the caller as `{kind, detail}`
+ *  instead of collapsing to `internal` like an unexpected throw does. */
+class McpToolFailure extends Error {
+  constructor(
+    readonly kind: string,
+    readonly detail: string,
+  ) {
+    super(detail);
+    this.name = "McpToolFailure";
+  }
+}
+
 // Handlers may be sync or async — `Promise` is already covered by `unknown`.
 type McpToolHandler = (args: unknown) => unknown;
+
+/** The resolved target Rust forwards for path-taking webview tools: the
+ *  canonical, boundary-checked path plus its workspace-relative form for
+ *  output and error detail. */
+interface ResolvedTarget {
+  path: string;
+  relativePath: string;
+}
+
+function resolvedTarget(args: unknown): ResolvedTarget {
+  const { path, relative_path } = (args ?? {}) as Record<string, unknown>;
+  if (typeof path !== "string" || typeof relative_path !== "string") {
+    throw new McpToolFailure("invalid_params", "path and relative_path are required");
+  }
+  return { path, relativePath: relative_path };
+}
+
+function resolvedContentTarget(args: unknown): ResolvedTarget & { content: string } {
+  const target = resolvedTarget(args);
+  const { content } = (args ?? {}) as Record<string, unknown>;
+  if (typeof content !== "string") {
+    throw new McpToolFailure("invalid_params", "content is required");
+  }
+  return { ...target, content };
+}
+
+/** AppError::AlreadyExists crosses IPC as its display string. */
+function isAlreadyExistsError(error: unknown): boolean {
+  return String(error).startsWith("Already exists:");
+}
 
 function describeWindow() {
   const { root, chromeMode } = useWorkspaceStore.getState();
@@ -47,9 +89,66 @@ function listTabs() {
   };
 }
 
+async function createFile(args: unknown) {
+  const { path, relativePath, content } = resolvedContentTarget(args);
+  if (await tauri.fileExists(path)) {
+    throw new McpToolFailure("already_exists", `${relativePath} already exists`);
+  }
+  try {
+    await tauri.createFile(path);
+  } catch (error) {
+    if (isAlreadyExistsError(error)) {
+      throw new McpToolFailure("already_exists", `${relativePath} already exists`);
+    }
+    throw error;
+  }
+  const written = await tauri.writeFile(path, content);
+  return { path, relative_path: relativePath, modified_at: written.modified_at };
+}
+
+async function writeFile(args: unknown) {
+  const { path, relativePath, content } = resolvedContentTarget(args);
+  const open = useEditorStore.getState().openFiles.get(path);
+  if (open?.isDirty) {
+    throw new McpToolFailure(
+      "unsaved_conflict",
+      `${relativePath} is open with unsaved changes; the user's text is preserved — retry after they save`,
+    );
+  }
+  const written = await tauri.writeFile(path, content);
+  // A clean open tab must show the new content without user action (FR-017)
+  // — the same refresh the file watcher applies to an external change. If the
+  // tab went dirty during the write the user's text wins: it stays open and
+  // the autosave engine writes it back over this write.
+  const settled = useEditorStore.getState().openFiles.get(path);
+  if (settled && !settled.isDirty) {
+    useEditorStore.getState().reloadFromDisk(path, content);
+  }
+  return { path, relative_path: relativePath, modified_at: written.modified_at };
+}
+
+async function createFolder(args: unknown) {
+  const { path, relativePath } = resolvedTarget(args);
+  if (await tauri.fileExists(path)) {
+    throw new McpToolFailure("already_exists", `${relativePath} already exists`);
+  }
+  try {
+    await tauri.createDirectory(path);
+  } catch (error) {
+    if (isAlreadyExistsError(error)) {
+      throw new McpToolFailure("already_exists", `${relativePath} already exists`);
+    }
+    throw error;
+  }
+  return { path, relative_path: relativePath };
+}
+
 const MCP_TOOL_HANDLERS: Record<string, McpToolHandler> = {
   describe_window: describeWindow,
   list_tabs: listTabs,
+  create_file: createFile,
+  write_file: writeFile,
+  create_folder: createFolder,
 };
 
 /** Run one forwarded tool call. Never throws — the bridge contract says the
@@ -66,6 +165,9 @@ export async function dispatchMcpRequest(request: McpRequest): Promise<McpDispat
   try {
     return { ok: true, result: await handler(request.args) };
   } catch (error) {
+    if (error instanceof McpToolFailure) {
+      return { ok: false, error: { kind: error.kind, detail: error.detail } };
+    }
     return {
       ok: false,
       error: { kind: "internal", detail: error instanceof Error ? error.message : String(error) },
@@ -77,8 +179,8 @@ export async function dispatchMcpRequest(request: McpRequest): Promise<McpDispat
 export async function respondToMcpRequest(request: McpRequest): Promise<void> {
   const dispatch = await dispatchMcpRequest(request);
   if (dispatch.ok) {
-    await mcpRespond(request.request_id, dispatch.result, null);
+    await tauri.mcpRespond(request.request_id, dispatch.result, null);
   } else {
-    await mcpRespond(request.request_id, null, dispatch.error);
+    await tauri.mcpRespond(request.request_id, null, dispatch.error);
   }
 }

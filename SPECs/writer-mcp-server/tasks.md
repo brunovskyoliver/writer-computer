@@ -87,11 +87,11 @@ description: "Task list for Writer MCP Server implementation"
 
 ### Implementation for User Story 2
 
-- [ ] T022 [US2] Implement `create_file` handler in `apps/desktop/src/lib/mcp.ts`: `tauri.createFile` (create-new semantics → `already_exists` on existing path, FR-014) then `tauri.writeFile` for content; markdown kinds (`.md`, `.markdown`) only; output `{path, relative_path, modified_at}`
-- [ ] T023 [US2] Implement `write_file` handler in `apps/desktop/src/lib/mcp.ts`: check `openFiles.get(path)?.isDirty` → `unsaved_conflict` (FR-016); `not_found` if missing; else `tauri.writeFile` then `markSaved`/`reloadFromDisk` so a clean open tab shows new content without user action (FR-017); this is the literal UI save path so `record_write`, the atomic temp write, index updates, and `sidebar:metadata-changed` behave identically (FR-018)
-- [ ] T024 [US2] Implement `create_folder` handler in `apps/desktop/src/lib/mcp.ts`: `tauri.createDirectory`; `already_exists` if present; output `{path, relative_path}` (FR-019)
-- [ ] T025 [US2] Register `create_file`, `write_file`, `create_folder` in the rmcp tool router in `apps/desktop/src-tauri/src/mcp/server.rs`: resolve workspace + path boundary in Rust (parent canonicalization for create targets), then forward to the owning window; serialization on the single JS thread per window means writes to one file can never interleave
-- [ ] T026 [US2] Add `vp test` coverage in `apps/desktop/tests/` for the webview dispatcher: dirty-conflict refusal preserves unsaved text, create-then-write ordering, unknown tool → `internal` error
+- [x] T022 [US2] Implement `create_file` handler in `apps/desktop/src/lib/mcp.ts`: `tauri.createFile` (create-new semantics → `already_exists` on existing path, FR-014) then `tauri.writeFile` for content; markdown kinds (`.md`, `.markdown`) only; output `{path, relative_path, modified_at}`
+- [x] T023 [US2] Implement `write_file` handler in `apps/desktop/src/lib/mcp.ts`: check `openFiles.get(path)?.isDirty` → `unsaved_conflict` (FR-016); `not_found` if missing; else `tauri.writeFile` then `markSaved`/`reloadFromDisk` so a clean open tab shows new content without user action (FR-017); this is the literal UI save path so `record_write`, the atomic temp write, index updates, and `sidebar:metadata-changed` behave identically (FR-018)
+- [x] T024 [US2] Implement `create_folder` handler in `apps/desktop/src/lib/mcp.ts`: `tauri.createDirectory`; `already_exists` if present; output `{path, relative_path}` (FR-019)
+- [x] T025 [US2] Register `create_file`, `write_file`, `create_folder` in the rmcp tool router in `apps/desktop/src-tauri/src/mcp/server.rs`: resolve workspace + path boundary in Rust (parent canonicalization for create targets), then forward to the owning window; serialization on the single JS thread per window means writes to one file can never interleave
+- [x] T026 [US2] Add `vp test` coverage in `apps/desktop/tests/` for the webview dispatcher: dirty-conflict refusal preserves unsaved text, create-then-write ordering, unknown tool → `internal` error
 
 **Checkpoint**: US2 fully functional — agent writes land exactly like editor saves, with the strictest refusal rules verified; verify against quickstart §4
 
