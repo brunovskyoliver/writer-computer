@@ -46,8 +46,16 @@
    would match it even if the container were added to the list). Without this,
    the spans still take `cursor: text` — that property is not contested — so the
    pointer looks like it should select and nothing does. That was the observed
-   symptom, and it is what this overrides. */
-.pdf-text-layer,
+   symptom, and it is what this overrides.
+
+   Note which elements are listed: **the spans, never the container.** The spans
+   are absolutely positioned, so most of the container's area is empty gap
+   between them. A mousedown that lands in a gap hit-tests to the container, and
+   if the container is selectable the browser anchors the caret at its offset 0
+   — the top of the page's text — so a drag beginning at the left edge of a line
+   selects everything above it. Making the spans the only selection roots means
+   a mousedown that misses text starts no selection at all, which is the correct
+   outcome. Do not add `.pdf-text-layer` to this list. */
 .pdf-text-layer span,
 .pdf-text-layer br {
   -webkit-user-select: text !important;
@@ -92,21 +100,4 @@
 
 .pdf-text-layer br::selection {
   background: transparent;
-}
-
-/* pdf.js grows this sentinel to the full height of the layer while a drag is in
-   progress, so dragging past the last line keeps extending the selection
-   instead of snapping back. It must never be selectable itself. */
-.pdf-text-layer .endOfContent {
-  display: block;
-  position: absolute;
-  inset: 100% 0 0;
-  z-index: 0;
-  cursor: default;
-  -webkit-user-select: none !important;
-  user-select: none !important;
-}
-
-.pdf-text-layer.selecting .endOfContent {
-  top: 0;
 }

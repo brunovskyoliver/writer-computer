@@ -29,12 +29,20 @@ export interface PdfQuoteCapture {
   top: number;
   width: number;
   height: number;
+  /** How bright the page is where the button will sit, sampled from the
+   *  rendered canvas. A PDF page is not always white — figures, dark plates
+   *  and slide decks are common — so the button's colours are derived from the
+   *  paper rather than assumed. */
+  onDarkPage: boolean;
 }
 
 /** Space between the selection and the button. */
-const OFFSET = 8;
-/** Enough room above the selection to sit there rather than below it. */
-const BUTTON_HEIGHT = 28;
+export const QUOTE_BUTTON_OFFSET = 8;
+/** Enough room above the selection to sit there rather than below it. Exported
+ *  because `pdf-pane.tsx` samples the page's brightness over exactly the area
+ *  the button will occupy; if the two numbers drift, it samples the wrong
+ *  pixels and the button can invert against the paper it is not on. */
+export const QUOTE_BUTTON_HEIGHT = 28;
 
 /**
  * The note the quote lands in: the **active tab of a visible pane**, not any
@@ -157,8 +165,19 @@ export function PdfQuoteButton({
   // Positioned in the scroll container's content coordinates, so it tracks the
   // selection through a scroll with no scroll handler at all. It is absolutely
   // placed and so shifts nothing else in the layout (scenario 2.1).
-  const above = capture.top >= BUTTON_HEIGHT + OFFSET;
-  const top = above ? capture.top - BUTTON_HEIGHT - OFFSET : capture.top + capture.height + OFFSET;
+  const above = capture.top >= QUOTE_BUTTON_HEIGHT + QUOTE_BUTTON_OFFSET;
+  const top = above
+    ? capture.top - QUOTE_BUTTON_HEIGHT - QUOTE_BUTTON_OFFSET
+    : capture.top + capture.height + QUOTE_BUTTON_OFFSET;
+
+  // Taken from the paper, not from the app theme. The previous version used
+  // `--surface-card`, which is near-white in light mode and so vanished against
+  // a white page — the button was there, just invisible. Inverting against the
+  // sampled page keeps it legible on white paper, on a dark figure, and on a
+  // slide deck, and it stays correct when the app theme changes because it
+  // never depended on the theme.
+  const ink = capture.onDarkPage ? "#ffffff" : "#1a1a1a";
+  const paper = capture.onDarkPage ? "rgba(20, 20, 20, 0.92)" : "rgba(255, 255, 255, 0.94)";
 
   return (
     <button
@@ -169,14 +188,14 @@ export function PdfQuoteButton({
       onClick={() => {
         if (insertQuote(capture, pdfPath, pdfTabId)) onQuoted();
       }}
-      className="absolute z-20 flex h-[24px] cursor-pointer items-center rounded-md border-0 px-2 text-[12px]"
+      className="absolute z-20 flex h-[24px] cursor-pointer items-center rounded-md px-2 text-[12px] font-medium"
       style={{
         left: capture.left,
         top,
-        background: "var(--surface-card)",
-        border: "1px solid var(--line-subtler)",
-        boxShadow: "0 4px 12px rgba(0, 0, 0, 0.18)",
-        color: "var(--text-secondary)",
+        background: paper,
+        border: `1px solid ${ink}`,
+        boxShadow: "0 2px 8px rgba(0, 0, 0, 0.28)",
+        color: ink,
       }}
     >
       Quote
