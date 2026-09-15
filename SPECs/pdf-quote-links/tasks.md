@@ -321,6 +321,36 @@ before the `pdf` kind is added.
   spans already sit exactly over their glyphs at every scale, so the emphasis
   follows a zoom change for free and there is no second geometry to keep in step
   with `--total-scale-factor`.
+- **The first version of this did not work at runtime, and the reason was the
+  match, not the plumbing.** Two readings of one PDF page disagree about
+  whitespace in a way collapsing cannot fix: `getTextContent()` yields items a
+  caller joins with a space, while a DOM selection over the text layer
+  concatenates the same items' spans with **nothing**, because they are inline
+  elements with no whitespace between them in the markup. Items split mid-line
+  for ordinary reasons (a font change, a ligature), so the hint captured from a
+  selection — `"Thequoted passage"` — was searched for in `"The quoted
+passage"` and never found. Every quote link therefore reported "no longer in
+  this PDF", scrolled to the page top at best, and highlighted nothing, which
+  read as "the jump does nothing". `compactPageText` (whitespace removed
+  entirely) is now the comparison form on all three sides — re-find needle,
+  re-find haystack, highlight span scan — which makes the comparison exact on
+  the characters that carry meaning instead of fuzzy. Regression test in
+  `tests/pdf-anchor.test.ts`.
+- **The blockquote is the click target, not the link line under it**
+  (`components/editor-area/pdf-quote-block.ts`). The file on disk is unchanged —
+  the contract still owns the shape and the `[[…]]` line still works and is
+  still what another editor sees — but the passage is what the reader is looking
+  at, and the link below it is bookkeeping. The block stays editable: while the
+  caret or a selection is inside it, clicks behave normally and no jump fires,
+  which is the same "unfold for editing" rule the wiki-link widget uses. Only a
+  line that is _nothing but_ a wiki link counts as the citation, so a sentence
+  mentioning a PDF does not turn the paragraph above it into a button.
+- **Landing centres on the passage when the jump travelled.** The pane can only
+  scroll to a _page_ — it cannot know where on it the quote sits until the spans
+  exist — so the reveal is two steps: page, then the first hit span. That span
+  uses `center` when the pane had to move and `nearest` when the page was
+  already in view, which keeps FR-024 while fixing "it doesn't scroll to the
+  position".
 - **Two searches, one joining rule.** `refindPassage` searches
   `getTextContent().items.map(str).join(" ")`; the highlight searches the
   rendered spans' normalized text joined with `" "`. The agreement rests on

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import { acquirePdf, pdfjsTextLayer, releasePdf, type PdfLoadError } from "@/lib/pdf";
 import {
+  compactPageText,
   normalizePageText,
   parseAnchorFragment,
   refindPassage,
@@ -141,16 +142,17 @@ function captureSelection(content: HTMLElement): PdfQuoteCapture | null {
  * The text layer spans a passage covers, or an empty array if it is not on
  * this page.
  *
- * Matching is at **span granularity**: the haystack is each span's normalized
- * text joined with a single space, and every span overlapping the match is
- * marked whole. That over-marks by at most a partial span at each end, and it
- * avoids mapping a normalized offset back onto un-normalized DOM text — which
- * is the part that would silently go wrong.
+ * Matching is at **span granularity**: the haystack is each span's text in
+ * `compactPageText` form, and every span overlapping the match is marked whole.
+ * That over-marks by at most a partial span at each end, and it avoids mapping
+ * an offset back onto un-compacted DOM text — which is the part that would
+ * silently go wrong.
  *
- * The joining rule has to match `pageText` below, because `refindPassage`
- * searches that string and this one searches these spans: if the two joined
- * differently, a passage could be reported found on a page where the highlight
- * then finds nothing.
+ * Compacted, not joined with spaces: these spans are exactly the items
+ * `refindPassage` searched through `getTextContent`, but a span carries no
+ * whitespace between it and the next one. Comparing with whitespace removed is
+ * the only form in which the two readings of a page agree — see
+ * `compactPageText`.
  *
  * `.markedContent` spans are containers (`display: contents`) holding the real
  * text spans, so including them would count their contents twice.
@@ -159,9 +161,8 @@ function spansCovering(container: HTMLElement, needle: string): HTMLElement[] {
   const parts: { span: HTMLElement; start: number; end: number }[] = [];
   let haystack = "";
   for (const span of container.querySelectorAll<HTMLElement>("span:not(.markedContent)")) {
-    const text = normalizePageText(span.textContent ?? "");
+    const text = compactPageText(span.textContent ?? "");
     if (!text) continue;
-    if (haystack) haystack += " ";
     const start = haystack.length;
     haystack += text;
     parts.push({ span, start, end: haystack.length });
@@ -173,8 +174,9 @@ function spansCovering(container: HTMLElement, needle: string): HTMLElement[] {
   return parts.filter((part) => part.start < until && part.end > at).map((part) => part.span);
 }
 
-/** A page's text, extracted in the pdf.js worker. Joined the same way
- *  `spansCovering` joins spans — see the note there. */
+/** A page's text, extracted in the pdf.js worker. The joiner is irrelevant:
+ *  both this string and the spans it is compared against go through
+ *  `compactPageText`, which is the only form the two readings agree in. */
 async function pageText(doc: PDFDocumentProxy, pageNumber: number): Promise<string> {
   const content = await (await doc.getPage(pageNumber)).getTextContent();
   return content.items.map((item) => ("str" in item ? item.str : "")).join(" ");
@@ -199,6 +201,7 @@ function PdfPageCanvas({
   scale,
   onMeasure,
   highlight,
+  highlightAlign,
   onHighlightMissed,
 }: {
   doc: PDFDocumentProxy;
@@ -207,6 +210,8 @@ function PdfPageCanvas({
   onMeasure: (pageNumber: number, size: PageSize) => void;
   /** The passage to emphasise on this page, or null. */
   highlight: string | null;
+  /** How to bring it into view once found. */
+  highlightAlign: ScrollLogicalPosition;
   onHighlightMissed: () => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -312,14 +317,15 @@ function PdfPageCanvas({
     missedRef.current = null;
 
     for (const span of hits) span.classList.add("pdf-hit");
-    // `nearest` is the FR-024 rule at span granularity: a passage already in
-    // view is re-emphasised where it is, and only one that is off-screen moves
-    // the page.
-    hits[0]?.scrollIntoView({ block: "nearest" });
+    // The second half of the reveal, and the one that actually lands on the
+    // quote: the pane can only scroll to a page, because it has no idea where
+    // on that page the passage sits until the spans exist. `nearest` is the
+    // FR-024 case — already in view, re-emphasised where it is.
+    hits[0]?.scrollIntoView({ block: highlightAlign, inline: "nearest" });
     return () => {
       for (const span of hits) span.classList.remove("pdf-hit");
     };
-  }, [highlight, textVersion, onHighlightMissed]);
+  }, [highlight, highlightAlign, textVersion, onHighlightMissed]);
 
   return (
     <div className="relative">
@@ -546,7 +552,11 @@ export function PdfPane({
   /** The passage this pane is emphasising, and the page it is on. Cleared by
    *  the fade timer below, so a highlight is a moment, not a state the
    *  document stays in. */
-  const [highlight, setHighlight] = useState<{ page: number; text: string } | null>(null);
+  const [highlight, setHighlight] = useState<{
+    page: number;
+    text: string;
+    align: ScrollLogicalPosition;
+  } | null>(null);
   const pendingFragment = usePdfAnchorStore((store) => store.requests[tabId]);
 
   /**
@@ -556,18 +566,23 @@ export function PdfPane({
    * page, because an anchor near a page boundary is genuinely visible from
    * either side and jerking the document to a page top the user is already
    * reading is the thing the requirement rules out.
+   *
+   * Reports whether it moved, which decides how the passage itself is then
+   * brought in: a page we jumped to centres on the quote, a page already under
+   * the reader's eyes only nudges.
    */
   const revealPage = useCallback(
     (page: number) => {
       const container = scrollRef.current;
-      if (!container || !offsets) return;
+      if (!container || !offsets) return false;
       const clamped = Math.min(Math.max(page, 1), pageCount);
       const top = offsets[clamped - 1]!;
       const bottom = offsets[clamped]!;
       const viewTop = container.scrollTop;
       const onScreen = Math.min(bottom, viewTop + container.clientHeight) - Math.max(top, viewTop);
-      if (onScreen >= Math.min(container.clientHeight, bottom - top) * 0.5) return;
+      if (onScreen >= Math.min(container.clientHeight, bottom - top) * 0.5) return false;
       container.scrollTop = top;
+      return true;
     },
     [offsets, pageCount],
   );
@@ -615,8 +630,16 @@ export function PdfPane({
         );
         if (cancelled) return;
         if (found.kind === "found") {
-          revealPage(found.page);
-          setHighlight({ page: found.page, text: found.text });
+          // Centre the passage when we had to travel to it — landing on the
+          // page top and leaving the quote somewhere below the fold is the
+          // "it didn't scroll to it" complaint. A page already in view is
+          // nudged at most, per FR-024.
+          const jumped = revealPage(found.page);
+          setHighlight({
+            page: found.page,
+            text: found.text,
+            align: jumped ? "center" : "nearest",
+          });
           return;
         }
         showEditorNotice("The quoted passage is no longer in this PDF.", tabId);
@@ -704,6 +727,7 @@ export function PdfPane({
                         scale={scale}
                         onMeasure={onMeasure}
                         highlight={highlight?.page === index + 1 ? highlight.text : null}
+                        highlightAlign={highlight?.align ?? "nearest"}
                         onHighlightMissed={reportHighlightMissed}
                       />
                     </div>

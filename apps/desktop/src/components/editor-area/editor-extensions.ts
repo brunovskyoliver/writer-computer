@@ -38,6 +38,7 @@ import { tableDecorations } from "./table-decorations";
 import { viewportParsePlugin } from "./viewport-parse";
 import { vimModeExtension } from "./vim-mode";
 import { wikiLinkExtension } from "./wiki-link-extension";
+import { pdfQuoteBlockExtension } from "./pdf-quote-block";
 
 // Focus the editor when its pane is revealed (tab switch). Panes hide via an
 // `invisible` class, so watch for that flipping off.
@@ -221,6 +222,7 @@ export function createEditorExtensions(
     headingDecorations,
     imageSrcResolver(getFilePath),
     wikiLinkExtension(getFilePath, isDisposed),
+    pdfQuoteBlockExtension(getFilePath, isDisposed),
     markdownFormatting,
     storeSyncExtension(getFilePath, getTabId),
     editorClipboardExtension(getFilePath, isDisposed),

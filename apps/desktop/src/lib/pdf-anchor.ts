@@ -201,9 +201,39 @@ export function normalizePageText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
+/**
+ * The form two readings of the same page can be compared in: all whitespace
+ * removed.
+ *
+ * pdf.js hands the same page back with **different spacing depending on how it
+ * is read**, and the difference is not noise we can collapse — it is missing
+ * characters:
+ *
+ * - `getTextContent()` yields positioned items, which a caller joins with a
+ *   space. A line made of three items reads `"the quoted passage"`.
+ * - A DOM selection over the text layer concatenates those same items' spans
+ *   with **nothing** between them, because they are inline elements with no
+ *   whitespace in the markup. The same line reads `"thequotedpassage"`.
+ *
+ * Items split mid-line for ordinary reasons — a font change, a ligature, a
+ * kerning jump — so any passage crossing an item boundary would never match
+ * itself. Collapsing runs (`normalizePageText`) cannot fix that: there is no
+ * whitespace on one side to collapse.
+ *
+ * Removing whitespace entirely is what makes the comparison *exact* on the
+ * characters that carry meaning, rather than fuzzy. It is only ever the
+ * comparison form — the quoted text stored in the note stays
+ * `normalizePageText`'d and readable.
+ */
+export function compactPageText(text: string): string {
+  return text.replace(/\s+/g, "");
+}
+
 export type RefindResult =
-  | { kind: "found"; page: number; index: number; text: string }
-  | { kind: "not-located" };
+  /** `index` and `text` are in **compacted** space (`compactPageText`), which
+   *  is the only space the two readings of a page agree in. A caller that
+   *  highlights must compact its own haystack the same way. */
+  { kind: "found"; page: number; index: number; text: string } | { kind: "not-located" };
 
 /**
  * Look for `text` on the recorded page, then outward one page at a time to
@@ -220,7 +250,7 @@ export async function refindPassage(
   pageCount: number,
   getPageText: (page: number) => Promise<string>,
 ): Promise<RefindResult> {
-  const needle = normalizePageText(text);
+  const needle = compactPageText(text);
   if (!needle) return { kind: "not-located" };
 
   const candidates: number[] = [recordedPage];
@@ -230,7 +260,7 @@ export async function refindPassage(
 
   for (const page of candidates) {
     if (page < 1 || page > pageCount) continue;
-    const haystack = normalizePageText(await getPageText(page));
+    const haystack = compactPageText(await getPageText(page));
     const index = haystack.indexOf(needle);
     if (index !== -1) return { kind: "found", page, index, text: needle };
   }

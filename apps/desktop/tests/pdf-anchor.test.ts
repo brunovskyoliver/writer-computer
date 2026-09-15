@@ -147,6 +147,20 @@ describe("refindPassage", () => {
     });
   });
 
+  // The regression this exists for: the two readings of one page disagree on
+  // whitespace. A DOM selection over the text layer glues adjacent items
+  // together ("thequoted"), while `getTextContent` joins them with a space.
+  // Comparing on collapsed whitespace made every multi-item passage unfindable,
+  // so a quote link jumped nowhere and highlighted nothing.
+  test("matches a selection that glued two items against space-joined page text", async () => {
+    const asSelected = "Thequoted passage lives here";
+    const asExtracted = async () => "The quoted passage lives here";
+    expect(await refindPassage(asSelected, 1, 1, asExtracted)).toMatchObject({
+      kind: "found",
+      page: 1,
+    });
+  });
+
   test("a passage that shifted one page is found nearest-first", async () => {
     const shifted = new Map([
       [5, "the quoted passage"],
