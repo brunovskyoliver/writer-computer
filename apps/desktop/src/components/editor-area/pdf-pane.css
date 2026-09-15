@@ -123,3 +123,19 @@
 .pdf-text-layer.selecting .endOfContent {
   top: 0;
 }
+
+/* A quote link's highlight (FR-022). The text layer's spans already sit exactly
+   over their glyphs at every zoom, so emphasis is a background on the spans
+   themselves rather than an overlay with its own geometry to keep in step.
+
+   The transition is declared on the span, not the highlight class, so removing
+   the class fades the emphasis out instead of cutting it — which is what makes
+   the highlight temporary rather than a mark the page keeps (FR-023). */
+.pdf-text-layer span {
+  transition: background-color 600ms ease-out;
+}
+
+.pdf-text-layer span.pdf-hit {
+  background-color: color-mix(in srgb, var(--accent) 38%, transparent);
+  border-radius: 2px;
+}

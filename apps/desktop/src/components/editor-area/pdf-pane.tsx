@@ -1,8 +1,15 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import { acquirePdf, pdfjsTextLayer, releasePdf, type PdfLoadError } from "@/lib/pdf";
-import { normalizePageText, textAnchor } from "@/lib/pdf-anchor";
+import {
+  normalizePageText,
+  parseAnchorFragment,
+  refindPassage,
+  textAnchor,
+} from "@/lib/pdf-anchor";
 import { useEditorStore } from "@/stores/editor-store";
+import { usePdfAnchorStore } from "@/stores/pdf-anchor-store";
+import { showEditorNotice } from "./editor-notice-store";
 import { PdfQuoteButton, type PdfQuoteCapture } from "./pdf-quote-button";
 import type { PdfLocation } from "./page-kinds/pdf";
 import { bindTextLayerSelection } from "./pdf-text-selection";
@@ -32,6 +39,10 @@ const PAGE_SETTLE_MS = 400;
 
 /** Rejections that mean "you scrolled away", not "this page is broken". */
 const CANCEL_ERRORS = new Set(["RenderingCancelledException", "AbortException"]);
+
+/** How long a quote highlight holds before it fades out, leaving the page
+ *  readable (FR-023). */
+const HIGHLIGHT_LINGER_MS = 2600;
 
 const ZOOM_STEP = 0.2;
 const ZOOM_MIN = 0.4;
@@ -127,6 +138,49 @@ function captureSelection(content: HTMLElement): PdfQuoteCapture | null {
 }
 
 /**
+ * The text layer spans a passage covers, or an empty array if it is not on
+ * this page.
+ *
+ * Matching is at **span granularity**: the haystack is each span's normalized
+ * text joined with a single space, and every span overlapping the match is
+ * marked whole. That over-marks by at most a partial span at each end, and it
+ * avoids mapping a normalized offset back onto un-normalized DOM text — which
+ * is the part that would silently go wrong.
+ *
+ * The joining rule has to match `pageText` below, because `refindPassage`
+ * searches that string and this one searches these spans: if the two joined
+ * differently, a passage could be reported found on a page where the highlight
+ * then finds nothing.
+ *
+ * `.markedContent` spans are containers (`display: contents`) holding the real
+ * text spans, so including them would count their contents twice.
+ */
+function spansCovering(container: HTMLElement, needle: string): HTMLElement[] {
+  const parts: { span: HTMLElement; start: number; end: number }[] = [];
+  let haystack = "";
+  for (const span of container.querySelectorAll<HTMLElement>("span:not(.markedContent)")) {
+    const text = normalizePageText(span.textContent ?? "");
+    if (!text) continue;
+    if (haystack) haystack += " ";
+    const start = haystack.length;
+    haystack += text;
+    parts.push({ span, start, end: haystack.length });
+  }
+
+  const at = haystack.indexOf(needle);
+  if (at === -1) return [];
+  const until = at + needle.length;
+  return parts.filter((part) => part.start < until && part.end > at).map((part) => part.span);
+}
+
+/** A page's text, extracted in the pdf.js worker. Joined the same way
+ *  `spansCovering` joins spans — see the note there. */
+async function pageText(doc: PDFDocumentProxy, pageNumber: number): Promise<string> {
+  const content = await (await doc.getPage(pageNumber)).getTextContent();
+  return content.items.map((item) => ("str" in item ? item.str : "")).join(" ");
+}
+
+/**
  * One rasterized page, with pdf.js's invisible text layer over it.
  *
  * Mounted only while inside the render window, so unmounting is what releases
@@ -144,14 +198,22 @@ function PdfPageCanvas({
   pageNumber,
   scale,
   onMeasure,
+  highlight,
+  onHighlightMissed,
 }: {
   doc: PDFDocumentProxy;
   pageNumber: number;
   scale: number;
   onMeasure: (pageNumber: number, size: PageSize) => void;
+  /** The passage to emphasise on this page, or null. */
+  highlight: string | null;
+  onHighlightMissed: () => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const textRef = useRef<HTMLDivElement | null>(null);
+  // Bumped when the text layer finishes building. The highlight cannot be
+  // applied before there are spans to apply it to, and a zoom rebuilds them.
+  const [textVersion, setTextVersion] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -197,7 +259,10 @@ function PdfPageCanvas({
         await layer.render();
         // Bound only after the spans exist: the sentinel it appends has to be
         // the last child of the layer to start parked below the page.
-        if (!cancelled) unbindSelection = bindTextLayerSelection(textContainer);
+        if (!cancelled) {
+          unbindSelection = bindTextLayerSelection(textContainer);
+          setTextVersion((version) => version + 1);
+        }
       }
 
       await task.promise;
@@ -224,6 +289,37 @@ function PdfPageCanvas({
       textContainer?.replaceChildren();
     };
   }, [doc, pageNumber, scale, onMeasure]);
+
+  // Emphasise the quoted passage once the spans exist (FR-022). Marking is a
+  // class on existing spans rather than an overlay: the spans already sit
+  // exactly over their glyphs at any zoom, so the highlight follows a zoom
+  // change for free and there is no second geometry to keep in step.
+  const missedRef = useRef<string | null>(null);
+  useEffect(() => {
+    const container = textRef.current;
+    if (!container || !highlight || textVersion === 0) return;
+
+    const hits = spansCovering(container, highlight);
+    if (hits.length === 0) {
+      // Report once per passage, not once per re-render: a zoom rebuilds the
+      // layer and would otherwise re-announce the same failure.
+      if (missedRef.current !== highlight) {
+        missedRef.current = highlight;
+        onHighlightMissed();
+      }
+      return;
+    }
+    missedRef.current = null;
+
+    for (const span of hits) span.classList.add("pdf-hit");
+    // `nearest` is the FR-024 rule at span granularity: a passage already in
+    // view is re-emphasised where it is, and only one that is off-screen moves
+    // the page.
+    hits[0]?.scrollIntoView({ block: "nearest" });
+    return () => {
+      for (const span of hits) span.classList.remove("pdf-hit");
+    };
+  }, [highlight, textVersion, onHighlightMissed]);
 
   return (
     <div className="relative">
@@ -445,6 +541,101 @@ export function PdfPane({
     [offsets, pageCount],
   );
 
+  // --- arriving from a quote link (FR-021–FR-026) --------------------------
+
+  /** The passage this pane is emphasising, and the page it is on. Cleared by
+   *  the fade timer below, so a highlight is a moment, not a state the
+   *  document stays in. */
+  const [highlight, setHighlight] = useState<{ page: number; text: string } | null>(null);
+  const pendingFragment = usePdfAnchorStore((store) => store.requests[tabId]);
+
+  /**
+   * Bring `page` into view, or leave the scroll alone if it is already
+   * substantially on screen — FR-024's "re-emphasise without scrolling". The
+   * test is overlap with the viewport rather than equality with the current
+   * page, because an anchor near a page boundary is genuinely visible from
+   * either side and jerking the document to a page top the user is already
+   * reading is the thing the requirement rules out.
+   */
+  const revealPage = useCallback(
+    (page: number) => {
+      const container = scrollRef.current;
+      if (!container || !offsets) return;
+      const clamped = Math.min(Math.max(page, 1), pageCount);
+      const top = offsets[clamped - 1]!;
+      const bottom = offsets[clamped]!;
+      const viewTop = container.scrollTop;
+      const onScreen = Math.min(bottom, viewTop + container.clientHeight) - Math.max(top, viewTop);
+      if (onScreen >= Math.min(container.clientHeight, bottom - top) * 0.5) return;
+      container.scrollTop = top;
+    },
+    [offsets, pageCount],
+  );
+
+  const reportHighlightMissed = useCallback(() => {
+    // FR-025: say the passage was not found rather than highlighting something
+    // near it. Reached when the re-find matched a page but the rendered spans
+    // do not — a page whose text extraction and text layer disagree.
+    showEditorNotice("The quoted passage could not be located on this page.", tabId);
+  }, [tabId]);
+
+  const doc = state.status === "ready" ? state.doc : null;
+  useEffect(() => {
+    if (pendingFragment === undefined || !doc || !offsets) return;
+    // Consumed here, not in the store's selector: an anchor is honoured once,
+    // and a later zoom or re-render must not replay the jump.
+    const fragment = usePdfAnchorStore.getState().consumePdfAnchor(tabId);
+    if (fragment === null) return;
+
+    let cancelled = false;
+    void (async () => {
+      const parsed = parseAnchorFragment(fragment);
+      const recorded = parsed.kind === "anchor" ? parsed.anchor.page : parsed.page;
+      let page = recorded;
+      if (recorded > pageCount) {
+        // A PDF that lost pages since the quote was taken. Say so and open at
+        // the last page rather than silently landing somewhere plausible.
+        showEditorNotice(
+          `This quote points at page ${recorded}, but the PDF now ends at page ${pageCount}.`,
+          tabId,
+        );
+        page = pageCount;
+      }
+
+      if (parsed.kind === "anchor" && parsed.anchor.kind === "text") {
+        const found = await refindPassage(parsed.anchor.text, page, pageCount, (target) =>
+          pageText(doc, target),
+        );
+        if (cancelled) return;
+        if (found.kind === "found") {
+          revealPage(found.page);
+          setHighlight({ page: found.page, text: found.text });
+          return;
+        }
+        showEditorNotice("The quoted passage is no longer in this PDF.", tabId);
+      }
+
+      // Everything else lands on the recorded page with nothing highlighted: a
+      // plain page link, an unreadable fragment, a passage that could not be
+      // re-found, and a region anchor (whose painting is T035's, in US4).
+      if (cancelled) return;
+      revealPage(page);
+      setHighlight(null);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [pendingFragment, doc, offsets, pageCount, revealPage, tabId]);
+
+  // The highlight is temporary emphasis, not a mark on the document (FR-023):
+  // it fades out on its own and the page is left readable.
+  useEffect(() => {
+    if (!highlight) return;
+    const timer = setTimeout(() => setHighlight(null), HIGHLIGHT_LINGER_MS);
+    return () => clearTimeout(timer);
+  }, [highlight]);
+
   return (
     // Matches `DrawingPane`: the tab is `keepAlive`, and `display: none` (not
     // `visibility`) is what stops a background viewer painting over the active
@@ -504,6 +695,8 @@ export function PdfPane({
                         pageNumber={index + 1}
                         scale={scale}
                         onMeasure={onMeasure}
+                        highlight={highlight?.page === index + 1 ? highlight.text : null}
+                        onHighlightMissed={reportHighlightMissed}
                       />
                     </div>
                   );

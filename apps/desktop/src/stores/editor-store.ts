@@ -27,6 +27,8 @@ import {
   layoutTabIds,
   normalizeLayout,
   paneOfTab,
+  panes,
+  splitPaneWithTab,
   removeTab as removeTabFromLayout,
   removeTabs as removeTabsFromLayout,
   setFocusedPane as focusPaneInLayout,
@@ -35,6 +37,7 @@ import {
   type Layout,
 } from "@/lib/editor-layout";
 import { locationBehavior, type Location } from "@/components/editor-area/page-kinds";
+import { requestPdfAnchor } from "./pdf-anchor-store";
 
 export interface OpenFile {
   path: string;
@@ -118,6 +121,10 @@ interface EditorState {
   setActiveFile: (path: string) => void;
   setActiveTab: (tabId: string) => void;
   setPdfPage: (tabId: string, page: number) => void;
+  /** Reveal `path` in this window and queue `fragment` for the tab that ends
+   *  up showing it (FR-021). The caller has already established the file
+   *  exists. */
+  revealPdfAnchor: (path: string, fragment: string, fromTabId: string | null) => void;
   setFocusedPane: (paneId: string) => void;
   /** Commit a finished divider drag. The resize library owns the live
    *  gesture; only the final ratio is layout state. */
@@ -844,6 +851,75 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         state.layout,
       ),
     );
+  },
+
+  /**
+   * Follow a quote link to its PDF (FR-021), in **this window only**
+   * (FR-028) — a PDF open in another window is not a reason to leave the note
+   * the user clicked in.
+   *
+   * The order is the requirement's, and each step is a weaker claim than the
+   * one above it:
+   *
+   * 1. A pane already *showing* the PDF is the answer — reuse it, open no tab,
+   *    make no split, and **take no focus**: the view is already visible, so
+   *    the only thing left to do is anchor it, and moving focus out of the
+   *    note would cost the caret for nothing.
+   * 2. A background tab holding it is activated in place.
+   * 3. Otherwise it opens in a split beside the note, so the quote and its
+   *    source are visible together — which is the point of the round trip.
+   *
+   * The anchor is queued *before* the layout mutation in every branch: a pane
+   * mounting in the same commit must already find it, or the first arrival at
+   * a freshly opened PDF would silently never scroll.
+   *
+   * The file's existence is the caller's precondition (the link resolver
+   * probed for it), so no stale link reaches this and no empty viewer is
+   * created for one.
+   */
+  revealPdfAnchor: (path: string, fragment: string, fromTabId: string | null) => {
+    const state = get();
+    const isTarget = (tabId: string | null) => {
+      const tab = tabId ? state.tabs.find((candidate) => candidate.id === tabId) : null;
+      return tab?.location.kind === "pdf" && tab.location.path === path;
+    };
+    const allPanes = panes(state.layout);
+
+    const showing = allPanes.find((pane) => isTarget(pane.activeTabId));
+    if (showing?.activeTabId) {
+      requestPdfAnchor(showing.activeTabId, fragment);
+      return;
+    }
+
+    for (const pane of allPanes) {
+      const backgroundTabId = pane.tabIds.find((tabId) => isTarget(tabId));
+      if (backgroundTabId) {
+        requestPdfAnchor(backgroundTabId, fragment);
+        set((current) =>
+          publish(current.tabs, activateTabInLayout(current.layout, backgroundTabId)),
+        );
+        return;
+      }
+    }
+
+    const tab = createFileTab(path);
+    requestPdfAnchor(tab.id, fragment);
+    set((current) => {
+      // The pane the link was clicked in, falling back to focus if it has gone
+      // (the same rule `appendTab` uses). An unknown pane id would make
+      // `insertTab` a no-op and `publish` then drop the tab entirely.
+      const origin = fromTabId ? paneOfTab(current.layout, fromTabId) : null;
+      const notePaneId =
+        origin && findPane(current.layout, origin.id) ? origin.id : current.layout.focusedPaneId;
+      // Two steps because `splitPaneWithTab` moves a tab the layout already
+      // owns: it is the app's one "open beside this" transition, and reusing it
+      // keeps split geometry and focus rules in a single place.
+      const withTab = insertTab(current.layout, notePaneId, tab.id);
+      return publish(
+        [...current.tabs, tab],
+        splitPaneWithTab(withTab, notePaneId, "x", "after", tab.id),
+      );
+    });
   },
 
   // Focus follows the pane, and the active file follows focus. Selecting a

@@ -19,6 +19,9 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import * as tauri from "@/lib/tauri";
 import { getFileStem } from "@/lib/paths";
 import { isDrawingPath } from "@/lib/drawings";
+import { isPdfPath } from "@/lib/pdf";
+import { useEditorStore } from "@/stores/editor-store";
+import { showEditorNotice } from "./editor-notice-store";
 import { getWorkspaceRoot } from "@/hooks/workspace-api";
 import * as editorApi from "@/hooks/editor-api";
 import {
@@ -27,6 +30,7 @@ import {
   parseWikiImageEmbedTarget,
   resolveWikiImage,
   resolveWikiLink,
+  resolveWikiPdf,
 } from "@/lib/wiki-links";
 import { attachStableImageHeight } from "@/lib/prosemark-core/fold/image";
 import { getEffectiveSelectionRanges } from "./drag-selection-gate";
@@ -392,6 +396,38 @@ export interface EditorOpenOrigin {
   isDisposed: () => boolean;
 }
 
+/**
+ * Follow a quote link back to its PDF (FR-021, FR-026).
+ *
+ * The existence probe is the resolution itself: `resolveWikiPdf` returns a path
+ * only for a file that is there. That is why the store's reveal needs no second
+ * check — a link to a PDF that has been moved or deleted reports the target it
+ * could not find and opens nothing, rather than producing an empty viewer.
+ */
+async function followPdfQuoteLink(
+  link: ReturnType<typeof parseWikiLink>,
+  origin: EditorOpenOrigin,
+  deps: { fileExists: typeof tauri.fileExists },
+): Promise<void> {
+  const path = await resolveWikiPdf(
+    link.path,
+    origin.workspaceRoot,
+    origin.filePath,
+    deps.fileExists,
+    tauri.findFileByName,
+  );
+  if (origin.isDisposed()) return;
+  if (!path) {
+    showEditorNotice(`Can't find "${link.path}" in this workspace.`, origin.tabId);
+    return;
+  }
+  // The fragment is passed through as written. Parsing it is the viewer's job:
+  // `lib/pdf-anchor.ts` is the one place that reads the grammar, and the
+  // failure modes (unreadable fragment, page past the end, passage not found)
+  // are all things only the loaded document can decide.
+  useEditorStore.getState().revealPdfAnchor(path, link.fragment ?? "", origin.tabId);
+}
+
 /** Resolve a wiki target and navigate the originating tab to it. */
 export async function followWikiLink(
   rawTarget: string,
@@ -402,6 +438,18 @@ export async function followWikiLink(
   } = tauri,
 ): Promise<void> {
   if (!origin.workspaceRoot) return;
+
+  // A `.pdf` target is a quote link, not a note link: it resolves with its
+  // extension intact and carries an anchor fragment the viewer honours, so it
+  // leaves the Markdown resolution path entirely (T025). The alias/fragment
+  // split is `parseWikiLink`'s, unchanged — only what happens to the two
+  // halves differs.
+  const link = parseWikiLink(rawTarget);
+  if (isPdfPath(link.path)) {
+    await followPdfQuoteLink(link, origin, deps);
+    return;
+  }
+
   const result = await resolveWikiLink(
     rawTarget,
     origin.workspaceRoot,

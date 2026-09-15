@@ -186,6 +186,34 @@ export async function resolveWikiImage(
 }
 
 /**
+ * Resolve a `.pdf` wiki-link target to an absolute path, or null.
+ *
+ * Separate from `resolveWikiLink` on purpose: that function's contract is
+ * Markdown notes, and it gets there by stripping the extension
+ * (`normalizeWikiTarget`) and then probing `.md`/`.markdown` or falling back to
+ * a fuzzy-index stem lookup. None of that can find a PDF — the fuzzy index is
+ * Markdown-only (research.md R3) — so a `.pdf` target has to keep its
+ * extension and resolve by direct probing instead.
+ *
+ * The probing rule (workspace-relative first for a path, note-dir then root
+ * then a basename search for a bare filename) is identical to an image embed's
+ * and lives in `resolveWikiImage`; this delegates rather than restating it.
+ * Pass the target with its extension intact — `parseWikiLink().path` already
+ * leaves `.pdf` alone.
+ */
+export async function resolveWikiPdf(
+  target: string,
+  workspaceRoot: string | null,
+  currentFilePath: string | null,
+  fileExists: (path: string) => Promise<boolean>,
+  findFileByName: (root: string, fileName: string) => Promise<string | null>,
+): Promise<string | null> {
+  const normalized = target.trim().replace(/\\/g, "/").replace(/^\/+/, "");
+  if (!normalized) return null;
+  return resolveWikiImage(normalized, workspaceRoot, currentFilePath, fileExists, findFileByName);
+}
+
+/**
  * Compute the canonical insertion text for a selected file.
  * Uses the shortest unambiguous form: bare stem when unique,
  * workspace-relative path (without extension) when duplicate stems exist.

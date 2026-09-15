@@ -270,14 +270,86 @@ before the `pdf` kind is added.
 
 **Depends on**: US1. Independent of US2 via a hand-written link.
 
-- [ ] T024 [US3] Add extension-preserving PDF target resolution to `apps/desktop/src/lib/wiki-links.ts`, following the `resolveWikiImage` precedent (line 154) rather than widening `resolveWikiLink`'s Markdown contract: a `.pdf` target resolves with its extension intact via a `fileExists` probe, and no `.md`/`.markdown` probing or `normalizeWikiTarget` stem-stripping is applied to it (research.md R3).
-- [ ] T025 [US3] Route `.pdf` link targets to PDF resolution in `apps/desktop/src/components/editor-area/wiki-link-extension.ts`, using the existing `parseWikiLink` alias/fragment split unchanged and handing the fragment to `lib/pdf-anchor.ts` for parsing.
-- [ ] T026 [US3] Decide and implement the pending-anchor handoff. `apps/desktop/src/lib/pending-anchor.ts` already implements a `(tabId, path) → string`, consumed-exactly-once handoff — the same shape data-model.md specifies for `PdfView.pendingAnchor`, and an encoded anchor fragment is a string. **Reuse it** rather than adding a second one-shot mechanism (Principle III, `docs/consolidation.md`); only if its key or consumption semantics genuinely do not fit should a separate store be added, and then the divergence from data-model.md must be recorded in this spec. Resolution writes the anchor; the pane consumes and clears it on mount or scroll, so resolution never needs an imperative handle on a component that may not be mounted yet.
-- [ ] T027 [US3] Implement the FR-021 resolution order in `apps/desktop/src/stores/editor-store.ts`, scoped to the current window only (FR-028). The path-existence check runs **first**, so a stale link never creates an empty viewer: if the path does not exist, report the missing path and stop (FR-026). Otherwise, in order: (a) a pane already _showing_ that PDF → reuse it, no new tab, no new split; (b) a _background tab_ in some pane holding it → activate that tab; (c) not open → open in a split beside the note using the existing `splitPaneWithTab` path in `apps/desktop/src/lib/editor-layout.ts:388`. Each case sets the pending anchor.
-- [ ] T028 [US3] Implement scroll-to-anchor and the highlight flash in `apps/desktop/src/components/editor-area/pdf-pane.tsx`: on consuming a pending anchor, scroll to the anchored page and visibly highlight the text range or region (FR-022). The highlight is temporary emphasis that fades, leaving the page readable (FR-023). When the anchor already fills the view, re-emphasise **without scrolling** (FR-024, scenario 3.4).
-- [ ] T029 [US3] Implement the anchor-failure reports in `apps/desktop/src/components/editor-area/pdf-pane.tsx` using T008's re-find: when the quoted passage cannot be located, navigate to the recorded page and report that the exact passage was not found — never highlight an arbitrary region (FR-025). When the anchored page is past the end of a shortened PDF, tell the user and open at the last page. An unreadable fragment goes to the recorded page with no highlight.
+- [x] T024 [US3] Add extension-preserving PDF target resolution to `apps/desktop/src/lib/wiki-links.ts`, following the `resolveWikiImage` precedent (line 154) rather than widening `resolveWikiLink`'s Markdown contract: a `.pdf` target resolves with its extension intact via a `fileExists` probe, and no `.md`/`.markdown` probing or `normalizeWikiTarget` stem-stripping is applied to it (research.md R3).
+- [x] T025 [US3] Route `.pdf` link targets to PDF resolution in `apps/desktop/src/components/editor-area/wiki-link-extension.ts`, using the existing `parseWikiLink` alias/fragment split unchanged and handing the fragment to `lib/pdf-anchor.ts` for parsing.
+- [x] T026 [US3] Decide and implement the pending-anchor handoff. `apps/desktop/src/lib/pending-anchor.ts` already implements a `(tabId, path) → string`, consumed-exactly-once handoff — the same shape data-model.md specifies for `PdfView.pendingAnchor`, and an encoded anchor fragment is a string. **Reuse it** rather than adding a second one-shot mechanism (Principle III, `docs/consolidation.md`); only if its key or consumption semantics genuinely do not fit should a separate store be added, and then the divergence from data-model.md must be recorded in this spec. Resolution writes the anchor; the pane consumes and clears it on mount or scroll, so resolution never needs an imperative handle on a component that may not be mounted yet.
+- [x] T027 [US3] Implement the FR-021 resolution order in `apps/desktop/src/stores/editor-store.ts`, scoped to the current window only (FR-028). The path-existence check runs **first**, so a stale link never creates an empty viewer: if the path does not exist, report the missing path and stop (FR-026). Otherwise, in order: (a) a pane already _showing_ that PDF → reuse it, no new tab, no new split; (b) a _background tab_ in some pane holding it → activate that tab; (c) not open → open in a split beside the note using the existing `splitPaneWithTab` path in `apps/desktop/src/lib/editor-layout.ts:388`. Each case sets the pending anchor.
+- [x] T028 [US3] Implement scroll-to-anchor and the highlight flash in `apps/desktop/src/components/editor-area/pdf-pane.tsx`: on consuming a pending anchor, scroll to the anchored page and visibly highlight the text range or region (FR-022). The highlight is temporary emphasis that fades, leaving the page readable (FR-023). When the anchor already fills the view, re-emphasise **without scrolling** (FR-024, scenario 3.4).
+- [x] T029 [US3] Implement the anchor-failure reports in `apps/desktop/src/components/editor-area/pdf-pane.tsx` using T008's re-find: when the quoted passage cannot be located, navigate to the recorded page and report that the exact passage was not found — never highlight an arbitrary region (FR-025). When the anchored page is past the end of a shortened PDF, tell the user and open at the last page. An unreadable fragment goes to the recorded page with no highlight.
 - [x] T030 [P] [US3] Add `apps/desktop/tests/pdf-anchor.test.ts`: anchors round-trip through the link grammar; out-of-range and malformed fragments are rejected rather than clamped into a wrong highlight; rect fractions produce the same page location across two different zoom levels.
-- [ ] T031 [P] [US3] Add `apps/desktop/tests/wiki-links-pdf.test.ts`: a `.pdf` target resolves with its extension intact, and a bare stem does not silently resolve to a note.
+- [x] T031 [P] [US3] Add `apps/desktop/tests/wiki-links-pdf.test.ts`: a `.pdf` target resolves with its extension intact, and a bare stem does not silently resolve to a note.
+
+**Phase 5 implementation notes** (landed):
+
+- **T026 resolved against the task's escape hatch: a separate store, not
+  `lib/pending-anchor.ts`.** That module is a consumed-once handoff keyed
+  `(tabId, path)` — the right _shape_ — but its consumption semantics are "read
+  at the next mount", which is all a heading anchor ever needs because following
+  one always swaps the editor's document. FR-021(a) has a case that cannot
+  reach: a pane **already showing** the target PDF never remounts, so a
+  mount-time read never fires. Bolting a subscriber set onto that module would
+  turn a handoff into a pub/sub channel for one consumer and leave the markdown
+  side carrying a notify path it ignores. `stores/pdf-anchor-store.ts` is the
+  same one-shot semantics with the one property the case needs, and the pane
+  handles mount-arrival and live-arrival through a single selector.
+  **Divergence from data-model.md's `PdfView.pendingAnchor` recorded here, as
+  T026 requires.**
+- The anchor is queued **before** the layout mutation in every branch of
+  `revealPdfAnchor`. `createFileTab` mints the id synchronously and touches no
+  store, so a pane mounting in the same commit already finds its anchor; writing
+  after the `set` would make a first arrival at a freshly opened PDF silently
+  never scroll.
+- **Case (a) takes no focus.** Reveal is not focus: the pane is already visible,
+  so anchoring it is the whole job, and moving focus out of the note would cost
+  the caret for nothing.
+- Case (c) is `insertTab` then `splitPaneWithTab`, because that transition moves
+  a tab the layout already owns. The note pane id is re-resolved _inside_ the
+  `set` with the same findPane-else-focused fallback `appendTab` uses — an
+  unknown pane makes `insertTab` a no-op, and `publish` would then drop the new
+  tab entirely rather than misplace it.
+- **T027's path-existence check is the resolution itself.** `resolveWikiPdf`
+  returns a path only for a file that is there, so the store needs no second
+  `fileExists`; a stale link reports the target it could not find and opens
+  nothing (FR-026).
+- T024 delegates to `resolveWikiImage` rather than restating its candidate
+  order: the probing rule for an attachment (workspace-relative first for a
+  path; note-dir, then root, then a basename search for a bare filename) is
+  identical, and `resolveWikiLink` cannot be widened to cover it — it gets to a
+  note by _stripping_ the extension and then probing `.md` or hitting the
+  Markdown-only fuzzy index (research.md R3).
+- **The highlight is a class on the text-layer spans, not an overlay.** The
+  spans already sit exactly over their glyphs at every scale, so the emphasis
+  follows a zoom change for free and there is no second geometry to keep in step
+  with `--total-scale-factor`.
+- **Two searches, one joining rule.** `refindPassage` searches
+  `getTextContent().items.map(str).join(" ")`; the highlight searches the
+  rendered spans' normalized text joined with `" "`. They must join identically
+  or a passage can be reported found on a page where the highlight then finds
+  nothing — a silent failure. Both go through `normalizePageText`. If the span
+  scan misses anyway, that is reported rather than swallowed: FR-025 forbids
+  highlighting an arbitrary region, so nothing is marked and the user is told.
+- The miss is reported **once per passage**, guarded by a ref: a zoom rebuilds
+  the text layer and would otherwise re-announce the same failure.
+- FR-024 is implemented twice, at two grains: the pane skips its scroll when the
+  anchored page already overlaps at least half the viewport, and the first hit
+  span uses `scrollIntoView({ block: "nearest" })`, which moves the page only if
+  the passage is actually off-screen.
+- Matching is **span-granular** — every span overlapping the match is marked
+  whole. That over-marks by at most a partial span at each end and avoids
+  mapping a whitespace-normalized offset back onto un-normalized DOM text, which
+  is the part that would go quietly wrong.
+- **Region anchors navigate to the recorded page and highlight nothing here.**
+  T035 (US4) owns region painting and specifies behaviour this phase would have
+  had to guess at ("multiplied by the _current_ viewport", no re-find, no claim
+  of correctness). Half-implementing it now would leave Phase 6 re-doing it.
+- Still open in the contract, unchanged from Phase 4: `splitFragment` splits on
+  the first `#`, so a PDF whose filename contains `#` parses to the wrong path.
+  It needs a contract change, not a code change, and was deliberately not
+  widened into T024's scope.
+- No Rust changed, so the `cargo` gates were not re-run. `vp check` (0 errors)
+  and `vp test` (1038 passing, +7) are clean.
+- **Not verified at runtime**: quickstart §3's manual scenarios need a real
+  text-layer PDF and a hand-written link, and were not exercised here.
 
 **Checkpoint**: The round trip is closed. US1 + US2 + US3 is the feature as the user described it.
 
