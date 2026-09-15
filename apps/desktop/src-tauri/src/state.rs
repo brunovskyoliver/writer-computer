@@ -273,21 +273,55 @@ impl WorkspaceState {
             .unwrap_or_default()
     }
 
-    pub fn update_index_modified_at(&self, path: &Path, modified_at: u64) {
-        let mut changed = false;
+    /// Reflect a completed write in the file index: bump `modified_at` for
+    /// indexed files, or insert the file when the index does not know it.
+    /// The write path suppresses the watcher's events as self-writes, so a
+    /// file created and written back-to-back would otherwise stay invisible
+    /// to search until the next full index. Only `.md` files under the
+    /// workspace root are indexed — the same filter the index walker and
+    /// watcher use.
+    pub fn index_written_file(&self, path: &Path, modified_at: u64) {
+        let root = self.workspace_root.read().clone();
+        let mut inserted = false;
         {
             let mut index = self.file_index.write();
             if let Some(file) = index.iter_mut().find(|file| file.path == path) {
-                if file.modified_at != modified_at {
-                    file.modified_at = modified_at;
-                    changed = true;
-                    self.file_index_revision.fetch_add(1, Ordering::SeqCst);
+                if file.modified_at == modified_at {
+                    return;
                 }
+                file.modified_at = modified_at;
+            } else {
+                let Some(root) = root.as_deref() else { return };
+                if !path.starts_with(root)
+                    || path.extension().and_then(|e| e.to_str()) != Some("md")
+                {
+                    return;
+                }
+                index.push(IndexedFile {
+                    path: path.to_path_buf(),
+                    relative_path: path
+                        .strip_prefix(root)
+                        .unwrap_or(path)
+                        .to_string_lossy()
+                        .into_owned(),
+                    name: path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default(),
+                    modified_at,
+                });
+                inserted = true;
             }
+            self.file_index_revision.fetch_add(1, Ordering::SeqCst);
         }
 
-        if changed {
-            self.invalidate_recent_files_cache();
+        self.invalidate_recent_files_cache();
+        if inserted {
+            register_ancestors(
+                &mut self.dirs_with_markdown.write(),
+                path,
+                root.as_deref().unwrap_or(path),
+            );
         }
     }
 
@@ -559,6 +593,43 @@ mod tests {
             app_state.find_by_standalone_file(Path::new("/tmp/other.md")),
             None
         );
+    }
+
+    #[test]
+    fn index_written_file_inserts_new_md_and_updates_existing() {
+        let state = WorkspaceState::default();
+        *state.workspace_root.write() = Some(PathBuf::from("/tmp/ws"));
+        let path = PathBuf::from("/tmp/ws/new.md");
+
+        // A just-created file whose watcher events were suppressed as a
+        // self-write still lands in the index — search sees it immediately.
+        state.index_written_file(&path, 10);
+        {
+            let index = state.file_index.read();
+            assert_eq!(index.len(), 1);
+            assert_eq!(index[0].relative_path, "new.md");
+            assert_eq!(index[0].modified_at, 10);
+        }
+        assert!(state
+            .dirs_with_markdown
+            .read()
+            .contains(Path::new("/tmp/ws")));
+
+        // A second write bumps the timestamp in place — no duplicate entry.
+        state.index_written_file(&path, 20);
+        let index = state.file_index.read();
+        assert_eq!(index.len(), 1);
+        assert_eq!(index[0].modified_at, 20);
+    }
+
+    #[test]
+    fn index_written_file_skips_non_markdown_and_outside_root() {
+        let state = WorkspaceState::default();
+        *state.workspace_root.write() = Some(PathBuf::from("/tmp/ws"));
+
+        state.index_written_file(Path::new("/tmp/ws/note.txt"), 1);
+        state.index_written_file(Path::new("/tmp/other/a.md"), 1);
+        assert!(state.file_index.read().is_empty());
     }
 
     #[test]

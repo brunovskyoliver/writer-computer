@@ -8,7 +8,8 @@ use crate::commands::search::fuzzy_search_from;
 use crate::error::{McpErrorKind, McpToolError};
 use crate::ignore::WorkspaceIgnore;
 use crate::mcp::{
-    forward_to_window, open_scopes, resolve_path, resolve_workspace, Resolved, Scope,
+    forward_to_window, open_scopes, resolve_create_path, resolve_path, resolve_workspace, Resolved,
+    Scope,
 };
 use crate::state::{AppState, WorkspaceState};
 use rmcp::handler::server::wrapper::Parameters;
@@ -61,6 +62,36 @@ impl WriterMcpServer {
         )
         .await
     }
+
+    /// Forward a write tool after Rust-side resolution: the webview gets the
+    /// canonical path (its save calls and open-tab lookups are keyed on it)
+    /// plus the workspace-relative form for output. The reply is the
+    /// tool's structured result verbatim.
+    async fn forward_resolved(
+        &self,
+        resolved: &Resolved,
+        tool: &str,
+        canonical: &Path,
+        relative: &str,
+        content: Option<&str>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let mut args = json!({
+            "path": canonical.to_string_lossy(),
+            "relative_path": relative,
+        });
+        if let Some(content) = content {
+            args["content"] = json!(content);
+        }
+        let reply = forward_to_window(
+            self.app_state().inner(),
+            &resolved.label,
+            self.conn_id,
+            tool,
+            args,
+        )
+        .await?;
+        Ok(CallToolResult::structured(reply))
+    }
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -103,6 +134,26 @@ pub struct WorkspaceOnlyArgs {
     /// Workspace id from `list_workspaces`; required when several are open.
     #[serde(default)]
     pub workspace: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct WriteFileArgs {
+    /// Workspace id from `list_workspaces`; required when several are open.
+    #[serde(default)]
+    pub workspace: Option<String>,
+    /// Path relative to the workspace root, or absolute inside it.
+    pub path: String,
+    /// The file's full content — writes replace, never patch.
+    pub content: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CreateFolderArgs {
+    /// Workspace id from `list_workspaces`; required when several are open.
+    #[serde(default)]
+    pub workspace: Option<String>,
+    /// Path relative to the workspace root, or absolute inside it.
+    pub path: String,
 }
 
 #[tool_router]
@@ -256,6 +307,68 @@ impl WriterMcpServer {
             .forward(args.workspace.as_deref(), "list_tabs", json!({}))
             .await?;
         Ok(CallToolResult::structured(reply))
+    }
+
+    /// Forwarded: the write runs through the window's own save path so
+    /// `record_write`, index updates, and sidebar events behave like an
+    /// editor save (FR-018). Rust checks the boundary and file kind; the
+    /// create-new refusal (`already_exists`) is the webview's `create_file`.
+    #[tool(
+        description = "Create a new markdown file (.md, .markdown) with the given content. Fails with already_exists if the path exists; use write_file to replace content."
+    )]
+    async fn create_file(
+        &self,
+        Parameters(args): Parameters<WriteFileArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let resolved = resolve_workspace(self.app_state().inner(), args.workspace.as_deref())?;
+        let (canonical, relative) = resolve_create_path(&resolved.scope, &args.path)?;
+        check_writable_kind(&canonical, &relative)?;
+        self.forward_resolved(
+            &resolved,
+            "create_file",
+            &canonical,
+            &relative,
+            Some(&args.content),
+        )
+        .await
+    }
+
+    /// Forwarded: the webview checks the dirty flag (`unsaved_conflict`),
+    /// writes through the UI save path, and refreshes a clean open tab
+    /// (FR-016/017/018). `resolve_path` itself answers `not_found`.
+    #[tool(
+        description = "Replace a markdown file's content in full. Fails with not_found if missing, unsupported_kind for non-markdown kinds, unsaved_conflict when the file is open with unsaved edits."
+    )]
+    async fn write_file(
+        &self,
+        Parameters(args): Parameters<WriteFileArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let resolved = resolve_workspace(self.app_state().inner(), args.workspace.as_deref())?;
+        let (canonical, relative) = resolve_path(&resolved.scope, &args.path)?;
+        check_writable_kind(&canonical, &relative)?;
+        self.forward_resolved(
+            &resolved,
+            "write_file",
+            &canonical,
+            &relative,
+            Some(&args.content),
+        )
+        .await
+    }
+
+    /// Forwarded: `create_directory` gives the create-new refusal; the
+    /// boundary check for the not-yet-existing path happens here (FR-019).
+    #[tool(
+        description = "Create a folder inside an open workspace. Fails with already_exists if the path exists."
+    )]
+    async fn create_folder(
+        &self,
+        Parameters(args): Parameters<CreateFolderArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let resolved = resolve_workspace(self.app_state().inner(), args.workspace.as_deref())?;
+        let (canonical, relative) = resolve_create_path(&resolved.scope, &args.path)?;
+        self.forward_resolved(&resolved, "create_folder", &canonical, &relative, None)
+            .await
     }
 }
 
@@ -448,6 +561,27 @@ fn is_readable_kind(path: &Path) -> bool {
     lower.ends_with(".md") || lower.ends_with(".markdown") || lower.ends_with(".excalidraw.svg")
 }
 
+/// The kinds the write tools accept: markdown only. Drawings carry no dirty
+/// flag the webview can check, so an agent replace could clobber in-flight
+/// edits — the unsaved-conflict rule (FR-016) only holds where `openFiles`
+/// sees the file.
+fn check_writable_kind(canonical: &Path, relative: &str) -> Result<(), McpToolError> {
+    let Some(name) = canonical.file_name().and_then(|n| n.to_str()) else {
+        return Err(McpToolError::new(
+            McpErrorKind::UnsupportedKind,
+            format!("{relative} is not a writable kind (.md, .markdown)"),
+        ));
+    };
+    let lower = name.to_ascii_lowercase();
+    if !lower.ends_with(".md") && !lower.ends_with(".markdown") {
+        return Err(McpToolError::new(
+            McpErrorKind::UnsupportedKind,
+            format!("{relative} is not a writable kind (.md, .markdown)"),
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -482,10 +616,10 @@ mod tests {
     // --- router registration -------------------------------------------------
 
     #[test]
-    fn router_registers_exactly_the_us1_tools() {
+    fn router_registers_the_us1_and_us2_tools() {
         // Routing rule check: the registered surface is the five read-only
-        // tools; `list_tabs` is the only webview-forwarded one (its body calls
-        // `forward`, everything else resolves against AppState/disk).
+        // tools plus the three write tools; the writes and `list_tabs` are
+        // webview-forwarded, the rest resolve against AppState/disk.
         let mut names: Vec<String> = WriterMcpServer::tool_router()
             .list_all()
             .into_iter()
@@ -495,11 +629,14 @@ mod tests {
         assert_eq!(
             names,
             [
+                "create_file",
+                "create_folder",
                 "list_files",
                 "list_tabs",
                 "list_workspaces",
                 "read_file",
-                "search_files"
+                "search_files",
+                "write_file"
             ]
         );
     }
