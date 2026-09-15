@@ -5,6 +5,7 @@ import { normalizePageText, textAnchor } from "@/lib/pdf-anchor";
 import { useEditorStore } from "@/stores/editor-store";
 import { PdfQuoteButton, type PdfQuoteCapture } from "./pdf-quote-button";
 import type { PdfLocation } from "./page-kinds/pdf";
+import { useEscKey } from "./use-esc-key";
 import "./pdf-pane.css";
 
 /**
@@ -27,6 +28,9 @@ const OVERSCAN = 1;
  *  location. Long enough that a scroll gesture writes once, short enough that
  *  quitting right after scrolling still records where you were. */
 const PAGE_SETTLE_MS = 400;
+
+/** Rejections that mean "you scrolled away", not "this page is broken". */
+const CANCEL_ERRORS = new Set(["RenderingCancelledException", "AbortException"]);
 
 const ZOOM_STEP = 0.2;
 const ZOOM_MIN = 0.4;
@@ -176,11 +180,10 @@ function PdfPageCanvas({
       // overlays the canvas's laid-out box, which is `unscaled × scale`. Using
       // the dpr-multiplied viewport here puts the spans at twice the offset on
       // a Retina display and makes selection pick the wrong words.
-      if (textContainer) {
-        const { TextLayer } = await pdfjsTextLayer();
-        if (cancelled) return;
+      const text = textContainer ? await pdfjsTextLayer() : null;
+      if (text && textContainer && !cancelled) {
         textContainer.style.setProperty("--total-scale-factor", String(scale));
-        const layer = new TextLayer({
+        const layer = new text.TextLayer({
           textContentSource: page.streamTextContent(),
           container: textContainer,
           viewport: page.getViewport({ scale }),
@@ -191,14 +194,18 @@ function PdfPageCanvas({
         await layer.render();
       }
 
-      try {
-        await task.promise;
-      } catch (error) {
-        // Scrolling away cancels in-flight work; that is not a failure.
-        if (error instanceof Error && error.name === "RenderingCancelledException") return;
-        console.error(`Failed to render PDF page ${pageNumber}`, error);
-      }
-    })();
+      await task.promise;
+    })().catch((error: unknown) => {
+      // Scrolling away cancels both halves of the page, and pages unmount
+      // mid-render constantly — so these two are the *expected* rejection, not
+      // a failure, and must be swallowed here rather than surfaced. Routing
+      // them into the error UI would make ordinary scrolling look like a
+      // failed load. Names checked against pdfjs-dist 6.3.289: the canvas
+      // rejects `RenderingCancelledException`, `TextLayer.cancel()` rejects
+      // `AbortException`.
+      if (error instanceof Error && CANCEL_ERRORS.has(error.name)) return;
+      console.error(`Failed to render PDF page ${pageNumber}`, error);
+    });
 
     return () => {
       cancelled = true;
@@ -404,19 +411,22 @@ export function PdfPane({
       const content = contentRef.current;
       setCapture(content ? captureSelection(content) : null);
     };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      window.getSelection()?.removeAllRanges();
-      setCapture(null);
-    };
     document.addEventListener("selectionchange", onSelectionChange);
-    document.addEventListener("keydown", onKeyDown);
     return () => {
       document.removeEventListener("selectionchange", onSelectionChange);
-      document.removeEventListener("keydown", onKeyDown);
       setCapture(null);
     };
   }, [state.status, isVisible]);
+
+  // Escape dismisses the button (scenario 2.6) — but only while there *is* a
+  // button. Gating on `capture` is load-bearing, not tidiness: Escape is heavily
+  // trafficked in this app (Vim insert mode, the search overlay), and a listener
+  // that ran whenever a PDF was merely visible would clear the *note's*
+  // selection every time the user pressed it in the pane next door.
+  useEscKey(capture !== null, () => {
+    window.getSelection()?.removeAllRanges();
+    setCapture(null);
+  });
 
   const goToPage = useCallback(
     (page: number) => {

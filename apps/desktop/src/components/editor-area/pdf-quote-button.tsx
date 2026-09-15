@@ -129,7 +129,18 @@ function insertQuote(capture: PdfQuoteCapture, pdfPath: string, pdfTabId: string
 
   const text = quoteMarkdown(relative, capture.anchor, capture.body);
   const { prefix, suffix } = blockPadding(target.view, target.view.state.selection.main.head);
-  return insertAtCursor(target.path, `${prefix}${text}${suffix}`, target.tabId);
+  if (!insertAtCursor(target.path, `${prefix}${text}${suffix}`, target.tabId)) {
+    // Unreachable while `visibleNote` only returns panes with a live view, but
+    // FR-018 is explicit that this action never fails silently.
+    showEditorNotice("The quote could not be inserted into the note.", pdfTabId);
+    return false;
+  }
+  // Focus follows the text. The insertion is one transaction either way, but
+  // undo is a keystroke, and a keystroke goes wherever focus is: leaving focus
+  // in the PDF means Cmd+Z never reaches the note's history and the
+  // single-step undo the user was promised appears not to work.
+  target.view.focus();
+  return true;
 }
 
 export function PdfQuoteButton({

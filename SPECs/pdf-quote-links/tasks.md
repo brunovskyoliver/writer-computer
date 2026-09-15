@@ -238,6 +238,21 @@ before the `pdf` kind is added.
   workspace root, and a PDF that resolves outside the root (`getRelativePath` hands back the
   absolute path unchanged in that case). Both report through `showEditorNotice` rather than
   writing a link that only resolves on this machine.
+- **Escape is gated on there being a button**, via the existing `useEscKey` hook rather than a
+  raw `document` listener. A listener live whenever a PDF was merely _visible_ would clear the
+  **note's** selection every time Escape was pressed in the pane next door — Vim insert mode,
+  the search overlay. Do not widen the gate.
+- Both halves of a page render are wrapped in one `.catch`. `TextLayer.cancel()` rejects with
+  `AbortException` (name confirmed in `pdfjs-dist@6.3.289/build/pdf.mjs`), the canvas with
+  `RenderingCancelledException`; pages unmount mid-render on every scroll, so leaving the text
+  layer's rejection unhandled produced a steady stream of unhandled rejections.
+- **Focus follows the quote into the note.** The insertion is one transaction either way, but
+  undo is a keystroke and a keystroke goes where focus is — leaving focus in the PDF would make
+  the promised single-step undo appear not to work (quickstart §2 step 3).
+- **Contract gap for US3 to know about**: `contracts/quote-link.md` constrains `]` and `|` in a
+  link but says nothing about `#`, and `splitFragment` splits on the _first_ `#`. A PDF whose
+  filename contains `#` therefore produces a link that parses to the wrong path. Not introduced
+  here and not fixed here — it needs a contract change, not a code change.
 - No Rust changed in this phase, so the `cargo` gates were not re-run. `vp check`, `tsc` and
   `vp test` (1031 passing) all clean.
 - **Not verified at runtime**: the manual scenarios in quickstart §2 need a real text-layer
