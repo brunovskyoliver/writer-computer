@@ -9,6 +9,8 @@
 
 ## Done
 
+- Add breathing room between the tab header and file path.
+
 - Clickable, font-scaled path folders: [spec](SPECs/tab-chrome.md).
 
 - Animated tab chrome and fixed Markdown path row: [spec](SPECs/tab-chrome.md).
