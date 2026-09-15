@@ -178,11 +178,70 @@ before the `pdf` kind is added.
 
 **Depends on**: US1 (there must be a viewer to select in).
 
-- [ ] T019 [US2] Add the pdf.js text layer to `apps/desktop/src/components/editor-area/pdf-pane.tsx` so text is selectable on pages that have one (FR-013). Text extraction runs in the pdf.js worker, never on the main thread.
-- [ ] T020 [US2] Create `apps/desktop/src/components/editor-area/pdf-quote-button.tsx`: a floating action that appears adjacent to a live selection, positioned so it does not cover the selection, following the app's existing floating-control conventions and shifting no layout. It disappears when the selection is cleared by click-elsewhere or Escape. A zero-width or few-pixel drag raises no button (FR-015).
-- [ ] T021 [US2] In `apps/desktop/src/lib/pdf-anchor.ts`, add the quote-text builder producing exactly the `contracts/quote-link.md` shape: a Markdown blockquote of the selected text, a blank line, then `[[<workspace-relative path with .pdf retained>#page=..&text=..|<stem> p.N]]`. The path is **always workspace-relative and extension-qualified** — bare-stem resolution cannot find PDFs because the fuzzy index is Markdown-only (research.md R3). The link's `text` is the truncated re-find hint; the blockquote holds the full passage (FR-019).
-- [ ] T022 [US2] Wire the button's action in `apps/desktop/src/components/editor-area/pdf-quote-button.tsx` to insert at the cursor of the visible note pane as a **single undoable CodeMirror transaction** (FR-017, scenario 2.4). A selection spanning a page boundary produces one quote anchored at the page where the selection _starts_, carrying the full selected text (scenario 2.3).
-- [ ] T023 [US2] Handle the no-target case: when no note pane is visible in the window, the button states there is no note to quote into rather than inserting anywhere or failing silently (FR-018, scenario 2.5). This includes the case where the note pane is closed between selection and press.
+- [x] T019 [US2] Add the pdf.js text layer to `apps/desktop/src/components/editor-area/pdf-pane.tsx` so text is selectable on pages that have one (FR-013). Text extraction runs in the pdf.js worker, never on the main thread.
+- [x] T020 [US2] Create `apps/desktop/src/components/editor-area/pdf-quote-button.tsx`: a floating action that appears adjacent to a live selection, positioned so it does not cover the selection, following the app's existing floating-control conventions and shifting no layout. It disappears when the selection is cleared by click-elsewhere or Escape. A zero-width or few-pixel drag raises no button (FR-015).
+- [x] T021 [US2] In `apps/desktop/src/lib/pdf-anchor.ts`, add the quote-text builder producing exactly the `contracts/quote-link.md` shape: a Markdown blockquote of the selected text, a blank line, then `[[<workspace-relative path with .pdf retained>#page=..&text=..|<stem> p.N]]`. The path is **always workspace-relative and extension-qualified** — bare-stem resolution cannot find PDFs because the fuzzy index is Markdown-only (research.md R3). The link's `text` is the truncated re-find hint; the blockquote holds the full passage (FR-019).
+- [x] T022 [US2] Wire the button's action in `apps/desktop/src/components/editor-area/pdf-quote-button.tsx` to insert at the cursor of the visible note pane as a **single undoable CodeMirror transaction** (FR-017, scenario 2.4). A selection spanning a page boundary produces one quote anchored at the page where the selection _starts_, carrying the full selected text (scenario 2.3).
+- [x] T023 [US2] Handle the no-target case: when no note pane is visible in the window, the button states there is no note to quote into rather than inserting anywhere or failing silently (FR-018, scenario 2.5). This includes the case where the note pane is closed between selection and press.
+
+**Phase 4 implementation notes** (landed):
+
+- **The text layer is positioned by a CSS custom property the host sets, not by the
+  viewport it was built with.** pdf.js v6 reads `--total-scale-factor` off the container;
+  earlier majors called it `--scale-factor`. It has to be kept in step with the render scale
+  or the invisible spans drift off the glyphs and selection picks the wrong words. Name
+  confirmed against `pdfjs-dist@6.3.289/web/pdf_viewer.css`, not from memory.
+- The layer is built at the **CSS** scale, not the device scale. The canvas rasterizes at
+  `scale × devicePixelRatio` and is scaled back down in CSS; handing that dpr-multiplied
+  viewport to `TextLayer` would place every span at twice the offset on a Retina display.
+- `pdf-pane.css` transcribes only the `.textLayer` rules from `pdfjs-dist/web/pdf_viewer.css`
+  rather than importing it. That stylesheet also carries the annotation layer, toolbar,
+  sidebar and find bar — a whole viewer UI this app does not mount. Precedent:
+  `mermaid-canvas.css`.
+- `TextLayer` **appends** to its container and never clears it, so a zoom change stacked a
+  second set of spans on the first. Cleanup calls `cancel()` _and_ `replaceChildren()`; the
+  cancel alone is not enough.
+- Text extraction is `page.streamTextContent()`, which runs in the worker — `TextLayer` only
+  positions what it is handed, so the main thread never parses a content stream (FR-013). A
+  scanned page yields zero items and an empty container, which is the correct outcome and
+  not a case to special-case.
+- **The page comes from the range's `startContainer`, never `anchorNode`.** `anchorNode` is
+  where the drag _began_, which on a backwards drag is the later node. Scenario 2.3 requires
+  a cross-page selection to anchor at the page it starts on, and only the range start gives
+  that in both drag directions.
+- The selection text is whitespace-collapsed with `normalizePageText` before both the
+  blockquote and the anchor are built, so the link's `text=` hint stays a literal prefix of
+  what `refindPassage` will search for. Two different normalizations would make the re-find
+  miss on exactly the passages it exists for.
+- **The insert reuses `editorApi.insertAtCursor`** instead of dispatching a transaction here.
+  It is the app's one API-level insert path and is a single `view.dispatch`, which is what
+  makes one undo revert the whole insertion (FR-017). It carries no `syncTransaction`
+  annotation and no `writer` user event, so `publishEditorUpdate` treats it exactly like
+  typing: store, save scheduler and sibling views all see it. A quote that reached the
+  visible buffer but not disk is the failure that would have looked like success.
+- Block padding is applied _before_ that call: `insertAtCursor`'s own clean-line rule only
+  fires for headings, and a `>` landing mid-line is the same bug for a blockquote.
+- **"Visible note pane" means the active tab of a pane**, not any open note tab — a note
+  sitting behind the PDF in the same pane is not visible. Resolved via the T009
+  `primaryPath === null` predicate, so a future standalone kind needs no change here.
+  Resolved at _press_ time, not capture time, which is what covers a note pane closed
+  between the selection and the press (scenario 2.5).
+- `onMouseDown` is prevented on the button. Without it the mousedown clears the selection,
+  which unmounts the button, and the click never lands — the control looks dead.
+- The button is absolutely positioned in the scroll container's **content** coordinates, so
+  it tracks the selection through a scroll with no scroll handler at all, and shifts nothing
+  else in the layout (scenario 2.1).
+- T021's wording says the alias is `<stem> p.N`; both worked examples in
+  `contracts/quote-link.md` say `apology.pdf p.12`. The contract wins — it is the artifact
+  that outlives the task list.
+- **Two guards beyond the task text, both because a bad link is permanent on disk**: no
+  workspace root, and a PDF that resolves outside the root (`getRelativePath` hands back the
+  absolute path unchanged in that case). Both report through `showEditorNotice` rather than
+  writing a link that only resolves on this machine.
+- No Rust changed in this phase, so the `cargo` gates were not re-run. `vp check`, `tsc` and
+  `vp test` (1031 passing) all clean.
+- **Not verified at runtime**: the manual scenarios in quickstart §2 need a real text-layer
+  PDF and were not exercised here.
 
 **Checkpoint**: Read → select → capture works end to end. Combined with US1 this is the workflow the feature was asked for, minus the return trip.
 

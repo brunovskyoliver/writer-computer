@@ -1,0 +1,92 @@
+/* The pdf.js text layer.
+ *
+ * Transcribed from the `.textLayer` block of `pdfjs-dist/web/pdf_viewer.css`
+ * (v6.3.289) rather than imported: that stylesheet also carries the annotation
+ * layer, the toolbar, the sidebar and the find bar — a whole viewer UI this app
+ * does not mount. Only the rules the `TextLayer` spans actually depend on are
+ * here. Precedent: `mermaid-canvas.css`.
+ *
+ * The one contract worth naming: pdf.js positions every span with
+ * `--total-scale-factor`, which the *host* sets on the container. It is not
+ * derived from the viewport the layer was built with, so it must be kept in
+ * step with the render scale or the invisible text drifts off the glyphs it is
+ * meant to sit on and selection picks the wrong words. In pdf.js v6 the
+ * property is `--total-scale-factor`; earlier majors called it
+ * `--scale-factor`. Do not rename it from memory.
+ */
+
+.pdf-text-layer {
+  position: absolute;
+  inset: 0;
+  text-align: initial;
+  overflow: clip;
+  opacity: 1;
+  line-height: 1;
+  letter-spacing: normal;
+  word-spacing: normal;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  caret-color: CanvasText;
+  z-index: 0;
+
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+}
+
+.pdf-text-layer span,
+.pdf-text-layer br {
+  /* Transparent, not hidden: the glyphs are painted by the canvas underneath.
+     These spans exist only to be selected. */
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+  user-select: text;
+}
+
+.pdf-text-layer > :not(.markedContent),
+.pdf-text-layer .markedContent span:not(.markedContent) {
+  z-index: 1;
+  --font-height: 0;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  --scale-x: 1;
+  --rotate: 0deg;
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+
+.pdf-text-layer .markedContent {
+  display: contents;
+}
+
+.pdf-text-layer span[role="img"] {
+  user-select: none;
+  cursor: default;
+}
+
+.pdf-text-layer ::selection {
+  background: color-mix(in srgb, AccentColor, transparent 50%);
+  color: transparent;
+}
+
+.pdf-text-layer br::selection {
+  background: transparent;
+}
+
+/* pdf.js grows this sentinel to the full height of the layer while a drag is in
+   progress, so dragging past the last line keeps extending the selection
+   instead of snapping back. It must never be selectable itself. */
+.pdf-text-layer .endOfContent {
+  display: block;
+  position: absolute;
+  inset: 100% 0 0;
+  z-index: 0;
+  cursor: default;
+  user-select: none;
+}
+
+.pdf-text-layer.selecting .endOfContent {
+  top: 0;
+}

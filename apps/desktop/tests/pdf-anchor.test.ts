@@ -7,10 +7,12 @@ import {
   parseAnchorFragment,
   rectToViewport,
   refindPassage,
+  quoteMarkdown,
   regionAnchor,
   textAnchor,
   type PdfAnchor,
 } from "../src/lib/pdf-anchor";
+import { parseWikiLink } from "../src/lib/wiki-links";
 
 describe("round trip", () => {
   test("a text anchor survives encode → parse", () => {
@@ -177,5 +179,29 @@ describe("refindPassage", () => {
 describe("normalizePageText", () => {
   test("collapses the runs pdf.js extraction inserts", () => {
     expect(normalizePageText("  a \n b\t\tc ")).toBe("a b c");
+  });
+});
+
+describe("quoteMarkdown", () => {
+  const anchor = textAnchor(12, "The unexamined life is not worth living.")!;
+
+  test("emits the contract's blockquote + link shape", () => {
+    expect(
+      quoteMarkdown("papers/apology.pdf", anchor, "The unexamined life is not worth living."),
+    ).toBe(
+      "> The unexamined life is not worth living.\n\n" +
+        "[[papers/apology.pdf#page=12&text=The%20unexamined%20life%20is%20not%20worth%20living.|apology.pdf p.12]]",
+    );
+  });
+
+  test("round-trips through the link parser it will be read back by", () => {
+    const link = quoteMarkdown("papers/apology.pdf", anchor, "x").split("\n\n")[1];
+    const parsed = parseWikiLink(link.slice(2, -2));
+    expect(parsed.path).toBe("papers/apology.pdf");
+    expect(parseAnchorFragment(parsed.fragment)).toEqual({ kind: "anchor", anchor });
+  });
+
+  test("quotes every line, so a multi-line passage keeps the link outside the quote", () => {
+    expect(quoteMarkdown("a.pdf", anchor, "one\ntwo")).toMatch(/^> one\n> two\n\n\[\[/);
   });
 });

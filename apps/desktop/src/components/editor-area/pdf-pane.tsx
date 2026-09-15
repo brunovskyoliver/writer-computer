@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
-import { acquirePdf, releasePdf, type PdfLoadError } from "@/lib/pdf";
+import { acquirePdf, pdfjsTextLayer, releasePdf, type PdfLoadError } from "@/lib/pdf";
+import { normalizePageText, textAnchor } from "@/lib/pdf-anchor";
 import { useEditorStore } from "@/stores/editor-store";
+import { PdfQuoteButton, type PdfQuoteCapture } from "./pdf-quote-button";
 import type { PdfLocation } from "./page-kinds/pdf";
+import "./pdf-pane.css";
 
 /**
  * The PDF reader. See SPECs/pdf-quote-links/.
@@ -72,12 +75,63 @@ function pageAt(offsets: number[], y: number): number {
 }
 
 /**
- * One rasterized page.
+ * Read the live DOM selection as a quote capture, or `null` if there is
+ * nothing quotable.
+ *
+ * The page comes from the selection's **start** container, not its anchor:
+ * `anchorNode` is where the drag *began*, which on a backwards drag is the
+ * later node. A selection running across a page boundary must be anchored at
+ * the page it starts on (scenario 2.3), and only the range's start gives that
+ * reliably in both drag directions.
+ *
+ * The text is whitespace-collapsed here so the blockquote and the link's
+ * re-find hint are built from the same string, and so the hint stays a literal
+ * prefix of what `refindPassage` will search for on the page.
+ */
+function captureSelection(content: HTMLElement): PdfQuoteCapture | null {
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return null;
+
+  const range = selection.getRangeAt(0);
+  if (!content.contains(range.startContainer)) return null;
+
+  const start =
+    range.startContainer instanceof Element
+      ? range.startContainer
+      : range.startContainer.parentElement;
+  const pageNumber = Number(start?.closest("[data-pdf-page]")?.getAttribute("data-pdf-page"));
+  if (!Number.isInteger(pageNumber)) return null;
+
+  // A two-pixel drag collapses to nothing selectable, so this is also the
+  // guard that keeps an accidental click from raising a button (FR-015).
+  const body = normalizePageText(selection.toString());
+  const anchor = textAnchor(pageNumber, body);
+  if (!anchor) return null;
+
+  const bounds = range.getBoundingClientRect();
+  const origin = content.getBoundingClientRect();
+  return {
+    anchor,
+    body,
+    left: bounds.left - origin.left,
+    top: bounds.top - origin.top,
+    width: bounds.width,
+    height: bounds.height,
+  };
+}
+
+/**
+ * One rasterized page, with pdf.js's invisible text layer over it.
  *
  * Mounted only while inside the render window, so unmounting is what releases
- * the canvas. The render task is cancelled in cleanup rather than left racing:
- * a cancelled task rejects with `RenderingCancelledException`, which is the
- * expected outcome of scrolling away and must not reach the error UI.
+ * both the canvas and the text spans. The render task and the text layer are
+ * cancelled in cleanup rather than left racing: a cancelled render rejects with
+ * `RenderingCancelledException`, which is the expected outcome of scrolling
+ * away and must not reach the error UI.
+ *
+ * Text extraction (`getTextContent`) runs in the pdf.js worker — `TextLayer`
+ * only positions the spans it is handed, so the main thread never parses
+ * content streams (FR-013).
  */
 function PdfPageCanvas({
   doc,
@@ -91,10 +145,13 @@ function PdfPageCanvas({
   onMeasure: (pageNumber: number, size: PageSize) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const textRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     let task: RenderTask | null = null;
+    let textLayer: { cancel: () => void } | null = null;
+    const textContainer = textRef.current;
 
     void (async () => {
       const page = await doc.getPage(pageNumber);
@@ -114,6 +171,26 @@ function PdfPageCanvas({
       canvas.style.height = `${unscaled.height * scale}px`;
 
       task = page.render({ canvas, viewport });
+
+      // The text layer is built at the *CSS* scale, not the device scale: it
+      // overlays the canvas's laid-out box, which is `unscaled × scale`. Using
+      // the dpr-multiplied viewport here puts the spans at twice the offset on
+      // a Retina display and makes selection pick the wrong words.
+      if (textContainer) {
+        const { TextLayer } = await pdfjsTextLayer();
+        if (cancelled) return;
+        textContainer.style.setProperty("--total-scale-factor", String(scale));
+        const layer = new TextLayer({
+          textContentSource: page.streamTextContent(),
+          container: textContainer,
+          viewport: page.getViewport({ scale }),
+        });
+        textLayer = layer;
+        // A page with no text layer (a scan) yields zero items and an empty
+        // container. That is the correct outcome, not a case to special-case.
+        await layer.render();
+      }
+
       try {
         await task.promise;
       } catch (error) {
@@ -126,10 +203,20 @@ function PdfPageCanvas({
     return () => {
       cancelled = true;
       task?.cancel();
+      textLayer?.cancel();
+      // `TextLayer` appends to the container and never clears it, so a scale
+      // change would stack a second set of spans on top of the first —
+      // duplicated, unselectable-looking text and two overlapping hit targets.
+      textContainer?.replaceChildren();
     };
   }, [doc, pageNumber, scale, onMeasure]);
 
-  return <canvas ref={canvasRef} className="block bg-white shadow-sm" />;
+  return (
+    <div className="relative">
+      <canvas ref={canvasRef} className="block bg-white shadow-sm" />
+      <div ref={textRef} className="pdf-text-layer" />
+    </div>
+  );
 }
 
 export function PdfPane({
@@ -305,6 +392,32 @@ export function PdfPane({
     return () => setPdfPage(tabId, pageRef.current);
   }, [setPdfPage, tabId]);
 
+  // The quote capture. Recomputed from the live selection rather than kept in
+  // sync with it, so there is one source of truth and no way for the button to
+  // outlive the text it points at (scenario 2.6).
+  const [capture, setCapture] = useState<PdfQuoteCapture | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (state.status !== "ready" || !isVisible) return;
+    const onSelectionChange = () => {
+      const content = contentRef.current;
+      setCapture(content ? captureSelection(content) : null);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      window.getSelection()?.removeAllRanges();
+      setCapture(null);
+    };
+    document.addEventListener("selectionchange", onSelectionChange);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("selectionchange", onSelectionChange);
+      document.removeEventListener("keydown", onKeyDown);
+      setCapture(null);
+    };
+  }, [state.status, isVisible]);
+
   const goToPage = useCallback(
     (page: number) => {
       const container = scrollRef.current;
@@ -349,6 +462,7 @@ export function PdfPane({
               // area to the widest page and centring with auto margins keeps
               // the overflow on the scrollable side.
               <div
+                ref={contentRef}
                 className="relative"
                 style={{
                   height: offsets[pageCount],
@@ -361,6 +475,10 @@ export function PdfPane({
                   return (
                     <div
                       key={index}
+                      // The page number a selection resolves to. Read off the
+                      // DOM rather than tracked in state because the selection
+                      // itself is a DOM fact, and the two must not disagree.
+                      data-pdf-page={index + 1}
                       className="absolute right-0 left-0 mx-auto"
                       style={{ top: offsets[index], width: size.width * scale }}
                     >
@@ -373,6 +491,17 @@ export function PdfPane({
                     </div>
                   );
                 })}
+                {capture ? (
+                  <PdfQuoteButton
+                    capture={capture}
+                    pdfPath={location.path}
+                    pdfTabId={tabId}
+                    onQuoted={() => {
+                      window.getSelection()?.removeAllRanges();
+                      setCapture(null);
+                    }}
+                  />
+                ) : null}
               </div>
             ) : (
               <div className="p-4 text-sm text-[var(--text-muted)]">Loading PDF…</div>

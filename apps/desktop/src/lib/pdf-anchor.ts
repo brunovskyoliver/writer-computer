@@ -236,3 +236,45 @@ export async function refindPassage(
   }
   return { kind: "not-located" };
 }
+
+// --- quote insertion -------------------------------------------------------
+
+/**
+ * Escape the one character that can terminate a wiki link's alias early.
+ * `lib/wiki-links.ts` unescapes `\|` on the way back in, so this is the
+ * matching half of that pair.
+ */
+function escapeAlias(text: string): string {
+  return text.replace(/\|/g, "\\|");
+}
+
+/**
+ * The Markdown a quote inserts: a blockquote, a blank line, and the link back.
+ * The exact shape is `contracts/quote-link.md`, which lives in the user's notes
+ * forever — change it here and nowhere else.
+ *
+ * `path` must already be **workspace-relative and `.pdf`-qualified**. Bare-stem
+ * resolution cannot find a PDF, because the fuzzy index is Markdown-only
+ * (research.md R3), so an unqualified path here is a permanently broken link on
+ * disk rather than a bug that can be fixed later.
+ *
+ * `body` is the full passage (or, for a region, the placeholder caption the
+ * user edits — FR-016). It is *not* the same string as the anchor's `text`:
+ * the anchor carries a 120-character re-find hint, the blockquote carries
+ * everything (FR-019).
+ *
+ * The alias is the filename plus the page, per both worked examples in the
+ * contract. T021's wording says "stem"; the contract's examples say
+ * `apology.pdf p.12`, and the contract is the artifact that outlives us.
+ */
+export function quoteMarkdown(path: string, anchor: PdfAnchor, body: string): string {
+  // Every line gets its own `>`. A passage that already contains a newline
+  // would otherwise leave the second line outside the quote, and the link with
+  // it — which reads as a stray paragraph in any other editor (SC-007).
+  const quoted = body
+    .split("\n")
+    .map((line) => `> ${line}`.trimEnd())
+    .join("\n");
+  const alias = escapeAlias(`${path.slice(path.lastIndexOf("/") + 1)} p.${anchor.page}`);
+  return `${quoted}\n\n[[${path}#${encodeAnchorFragment(anchor)}|${alias}]]`;
+}

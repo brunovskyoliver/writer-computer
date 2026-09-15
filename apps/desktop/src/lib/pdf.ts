@@ -73,6 +73,17 @@ async function pdfjs(): Promise<typeof import("pdfjs-dist")> {
 }
 
 /**
+ * The text-layer constructor, behind the same lazy boundary as everything else
+ * here. Narrowed to the one export the viewer needs rather than handing the
+ * whole module out, so `await import("pdfjs-dist")` stays confined to this
+ * file and there is still no way to reach pdf.js without `workerSrc` set.
+ */
+export async function pdfjsTextLayer(): Promise<Pick<typeof import("pdfjs-dist"), "TextLayer">> {
+  const { TextLayer } = await pdfjs();
+  return { TextLayer };
+}
+
+/**
  * Map a pdf.js failure onto a named cause.
  *
  * Matching on `error.name` rather than `instanceof`: these exceptions are
