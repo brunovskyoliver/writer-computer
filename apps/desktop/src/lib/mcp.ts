@@ -1,5 +1,6 @@
 import * as tauri from "@/lib/tauri";
 import { locationBehavior } from "@/components/editor-area/page-kinds";
+import { getParentDir } from "@/lib/paths";
 import { useEditorStore } from "@/stores/editor-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 
@@ -67,6 +68,18 @@ function isAlreadyExistsError(error: unknown): boolean {
   return String(error).startsWith("Already exists:");
 }
 
+/** A created path only reaches the sidebar tree when its parent directory is
+ *  re-read — the same explicit refresh the sidebar's own duplicate/delete
+ *  actions run (the watcher treats the create's events as self-writes). A
+ *  refresh failure must not fail the tool: the path already exists on disk. */
+async function refreshSidebarParent(path: string) {
+  const { root, refreshDirectory } = useWorkspaceStore.getState();
+  if (!root) return;
+  await refreshDirectory(getParentDir(path)).catch((error: unknown) => {
+    console.warn("[mcp] sidebar refresh failed", error);
+  });
+}
+
 function describeWindow() {
   const { root, chromeMode } = useWorkspaceStore.getState();
   const { activeFilePath } = useEditorStore.getState();
@@ -103,6 +116,7 @@ async function createFile(args: unknown) {
     throw error;
   }
   const written = await tauri.writeFile(path, content);
+  await refreshSidebarParent(path);
   return { path, relative_path: relativePath, modified_at: written.modified_at };
 }
 
@@ -140,6 +154,7 @@ async function createFolder(args: unknown) {
     }
     throw error;
   }
+  await refreshSidebarParent(path);
   return { path, relative_path: relativePath };
 }
 

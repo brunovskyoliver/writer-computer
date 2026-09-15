@@ -369,7 +369,7 @@ pub async fn write_file(
 
     let write_path = PathBuf::from(&path);
     let result = blocking(move || write_file_impl(&path, &content)).await?;
-    state.update_index_modified_at(&write_path, result.modified_at);
+    state.index_written_file(&write_path, result.modified_at);
     let _ = app.emit_to(label, "sidebar:metadata-changed", &result.path);
     Ok(result)
 }
@@ -946,7 +946,7 @@ mod tests {
         let before = read_recent_files_impl(&state, 1, 0);
         assert_eq!(before[0].name, "new.md");
 
-        state.update_index_modified_at(&old_path, 5);
+        state.index_written_file(&old_path, 5);
 
         let after = read_recent_files_impl(&state, 1, 0);
         assert_eq!(after[0].name, "old.md");

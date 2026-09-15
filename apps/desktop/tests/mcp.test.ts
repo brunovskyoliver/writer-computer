@@ -115,6 +115,7 @@ describe("dispatchMcpRequest write tools", () => {
       if (cmd === "create_file")
         return Promise.resolve({ path: "/ws/new.md", content: "# ", modified_at: 1 });
       if (cmd === "write_file") return Promise.resolve({ path: "/ws/new.md", modified_at: 2 });
+      if (cmd === "read_directory") return Promise.resolve([]);
       return Promise.reject(new Error(`unexpected command ${cmd}`));
     });
 
@@ -132,7 +133,9 @@ describe("dispatchMcpRequest write tools", () => {
       "file_exists",
       "create_file",
       "write_file",
+      "read_directory",
     ]);
+    expect(mockedInvoke).toHaveBeenCalledWith("read_directory", { path: "/ws" });
     expect(mockedInvoke).toHaveBeenCalledWith("create_file", { path: "/ws/new.md" });
     expect(mockedInvoke).toHaveBeenCalledWith("write_file", {
       path: "/ws/new.md",
@@ -142,7 +145,9 @@ describe("dispatchMcpRequest write tools", () => {
 
   test("create_file on an existing path fails already_exists and writes nothing", async () => {
     mockedInvoke.mockImplementation((cmd) =>
-      cmd === "file_exists" ? Promise.resolve(true) : Promise.reject(new Error(`unexpected ${cmd}`)),
+      cmd === "file_exists"
+        ? Promise.resolve(true)
+        : Promise.reject(new Error(`unexpected ${cmd}`)),
     );
 
     const dispatch = await dispatchMcpRequest({
@@ -235,6 +240,7 @@ describe("dispatchMcpRequest write tools", () => {
           modified_at: 1,
           title: null,
         });
+      if (cmd === "read_directory") return Promise.resolve([]);
       return Promise.reject(new Error(`unexpected command ${cmd}`));
     });
 
@@ -251,7 +257,9 @@ describe("dispatchMcpRequest write tools", () => {
     expect(mockedInvoke).toHaveBeenCalledWith("create_directory", { path: "/ws/notes" });
 
     mockedInvoke.mockImplementation((cmd) =>
-      cmd === "file_exists" ? Promise.resolve(true) : Promise.reject(new Error(`unexpected ${cmd}`)),
+      cmd === "file_exists"
+        ? Promise.resolve(true)
+        : Promise.reject(new Error(`unexpected ${cmd}`)),
     );
     const refused = await dispatchMcpRequest({
       request_id: 2,
