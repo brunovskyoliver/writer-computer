@@ -9,31 +9,60 @@ import { showEditorNotice } from "./editor-notice-store";
 const MAX_IMAGE_SIZE_MB = 5;
 const MAX_IMAGE_SIZE = MAX_IMAGE_SIZE_MB * 1024 * 1024;
 const MAX_IMAGE_DIMENSION = 2560;
-const WEBP_QUALITY = 0.85;
+// Each attempt is (long-edge cap, quality). WKWebView silently falls back to
+// PNG when it cannot encode the requested type, so trust blob.type, not the
+// requested one, and step down until the result fits.
+const COMPRESSION_ATTEMPTS: ReadonlyArray<[number, number]> = [
+  [MAX_IMAGE_DIMENSION, 0.85],
+  [1920, 0.75],
+  [1440, 0.65],
+  [1024, 0.6],
+];
 
-/** Re-encode an oversized image as WebP, downscaling if it is also huge in
- *  pixels. Returns null when the browser cannot decode it (e.g. SVG, HEIC). */
-async function compressImage(file: File): Promise<{ bytes: Uint8Array; format: string } | null> {
+/** Re-encode an oversized image, shrinking until it fits under the limit.
+ *  Returns null when the browser cannot decode it (e.g. SVG, HEIC) or when
+ *  even the smallest attempt stays too big. */
+async function compressImage(
+  file: File,
+  limit: number,
+): Promise<{ bytes: Uint8Array<ArrayBufferLike>; format: string; size: number } | null> {
   let bitmap: ImageBitmap;
   try {
     bitmap = await createImageBitmap(file);
   } catch {
     return null;
   }
-  const scale = Math.min(1, MAX_IMAGE_DIMENSION / Math.max(bitmap.width, bitmap.height));
-  const canvas = new OffscreenCanvas(
-    Math.round(bitmap.width * scale),
-    Math.round(bitmap.height * scale),
-  );
-  const ctx = canvas.getContext("2d");
-  if (!ctx) {
+
+  let smallest: { bytes: Uint8Array<ArrayBufferLike>; format: string; size: number } | null = null;
+  try {
+    for (const [maxDimension, quality] of COMPRESSION_ATTEMPTS) {
+      const scale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height));
+      const canvas = new OffscreenCanvas(
+        Math.max(1, Math.round(bitmap.width * scale)),
+        Math.max(1, Math.round(bitmap.height * scale)),
+      );
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return null;
+      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+
+      let blob = await canvas.convertToBlob({ type: "image/webp", quality });
+      // No WebP encoder: PNG is the fallback and is far worse for photos.
+      if (blob.type !== "image/webp") {
+        blob = await canvas.convertToBlob({ type: "image/jpeg", quality });
+      }
+      const result = {
+        bytes: new Uint8Array(await blob.arrayBuffer()),
+        format: blob.type.split("/")[1] || "png",
+        size: blob.size,
+      };
+      if (result.size <= limit) return result;
+      smallest = result;
+    }
+  } finally {
     bitmap.close();
-    return null;
   }
-  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-  bitmap.close();
-  const blob = await canvas.convertToBlob({ type: "image/webp", quality: WEBP_QUALITY });
-  return { bytes: new Uint8Array(await blob.arrayBuffer()), format: "webp" };
+
+  return smallest;
 }
 
 async function handleImagePaste(
@@ -48,18 +77,19 @@ async function handleImagePaste(
   let bytes: Uint8Array<ArrayBufferLike> = new Uint8Array(buffer);
   let format = file.type.split("/")[1] || "png";
   if (bytes.byteLength > MAX_IMAGE_SIZE) {
-    const compressed = await compressImage(file);
+    const compressed = await compressImage(file, MAX_IMAGE_SIZE);
     if (isDisposed()) return;
-    if (!compressed || compressed.bytes.byteLength > MAX_IMAGE_SIZE) {
-      const sizeMb = ((compressed?.bytes.byteLength ?? bytes.byteLength) / (1024 * 1024)).toFixed(
-        1,
-      );
+    if (!compressed || compressed.size > MAX_IMAGE_SIZE) {
+      const sizeMb = ((compressed?.size ?? bytes.byteLength) / (1024 * 1024)).toFixed(1);
       showEditorNotice(
         `Image not pasted: ${sizeMb} MB is over the ${MAX_IMAGE_SIZE_MB} MB limit`,
         editorApi.getTabIdForView(view),
       );
       return;
     }
+    console.debug(
+      `[editor] compressed pasted image: ${buffer.byteLength} -> ${compressed.size} bytes as ${compressed.format}`,
+    );
     bytes = compressed.bytes;
     format = compressed.format;
   }
