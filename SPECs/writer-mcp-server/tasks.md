@@ -124,8 +124,8 @@ description: "Task list for Writer MCP Server implementation"
 
 ### Implementation for User Story 4
 
-- [ ] T033 [US4] Create `apps/desktop/src/components/settings-panel/mcp-section.tsx` following the `latex-suite-extras.tsx` extras pattern: reads `mcpStatus` (enabled, state, error, socket_path), shows running/failed status with the bind-error detail (FR-004/FR-005), the copyable snippet `{ "command": "writer", "args": ["mcp"] }`, and — when `cli_status` reports the `writer` command missing — a pointer to the existing Install CLI action instead of the snippet (FR-008a); mount it in `apps/desktop/src/components/settings-panel/index.tsx`
-- [ ] T034 [US4] Regenerate or update the settings types derived from `apps/desktop/shared/settings.schema.json` (check `apps/desktop/src/lib/settings-schema.ts` for how schema keys surface to the frontend) so `mcp.enabled` renders as a settings toggle in the appropriate category
+- [x] T033 [US4] Create `apps/desktop/src/components/settings-panel/mcp-section.tsx` following the `latex-suite-extras.tsx` extras pattern: reads `mcpStatus` (enabled, state, error, socket_path), shows running/failed status with the bind-error detail (FR-004/FR-005), the copyable snippet `{ "command": "writer", "args": ["mcp"] }`, and — when `cli_status` reports the `writer` command missing — a pointer to the existing Install CLI action instead of the snippet (FR-008a); mount it in `apps/desktop/src/components/settings-panel/index.tsx`
+- [x] T034 [US4] Regenerate or update the settings types derived from `apps/desktop/shared/settings.schema.json` (check `apps/desktop/src/lib/settings-schema.ts` for how schema keys surface to the frontend) so `mcp.enabled` renders as a settings toggle in the appropriate category — verified: `SettingsMap`/`SettingKey` derive from the JSON import at compile time and `SettingControl` renders `boolean` as a toggle, so the T005 schema entry already surfaces under Privacy with no codegen step
 
 **Checkpoint**: US4 fully functional — the trust gate is user-visible and verified end to end; verify against quickstart §1 and §6
 

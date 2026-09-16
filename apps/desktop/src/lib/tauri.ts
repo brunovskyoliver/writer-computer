@@ -299,6 +299,21 @@ export function mcpStatus(): Promise<McpStatus> {
   return invoke("mcp_status");
 }
 
+/** Whether the `writer` shell command is on PATH — backs the settings
+ *  surface's "point at Install CLI" fallback (FR-008a). The command is
+ *  registered on macOS only; on other platforms the invoke rejects and
+ *  callers treat the install state as unknown. */
+export interface CliInstallStatus {
+  target: string;
+  source: string | null;
+  installed: boolean;
+  state: "missing" | "installed" | "stale" | "foreign";
+}
+
+export function cliStatus(): Promise<CliInstallStatus> {
+  return invoke("cli_status");
+}
+
 /** Complete one forwarded tool call. Exactly one of `result` / `error` is
  *  set — the dispatcher decides which before calling. */
 export function mcpRespond(

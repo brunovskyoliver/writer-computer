@@ -4,6 +4,7 @@ import { SETTINGS_SCHEMA, type SettingDef } from "@/lib/settings-schema";
 import { SettingControl } from "./setting-control";
 import { ThemesSection } from "./themes-section";
 import { LatexSuiteExtras } from "./latex-suite-extras";
+import { McpSection } from "./mcp-section";
 import { EditorScrollContainer } from "@/components/editor-area/editor-scroll-container";
 
 /** Section that renders above the Themes block. The schema-driven section
@@ -12,7 +13,10 @@ import { EditorScrollContainer } from "@/components/editor-area/editor-scroll-co
 const SECTIONS_BEFORE_THEMES = ["Appearance", "Typography"] as const;
 
 /** Extra, non-schema UI rendered under a section's generated controls. */
-const SECTION_EXTRAS: Record<string, ComponentType> = { "LaTeX Suite": LatexSuiteExtras };
+const SECTION_EXTRAS: Record<string, ComponentType> = {
+  "LaTeX Suite": LatexSuiteExtras,
+  Privacy: McpSection,
+};
 
 export function SettingsPanel({ isVisible }: { isVisible: boolean }) {
   const settings = useAllSettings();
