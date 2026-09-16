@@ -8,6 +8,33 @@ import { showEditorNotice } from "./editor-notice-store";
 
 const MAX_IMAGE_SIZE_MB = 5;
 const MAX_IMAGE_SIZE = MAX_IMAGE_SIZE_MB * 1024 * 1024;
+const MAX_IMAGE_DIMENSION = 2560;
+const WEBP_QUALITY = 0.85;
+
+/** Re-encode an oversized image as WebP, downscaling if it is also huge in
+ *  pixels. Returns null when the browser cannot decode it (e.g. SVG, HEIC). */
+async function compressImage(file: File): Promise<{ bytes: Uint8Array; format: string } | null> {
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await createImageBitmap(file);
+  } catch {
+    return null;
+  }
+  const scale = Math.min(1, MAX_IMAGE_DIMENSION / Math.max(bitmap.width, bitmap.height));
+  const canvas = new OffscreenCanvas(
+    Math.round(bitmap.width * scale),
+    Math.round(bitmap.height * scale),
+  );
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    bitmap.close();
+    return null;
+  }
+  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  const blob = await canvas.convertToBlob({ type: "image/webp", quality: WEBP_QUALITY });
+  return { bytes: new Uint8Array(await blob.arrayBuffer()), format: "webp" };
+}
 
 async function handleImagePaste(
   file: File,
@@ -17,17 +44,27 @@ async function handleImagePaste(
 ) {
   const buffer = await file.arrayBuffer();
   if (isDisposed()) return;
-  if (buffer.byteLength > MAX_IMAGE_SIZE) {
-    const sizeMb = (buffer.byteLength / (1024 * 1024)).toFixed(1);
-    showEditorNotice(
-      `Image not pasted: ${sizeMb} MB is over the ${MAX_IMAGE_SIZE_MB} MB limit`,
-      editorApi.getTabIdForView(view),
-    );
-    return;
+
+  let bytes: Uint8Array<ArrayBufferLike> = new Uint8Array(buffer);
+  let format = file.type.split("/")[1] || "png";
+  if (bytes.byteLength > MAX_IMAGE_SIZE) {
+    const compressed = await compressImage(file);
+    if (isDisposed()) return;
+    if (!compressed || compressed.bytes.byteLength > MAX_IMAGE_SIZE) {
+      const sizeMb = ((compressed?.bytes.byteLength ?? bytes.byteLength) / (1024 * 1024)).toFixed(
+        1,
+      );
+      showEditorNotice(
+        `Image not pasted: ${sizeMb} MB is over the ${MAX_IMAGE_SIZE_MB} MB limit`,
+        editorApi.getTabIdForView(view),
+      );
+      return;
+    }
+    bytes = compressed.bytes;
+    format = compressed.format;
   }
 
-  const imageData = Array.from(new Uint8Array(buffer));
-  const format = file.type.split("/")[1] || "png";
+  const imageData = Array.from(bytes);
   const result = await tauri.saveClipboardImage(filePath, imageData, format);
   if (isDisposed()) return;
   const imageMarkdown = `![${file.name}](${formatMarkdownDestination(result.relative_path)})`;

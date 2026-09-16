@@ -2,6 +2,8 @@
 
 ## 2026-09-15
 
+- Pasting an image larger than 5 MB no longer fails. Writer re-encodes it as WebP (downscaling anything wider or taller than 2560px) and saves that instead; only an image still over 5 MB after compression, or one the renderer cannot decode, is rejected.
+
 - Agents and scripts can now inspect Writer over MCP. Enable "MCP server" in Settings, then point any MCP client at `writer mcp` — the CLI bridges stdio to a private Unix socket in Writer's app-data folder. Read-only for now: agents can list open workspaces and their files, fuzzy-search paths, and read note contents including frontmatter.
 
 - Agents can now also write through MCP: `create_file`, `write_file`, and `create_folder` let a connected agent create notes and folders or replace a note's content in full. Writes go through Writer's own save path — they appear in the sidebar and search index exactly like an editor save, a note open with unsaved edits refuses the write instead of losing the user's text, and a clean open tab shows the new content immediately.
