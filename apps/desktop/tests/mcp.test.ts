@@ -4,6 +4,25 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
 }));
 
+const { currentWindow } = vi.hoisted(() => ({
+  currentWindow: {
+    isMinimized: vi.fn(() => Promise.resolve(false)),
+    unminimize: vi.fn(() => Promise.resolve()),
+    setFocus: vi.fn(() => Promise.resolve()),
+    show: vi.fn(() => Promise.resolve()),
+  },
+}));
+
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: () => currentWindow,
+}));
+
+const { revealPathInSidebar } = vi.hoisted(() => ({
+  revealPathInSidebar: vi.fn(() => Promise.resolve()),
+}));
+
+vi.mock("@/lib/reveal-in-sidebar", () => ({ revealPathInSidebar }));
+
 import { invoke } from "@tauri-apps/api/core";
 import { dispatchMcpRequest, respondToMcpRequest } from "../src/lib/mcp";
 import { useEditorStore, type OpenFile, type Tab } from "../src/stores/editor-store";
@@ -268,6 +287,68 @@ describe("dispatchMcpRequest write tools", () => {
     });
     expect(refused.ok).toBe(false);
     if (!refused.ok) expect(refused.error.kind).toBe("already_exists");
+  });
+});
+
+describe("dispatchMcpRequest open/control tools", () => {
+  test("open_file navigates the active tab and brings the window forward", async () => {
+    const openFile = vi.fn(() => Promise.resolve());
+    const openFileInNewTab = vi.fn(() => Promise.resolve());
+    useEditorStore.setState({ openFile, openFileInNewTab });
+
+    const dispatch = await dispatchMcpRequest({
+      request_id: 1,
+      tool: "open_file",
+      args: { path: "/ws/b.md", relative_path: "b.md", new_tab: false },
+    });
+
+    expect(dispatch).toEqual({ ok: true, result: { opened: "b.md" } });
+    expect(openFile).toHaveBeenCalledWith("/ws/b.md");
+    expect(openFileInNewTab).not.toHaveBeenCalled();
+    expect(currentWindow.setFocus).toHaveBeenCalled();
+  });
+
+  test("open_file with new_tab opens a fresh tab", async () => {
+    const openFile = vi.fn(() => Promise.resolve());
+    const openFileInNewTab = vi.fn(() => Promise.resolve());
+    useEditorStore.setState({ openFile, openFileInNewTab });
+
+    const dispatch = await dispatchMcpRequest({
+      request_id: 1,
+      tool: "open_file",
+      args: { path: "/ws/b.md", relative_path: "b.md", new_tab: true },
+    });
+
+    expect(dispatch).toEqual({ ok: true, result: { opened: "b.md" } });
+    expect(openFileInNewTab).toHaveBeenCalledWith("/ws/b.md");
+    expect(openFile).not.toHaveBeenCalled();
+  });
+
+  test("open_file in a compact window only focuses — its file is already shown", async () => {
+    useWorkspaceStore.setState({ root: null, chromeMode: "compact-file" });
+    const openFile = vi.fn(() => Promise.resolve());
+    useEditorStore.setState({ openFile });
+
+    const dispatch = await dispatchMcpRequest({
+      request_id: 1,
+      tool: "open_file",
+      args: { path: "/ws/a.md", relative_path: "a.md", new_tab: false },
+    });
+
+    expect(dispatch).toEqual({ ok: true, result: { opened: "a.md" } });
+    expect(openFile).not.toHaveBeenCalled();
+    expect(currentWindow.setFocus).toHaveBeenCalled();
+  });
+
+  test("reveal_in_sidebar expands and highlights without a focus change", async () => {
+    const dispatch = await dispatchMcpRequest({
+      request_id: 1,
+      tool: "reveal_in_sidebar",
+      args: { path: "/ws/sub/note.md", relative_path: "sub/note.md" },
+    });
+
+    expect(dispatch).toEqual({ ok: true, result: {} });
+    expect(revealPathInSidebar).toHaveBeenCalledWith("/ws/sub/note.md", { showSidebar: true });
   });
 });
 

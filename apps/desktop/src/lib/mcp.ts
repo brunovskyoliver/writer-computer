@@ -1,6 +1,7 @@
 import * as tauri from "@/lib/tauri";
 import { locationBehavior } from "@/components/editor-area/page-kinds";
 import { getParentDir } from "@/lib/paths";
+import { revealPathInSidebar } from "@/lib/reveal-in-sidebar";
 import { useEditorStore } from "@/stores/editor-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 
@@ -158,12 +159,43 @@ async function createFolder(args: unknown) {
   return { path, relative_path: relativePath };
 }
 
+/** FR-020: open in the window's active tab — a fresh tab when `new_tab` —
+ *  then bring the window forward. The only webview-side tool allowed to
+ *  steal focus; Rust already resolved the path (`not_found` never reaches
+ *  here). */
+async function openFile(args: unknown) {
+  const { path, relativePath } = resolvedTarget(args);
+  const { new_tab } = (args ?? {}) as Record<string, unknown>;
+  // A compact window's whole scope is its hosted file — already shown, so
+  // the open reduces to the focus.
+  if (useWorkspaceStore.getState().chromeMode !== "compact-file") {
+    const editor = useEditorStore.getState();
+    if (new_tab === true) {
+      await editor.openFileInNewTab(path);
+    } else {
+      await editor.openFile(path);
+    }
+  }
+  await tauri.focusCurrentWindow();
+  return { opened: relativePath };
+}
+
+/** FR-022: the tab context-menu's reveal — expand the ancestors, scroll the
+ *  row into view, no focus change. */
+async function revealInSidebar(args: unknown) {
+  const { path } = resolvedTarget(args);
+  await revealPathInSidebar(path, { showSidebar: true });
+  return {};
+}
+
 const MCP_TOOL_HANDLERS: Record<string, McpToolHandler> = {
   describe_window: describeWindow,
   list_tabs: listTabs,
   create_file: createFile,
   write_file: writeFile,
   create_folder: createFolder,
+  open_file: openFile,
+  reveal_in_sidebar: revealInSidebar,
 };
 
 /** Run one forwarded tool call. Never throws — the bridge contract says the

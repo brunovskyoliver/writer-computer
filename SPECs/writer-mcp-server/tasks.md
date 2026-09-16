@@ -105,12 +105,12 @@ description: "Task list for Writer MCP Server implementation"
 
 ### Implementation for User Story 3
 
-- [ ] T027 [US3] Implement `open_file` handler in `apps/desktop/src/lib/mcp.ts`: `openFile`/`openFileInNewTab` on the editor store (`new_tab` input, default false), then bring the window forward; `not_found` if missing; may steal focus per FR-020; output `{opened: relative_path}`
-- [ ] T028 [US3] Implement `reveal_in_sidebar` handler in `apps/desktop/src/lib/mcp.ts`: `revealPathInSidebar` — expands and highlights the entry like the tab context-menu action, no focus change (FR-022)
-- [ ] T029 [US3] Implement `open_workspace` tool in `apps/desktop/src-tauri/src/mcp/server.rs`: absolute folder path input; `find_by_workspace` hit → focus that window and return its id (no duplicate, FR-021); miss → existing window-creation path (`open_workspace_in_new_window`); output `{workspace: id}`
-- [ ] T030 [US3] Implement `open_standalone_file` tool in `apps/desktop/src-tauri/src/mcp/server.rs`: absolute file path; `find_by_standalone_file` dedupe focuses the existing compact window, else `open_file_in_standalone_window` (FR-024); output `{opened: path}`
-- [ ] T031 [US3] Implement `focus_window` tool in `apps/desktop/src-tauri/src/mcp/server.rs`: `workspace` argument required (no sensible default); `window.set_focus()` plus unminimize, matching the existing window-focus call sites in `lib.rs` (FR-023)
-- [ ] T032 [US3] Register `open_file` and `reveal_in_sidebar` in the rmcp tool router in `apps/desktop/src-tauri/src/mcp/server.rs` as webview-forwarded tools (resolve workspace → window label first); confirm `focus_window`/`open_workspace`/`open_standalone_file` are the only tools that call `set_focus` and that no other tool steals focus (FR-030)
+- [x] T027 [US3] Implement `open_file` handler in `apps/desktop/src/lib/mcp.ts`: `openFile`/`openFileInNewTab` on the editor store (`new_tab` input, default false), then bring the window forward; `not_found` if missing; may steal focus per FR-020; output `{opened: relative_path}`
+- [x] T028 [US3] Implement `reveal_in_sidebar` handler in `apps/desktop/src/lib/mcp.ts`: `revealPathInSidebar` — expands and highlights the entry like the tab context-menu action, no focus change (FR-022)
+- [x] T029 [US3] Implement `open_workspace` tool in `apps/desktop/src-tauri/src/mcp/server.rs`: absolute folder path input; `find_by_workspace` hit → focus that window and return its id (no duplicate, FR-021); miss → existing window-creation path (`open_workspace_in_new_window`); output `{workspace: id}`
+- [x] T030 [US3] Implement `open_standalone_file` tool in `apps/desktop/src-tauri/src/mcp/server.rs`: absolute file path; `find_by_standalone_file` dedupe focuses the existing compact window, else `open_file_in_standalone_window` (FR-024); output `{opened: path}`
+- [x] T031 [US3] Implement `focus_window` tool in `apps/desktop/src-tauri/src/mcp/server.rs`: `workspace` argument required (no sensible default); `window.set_focus()` plus unminimize, matching the existing window-focus call sites in `lib.rs` (FR-023)
+- [x] T032 [US3] Register `open_file` and `reveal_in_sidebar` in the rmcp tool router in `apps/desktop/src-tauri/src/mcp/server.rs` as webview-forwarded tools (resolve workspace → window label first); confirm `focus_window`/`open_workspace`/`open_standalone_file` are the only tools that call `set_focus` and that no other tool steals focus (FR-030)
 
 **Checkpoint**: US3 fully functional — agent navigation is indistinguishable in end state from user navigation; verify against quickstart §5
 

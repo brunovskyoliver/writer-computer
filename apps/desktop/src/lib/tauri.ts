@@ -314,6 +314,17 @@ export function showMainWindow(): Promise<void> {
   return getCurrentWindow().show();
 }
 
+/** Bring the current window forward: unminimize if needed, then focus.
+ *  Only tools whose purpose is opening or focusing something may call this
+ *  (FR-030 — agent actions otherwise never steal focus). */
+export async function focusCurrentWindow(): Promise<void> {
+  const window = getCurrentWindow();
+  if (await window.isMinimized()) {
+    await window.unminimize();
+  }
+  await window.setFocus();
+}
+
 // Image commands
 export function saveClipboardImage(
   markdownFilePath: string,

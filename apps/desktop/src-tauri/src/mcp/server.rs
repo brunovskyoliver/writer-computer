@@ -156,6 +156,40 @@ pub struct CreateFolderArgs {
     pub path: String,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct OpenFileArgs {
+    /// Workspace id from `list_workspaces`; required when several are open.
+    #[serde(default)]
+    pub workspace: Option<String>,
+    /// Path relative to the workspace root, or absolute inside it.
+    pub path: String,
+    /// Open in a fresh tab instead of navigating the window's active tab.
+    #[serde(default)]
+    pub new_tab: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct OpenWorkspaceArgs {
+    /// Absolute path of the folder to open as a workspace.
+    pub path: String,
+    /// Reserved: v1 always opens a separate window or focuses the existing
+    /// one — an existing window is never re-rooted.
+    #[serde(default)]
+    pub new_window: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct StandaloneFileArgs {
+    /// Absolute path of the file to open in a compact window.
+    pub path: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct FocusWindowArgs {
+    /// Workspace id from `list_workspaces`. Required — there is no default.
+    pub workspace: String,
+}
+
 #[tool_router]
 impl WriterMcpServer {
     /// Enumerate every open scope, then fan out `describe_window` for each
@@ -369,6 +403,124 @@ impl WriterMcpServer {
         let (canonical, relative) = resolve_create_path(&resolved.scope, &args.path)?;
         self.forward_resolved(&resolved, "create_folder", &canonical, &relative, None)
             .await
+    }
+
+    /// Forwarded: the editor store owns tab open/navigation, and the webview
+    /// focuses its own window on success (FR-020). `resolve_path` answers
+    /// `not_found` up front, so no tab is ever created for a missing file.
+    #[tool(
+        description = "Open a file inside an open workspace — in the active tab, or a new tab with new_tab — and bring that window forward."
+    )]
+    async fn open_file(
+        &self,
+        Parameters(args): Parameters<OpenFileArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let resolved = resolve_workspace(self.app_state().inner(), args.workspace.as_deref())?;
+        let (canonical, relative) = resolve_path(&resolved.scope, &args.path)?;
+        let reply = forward_to_window(
+            self.app_state().inner(),
+            &resolved.label,
+            self.conn_id,
+            "open_file",
+            json!({
+                "path": canonical.to_string_lossy(),
+                "relative_path": relative,
+                "new_tab": args.new_tab.unwrap_or(false),
+            }),
+        )
+        .await?;
+        Ok(CallToolResult::structured(reply))
+    }
+
+    /// Forwarded: the reveal is the tab context-menu's own action — expand,
+    /// scroll into view, no focus change (FR-022).
+    #[tool(
+        description = "Reveal a file in its workspace window's sidebar: expand and highlight the entry like the tab context-menu action."
+    )]
+    async fn reveal_in_sidebar(
+        &self,
+        Parameters(args): Parameters<ReadFileArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let resolved = resolve_workspace(self.app_state().inner(), args.workspace.as_deref())?;
+        let (canonical, relative) = resolve_path(&resolved.scope, &args.path)?;
+        self.forward_resolved(&resolved, "reveal_in_sidebar", &canonical, &relative, None)
+            .await
+    }
+
+    /// The existing window-creation path: it already dedupes on
+    /// `find_by_workspace`, focusing the hosting window instead of building
+    /// a duplicate (FR-021).
+    #[tool(
+        description = "Open a folder as a workspace. If it is already open, its window is focused and its id returned — never a duplicate."
+    )]
+    async fn open_workspace(
+        &self,
+        Parameters(args): Parameters<OpenWorkspaceArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let raw = Path::new(&args.path);
+        if !raw.is_dir() {
+            return Err(McpToolError::new(
+                McpErrorKind::NotFound,
+                format!("{} is not a directory", args.path),
+            )
+            .into());
+        }
+        let canonical = raw
+            .canonicalize()
+            .map_err(|e| McpToolError::new(McpErrorKind::Internal, e.to_string()))?;
+        crate::open_new_workspace_window(&self.app, canonical.to_string_lossy().to_string(), None)
+            .map_err(|e| McpToolError::new(McpErrorKind::Internal, e.to_string()))?;
+        Ok(CallToolResult::structured(
+            json!({ "workspace": canonical.to_string_lossy() }),
+        ))
+    }
+
+    /// The existing standalone-window path: `find_by_standalone_file`
+    /// dedupe focuses the hosting compact window on repeat opens (FR-024).
+    #[tool(
+        description = "Open a single file in a standalone compact window. Repeat opens focus the existing window."
+    )]
+    async fn open_standalone_file(
+        &self,
+        Parameters(args): Parameters<StandaloneFileArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let raw = Path::new(&args.path);
+        if !raw.is_file() {
+            return Err(McpToolError::new(
+                McpErrorKind::NotFound,
+                format!("{} does not exist", args.path),
+            )
+            .into());
+        }
+        let canonical = raw
+            .canonicalize()
+            .map_err(|e| McpToolError::new(McpErrorKind::Internal, e.to_string()))?;
+        crate::open_standalone_file_window(&self.app, canonical.to_string_lossy().to_string())
+            .map_err(|e| McpToolError::new(McpErrorKind::Internal, e.to_string()))?;
+        Ok(CallToolResult::structured(
+            json!({ "opened": canonical.to_string_lossy() }),
+        ))
+    }
+
+    /// `workspace` is required — there is no sensible default. Unminimize +
+    /// focus, matching the other window-focus call sites (FR-023).
+    #[tool(
+        description = "Bring a workspace's window forward. `workspace` is required — an id from list_workspaces."
+    )]
+    async fn focus_window(
+        &self,
+        Parameters(args): Parameters<FocusWindowArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let resolved = resolve_workspace(self.app_state().inner(), Some(&args.workspace))?;
+        let window = self
+            .app
+            .get_webview_window(&resolved.label)
+            .ok_or_else(|| window_gone(&resolved))?;
+        let _ = window.unminimize();
+        window
+            .set_focus()
+            .map_err(|e| McpToolError::new(McpErrorKind::Internal, e.to_string()))?;
+        Ok(CallToolResult::structured(json!({})))
     }
 }
 
@@ -616,10 +768,11 @@ mod tests {
     // --- router registration -------------------------------------------------
 
     #[test]
-    fn router_registers_the_us1_and_us2_tools() {
-        // Routing rule check: the registered surface is the five read-only
-        // tools plus the three write tools; the writes and `list_tabs` are
-        // webview-forwarded, the rest resolve against AppState/disk.
+    fn router_registers_the_full_tool_surface() {
+        // Routing rule check: the read-only tools plus the write tools and
+        // the open/focus tools. The writes, `list_tabs`, `open_file`, and
+        // `reveal_in_sidebar` are webview-forwarded; the rest resolve
+        // against AppState/disk.
         let mut names: Vec<String> = WriterMcpServer::tool_router()
             .list_all()
             .into_iter()
@@ -631,10 +784,15 @@ mod tests {
             [
                 "create_file",
                 "create_folder",
+                "focus_window",
                 "list_files",
                 "list_tabs",
                 "list_workspaces",
+                "open_file",
+                "open_standalone_file",
+                "open_workspace",
                 "read_file",
+                "reveal_in_sidebar",
                 "search_files",
                 "write_file"
             ]
