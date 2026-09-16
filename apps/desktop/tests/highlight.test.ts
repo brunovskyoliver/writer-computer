@@ -6,11 +6,15 @@ import { htmlBlockParserExtension } from "../src/components/editor-area/html-blo
 import { latexMathNesting } from "../src/components/editor-area/latex-highlighting";
 import { prosemarkMarkdownSyntaxExtensions } from "../src/lib/prosemark-core/main";
 import { validateMath } from "../src/components/editor-area/math-renderer";
-import { planHighlightRegions } from "../src/components/editor-area/highlight-command";
+import {
+  planDirectHighlightEdit,
+  planHighlightRegions,
+} from "../src/components/editor-area/highlight-command";
 import {
   detectHighlights,
   emitMathHighlight,
   emitProseHighlight,
+  findHighlightCoveringRange,
   highlightContext,
 } from "../src/lib/highlight/emit";
 import { expandAndValidate, passesGuards } from "../src/lib/highlight/math-range";
@@ -163,6 +167,28 @@ describe("highlight detector", () => {
 });
 
 describe("highlight write path (regions)", () => {
+  const applyChanges = (
+    text: string,
+    changes: readonly { from: number; to: number; insert: string }[],
+  ) => {
+    let out = text;
+    for (const change of changes.toReversed()) {
+      out = out.slice(0, change.from) + change.insert + out.slice(change.to);
+    }
+    return out;
+  };
+
+  const renderMathPlan = (plan: ReturnType<typeof planHighlightRegions>) => {
+    let out = "";
+    let cursor = 0;
+    for (const region of plan.regions) {
+      out += plan.stripped.slice(cursor, region.from);
+      out += emitMathHighlight(plan.stripped.slice(region.from, region.to), region.hex);
+      cursor = region.to;
+    }
+    return out + plan.stripped.slice(cursor);
+  };
+
   test("a plain selection produces one region", () => {
     const plan = planHighlightRegions("a + b", 0, 5, "#cf222e");
     expect(plan.stripped).toBe("a + b");
@@ -205,12 +231,65 @@ describe("highlight write path (regions)", () => {
     expect(plan.stripped).toBe(inner);
   });
 
-  test("apply-then-remove returns the source byte-for-byte", () => {
-    const text = "x + y";
-    const apply = planHighlightRegions(text, 0, 5, "#e0a000");
-    const applied = emitMathHighlight(apply.stripped, "#e0a000");
-    const remove = planHighlightRegions(applied, 0, applied.length, null);
-    expect(remove.stripped).toBe(text);
+  test.each([
+    [
+      "math",
+      "x + \\frac{a}{b}  weird   spacing",
+      emitMathHighlight,
+      ["\\textcolor{#e0a000}{", "}"],
+    ],
+    [
+      "prose",
+      "text with  exact   spacing",
+      emitProseHighlight,
+      ['<span style="color:#e0a000">', "</span>"],
+    ],
+  ] as const)(
+    "apply-then-remove returns %s source byte-for-byte",
+    (context, original, emit, wrappers) => {
+      const applied = emit(original, "#e0a000");
+      const hit = detectHighlights(applied)[0];
+      const remove = planDirectHighlightEdit(applied, hit.from, hit.to, null, context);
+      expect(remove?.changes.map((change) => applied.slice(change.from, change.to))).toEqual(
+        wrappers,
+      );
+      expect(applyChanges(applied, remove?.changes ?? [])).toBe(original);
+    },
+  );
+
+  test("exact recolour replaces only the colour argument", () => {
+    const text = "\\textcolor{#e0a000}{x+y}";
+    const hit = detectHighlights(text)[0];
+    const edit = planDirectHighlightEdit(text, hit.from, hit.to, "#0969da", "math");
+    expect(edit?.changes).toEqual([
+      { from: text.indexOf("#e0a000"), to: text.indexOf("#e0a000") + 7, insert: "#0969da" },
+    ]);
+    expect(applyChanges(text, edit?.changes ?? [])).toBe("\\textcolor{#0969da}{x+y}");
+  });
+
+  test("partial overlap emits three adjacent wrappers without nesting", () => {
+    const text = "\\textcolor{#e0a000}{abcde}";
+    const hit = detectHighlights(text)[0];
+    const plan = planHighlightRegions(
+      text,
+      hit.from + 2,
+      hit.from + 4,
+      "#0969da",
+      undefined,
+      "math",
+    );
+    const rendered = renderMathPlan(plan);
+    expect(rendered).toBe(
+      "\\textcolor{#e0a000}{ab}\\textcolor{#0969da}{cd}\\textcolor{#e0a000}{e}",
+    );
+    expect(detectHighlights(rendered)).toHaveLength(3);
+  });
+
+  test("finds the active highlight covering a selection without snapping its colour", () => {
+    const text = "\\textcolor{#123abc}{abcde}";
+    const hit = detectHighlights(text)[0];
+    expect(findHighlightCoveringRange(text, hit.from + 1, hit.to - 1, "math")?.hex).toBe("#123abc");
+    expect(HIGHLIGHT_PALETTE.some((colour) => colour.hex === "#123abc")).toBe(false);
   });
 
   test("the math plan leaves a prose span inside the formula alone", () => {

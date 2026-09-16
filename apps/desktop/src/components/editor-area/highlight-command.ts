@@ -59,6 +59,44 @@ export interface HighlightPlan {
   absorbed: DetectedHighlight[];
 }
 
+export interface DirectHighlightEdit {
+  changes: { from: number; to: number; insert: string }[];
+  selection: { from: number; to: number };
+}
+
+export function planDirectHighlightEdit(
+  text: string,
+  selFrom: number,
+  selTo: number,
+  newHex: string | null,
+  context: "math" | "prose",
+): DirectHighlightEdit | null {
+  const highlight = detectHighlights(text).find(
+    (candidate) =>
+      candidate.context === context && candidate.from === selFrom && candidate.to === selTo,
+  );
+  if (!highlight) return null;
+  if (newHex !== null) {
+    const hexFrom = text.indexOf(highlight.hex, highlight.wrapperFrom);
+    if (hexFrom < highlight.wrapperFrom || hexFrom + highlight.hex.length > highlight.from)
+      return null;
+    return {
+      changes: [{ from: hexFrom, to: hexFrom + highlight.hex.length, insert: newHex }],
+      selection: { from: selFrom, to: selTo },
+    };
+  }
+  return {
+    changes: [
+      { from: highlight.wrapperFrom, to: highlight.from, insert: "" },
+      { from: highlight.to, to: highlight.wrapperTo, insert: "" },
+    ],
+    selection: {
+      from: highlight.wrapperFrom,
+      to: highlight.wrapperFrom + highlight.to - highlight.from,
+    },
+  };
+}
+
 const WRAPPER_OVERHEAD = "\\textcolor{#000000}{".length + "}".length;
 
 /**
@@ -167,6 +205,18 @@ export function planHighlightRegions(
 const overlaps = (a: { from: number; to: number }, b: { from: number; to: number }) =>
   a.from < b.to && b.from < a.to;
 
+function dispatchDirectEdit(view: EditorView, edit: DirectHighlightEdit, base = 0) {
+  view.dispatch({
+    changes: edit.changes.map((change) => ({
+      from: base + change.from,
+      to: base + change.to,
+      insert: change.insert,
+    })),
+    selection: EditorSelection.range(base + edit.selection.from, base + edit.selection.to),
+  });
+  view.focus();
+}
+
 /** The math branch: each region walks `expandAndValidate` on the stripped
  *  formula, and a remainder that cannot be re-wrapped safely fails the whole
  *  action rather than writing a partial result (research R8). An expansion
@@ -186,6 +236,13 @@ function applyMathHighlight(
   if (selFrom >= selTo) return "invalid";
 
   const hex = colour?.hex ?? null;
+  const direct = planDirectHighlightEdit(formula, selFrom, selTo, hex, "math");
+  if (direct) {
+    if (direct.changes.some((change) => formula.slice(change.from, change.to) !== change.insert)) {
+      dispatchDirectEdit(view, direct, node.formulaFrom);
+    }
+    return "applied";
+  }
   const allHits = detectHighlights(formula).filter((h) => h.context === "math");
   let seed: { from: number; to: number } | undefined;
 
@@ -301,6 +358,13 @@ function applyProseHighlight(
   colour: PaletteColour | null,
 ): ApplyHighlightResult {
   const text = view.state.doc.toString();
+  const direct = planDirectHighlightEdit(text, sel.from, sel.to, colour?.hex ?? null, "prose");
+  if (direct) {
+    if (direct.changes.some((change) => text.slice(change.from, change.to) !== change.insert)) {
+      dispatchDirectEdit(view, direct);
+    }
+    return "applied";
+  }
   const plan = planHighlightRegions(
     text,
     sel.from,

@@ -12,7 +12,7 @@
 
 import { EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
 import { create } from "zustand";
-import { highlightContext } from "@/lib/highlight/emit";
+import { findHighlightCoveringRange, highlightContext } from "@/lib/highlight/emit";
 import { HIGHLIGHT_PALETTE, type PaletteColour } from "@/lib/highlight/palette";
 import { treeChanged } from "@/lib/prosemark-core/utils";
 import { findOuterScroller } from "./editor-scroll";
@@ -22,6 +22,7 @@ import "./highlight.css";
 interface BarSnapshot {
   left: number;
   top: number;
+  activeHex: string | null;
 }
 
 /** Per-view anchor positions; the component subscribes only to its own view's
@@ -40,7 +41,9 @@ function publishSnapshot(view: EditorView, snap: BarSnapshot | null) {
       next.delete(view);
       return { snapshots: next };
     }
-    if (had && had.left === snap.left && had.top === snap.top) return s;
+    if (had && had.left === snap.left && had.top === snap.top && had.activeHex === snap.activeHex) {
+      return s;
+    }
     const next = new Map(s.snapshots);
     next.set(view, snap);
     return { snapshots: next };
@@ -77,16 +80,22 @@ export const highlightBarPlugin = ViewPlugin.define((view) => ({
     // handler itself (docs/editor.md). The measure re-resolves the live
     // selection — a transaction landing between the update and the measure
     // must not anchor the bar to a range that no longer exists (FR-017).
+    const recomputeActive = update.docChanged || update.selectionSet;
     view.requestMeasure({
       read() {
         const live = view.state.selection.main;
-        if (
-          live.empty ||
-          view.state.readOnly ||
-          highlightContext(view.state, live.from, live.to) === null
-        ) {
+        const context = live.empty ? null : highlightContext(view.state, live.from, live.to);
+        if (live.empty || view.state.readOnly || context === null) {
           return null;
         }
+        const activeHex = recomputeActive
+          ? (findHighlightCoveringRange(
+              view.state.doc.toString(),
+              live.from,
+              live.to,
+              context.kind === "math" ? "math" : "prose",
+            )?.hex ?? null)
+          : (useHighlightBarStore.getState().snapshots.get(view)?.activeHex ?? null);
         const scroller = findOuterScroller(view.dom);
         const head = view.coordsAtPos(live.from);
         const tail = view.coordsAtPos(live.to);
@@ -103,7 +112,7 @@ export const highlightBarPlugin = ViewPlugin.define((view) => ({
           above >= 0
             ? above
             : (tail?.bottom ?? head.bottom) - originTop + scroller.scrollTop + BAR_OFFSET;
-        return { left, top };
+        return { left, top, activeHex };
       },
       write(snap) {
         publishSnapshot(view, snap);
@@ -133,6 +142,7 @@ export function HighlightBar({ view, tabId }: { view: EditorView | null; tabId: 
           style={{ backgroundColor: colour.hex }}
           title={colour.name}
           aria-label={`Highlight ${colour.name}`}
+          aria-pressed={snapshot.activeHex === colour.hex}
           // Keep the press from collapsing the selection before onClick can
           // re-resolve it — the same pattern the PDF block quote button uses.
           onMouseDown={(event) => event.preventDefault()}
@@ -150,6 +160,7 @@ export function HighlightBar({ view, tabId }: { view: EditorView | null; tabId: 
         className="highlight-remove"
         title="Remove highlight"
         aria-label="Remove highlight"
+        disabled={snapshot.activeHex === null}
         onMouseDown={(event) => event.preventDefault()}
         onClick={() => {
           if (applyHighlight(view, null, tabId) === "invalid") {

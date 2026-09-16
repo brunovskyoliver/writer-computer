@@ -152,6 +152,22 @@ export function detectHighlights(text: string, base = 0): DetectedHighlight[] {
   return found.sort((a, b) => a.wrapperFrom - b.wrapperFrom);
 }
 
+export function findHighlightCoveringRange(
+  text: string,
+  from: number,
+  to: number,
+  context?: "math" | "prose",
+): DetectedHighlight | null {
+  return (
+    detectHighlights(text).find(
+      (highlight) =>
+        (context === undefined || highlight.context === context) &&
+        highlight.from <= from &&
+        to <= highlight.to,
+    ) ?? null
+  );
+}
+
 /**
  * The math emitter (FR-005): the fragment is wrapped byte-for-byte — a prefix,
  * the untouched document text, a suffix. Written inside the `$…$`/`$$…$$`

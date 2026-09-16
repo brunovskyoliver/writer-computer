@@ -40,8 +40,18 @@
   );
 }
 
+.highlight-swatch[aria-pressed="true"] {
+  outline: 2px solid var(--fg-base);
+  outline-offset: 2px;
+}
+
+.highlight-remove:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
 .highlight-swatch:hover,
-.highlight-remove:hover {
+.highlight-remove:not(:disabled):hover {
   transform: scale(1.12);
 }
 

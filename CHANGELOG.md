@@ -2,7 +2,7 @@
 
 ## 2026-09-16
 
-- Select a fragment of a `$…$`/`$$…$$` formula — or a run of ordinary prose — and a colour bar appears above the selection. Picking a swatch writes the colour into the Markdown itself: `\textcolor{#rrggbb}{…}` inside the math delimiters, `<span style="color:#rrggbb">…</span>` in prose, one span per paragraph — one undoable edit either way, readable in Obsidian and on GitHub. Formula selections that don't map to a whole fragment are expanded over the enclosing group or command (`{a}` inside `\frac{a}{b}` colours the whole fraction); selections that can't be coloured safely write nothing and say why. While editing, the markup conceals and the text shows in its colour until the caret enters it. Recolour/remove polish and keyboard access are still to come.
+- Select a fragment of a `$…$`/`$$…$$` formula — or a run of ordinary prose — and a colour bar appears above the selection. Picking a swatch writes the colour into the Markdown itself: `\textcolor{#rrggbb}{…}` inside the math delimiters, `<span style="color:#rrggbb">…</span>` in prose, one span per paragraph — one undoable edit either way, readable in Obsidian and on GitHub. Formula selections that don't map to a whole fragment are expanded over the enclosing group or command (`{a}` inside `\frac{a}{b}` colours the whole fraction); selections that can't be coloured safely write nothing and say why. While editing, the markup conceals and the text shows in its colour until the caret enters it. Selecting coloured text now marks its current swatch, lets you replace that colour without nesting wrappers, and enables byte-exact removal in one undoable edit. Keyboard access is still to come.
 
 ## 2026-09-15
 
