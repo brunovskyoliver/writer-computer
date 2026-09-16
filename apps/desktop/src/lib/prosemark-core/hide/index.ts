@@ -4,7 +4,8 @@ import type { InlineContext, MarkdownConfig } from "@lezer/markdown";
 import { markdownTags } from "../markdown/tags";
 import { stateWORDAt } from "../utils";
 
-export { hideExtension } from "./core";
+export { hideExtension, hidableNodeFacet } from "./core";
+export type { HidableNodeSpec } from "./core";
 
 const renderedLinkDecoration = Decoration.mark({
   class: "cm-rendered-link",

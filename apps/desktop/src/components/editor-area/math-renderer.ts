@@ -47,3 +47,22 @@ export function renderMath(
 export function clearMathCache() {
   htmlCache.clear();
 }
+
+// `katex.__parse` is the parser itself — throws ParseError on unrenderable
+// input — but is absent from @types/katex, so the cast names it once here.
+const katexParse = (katex as unknown as { __parse: (formula: string) => unknown }).__parse.bind(
+  katex,
+);
+
+/** Yes/no on "would this formula render". The highlight write path runs it on
+ *  each candidate range before anything is written — a candidate that fails
+ *  never reaches the document (FR-008/FR-009). Full parse, not
+ *  renderToString: only the verdict is needed. */
+export function validateMath(formula: string): boolean {
+  try {
+    katexParse(formula);
+    return true;
+  } catch {
+    return false;
+  }
+}

@@ -1,5 +1,6 @@
 import type { EditorView } from "@codemirror/view";
 import { ProseMarkEditor } from "./prosemark-editor";
+import { HighlightBar } from "./highlight-bar";
 import { FrontmatterPanel } from "./frontmatter-panel";
 import { EditorScrollContainer } from "./editor-scroll-container";
 import { EditorSearchOverview } from "./editor-search-overview";
@@ -89,6 +90,7 @@ export const EditorPane = memo(function EditorPane({
           autoFocus={isFocused}
           onViewChange={setEditorView}
         />
+        <HighlightBar view={editorView} tabId={tabId} />
       </EditorScrollContainer>
       <SectionRail filePath={path} view={editorView} scrollContainerRef={scrollContainerRef} />
       {isFocused && <EditorSearchOverview scrollContainerRef={scrollContainerRef} />}

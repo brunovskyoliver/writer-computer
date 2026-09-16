@@ -46,7 +46,7 @@ export function EditorScrollContainer({ ref, children }: EditorScrollContainerPr
     >
       <div
         ref={ref}
-        className="h-full overflow-y-auto [scrollbar-gutter:stable_both-edges]"
+        className="relative h-full overflow-y-auto [scrollbar-gutter:stable_both-edges]"
         style={{
           maskImage: FADE_MASK,
           WebkitMaskImage: FADE_MASK,

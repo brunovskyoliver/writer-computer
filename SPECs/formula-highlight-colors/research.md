@@ -339,3 +339,26 @@ block finds nothing and the concealment silently fails. This makes the contract'
 paragraph_ rule **load-bearing rather than cosmetic**: Writer must never emit the straddling form,
 and the multi-paragraph split in `document-format.md` is what guarantees the pairing scan always
 succeeds on Writer's own output.
+
+---
+
+## R10 — What actually conceals the math wrapper (implementation record)
+
+**Decision**: the math-source decoration pass in
+`apps/desktop/src/components/editor-area/highlight-decorations.ts` scans each `Math` node's formula
+span directly with the `detectHighlights` scanner, emitting `Decoration.replace` over the
+`\textcolor{#rrggbb}{` prefix and its closing `}`, and `Decoration.mark` over the inner glyphs.
+
+**Why not `hidableNodeFacet`**: plan.md assigned concealment to that facet, which holds for prose
+(research R9) but cannot hold for math. The facet keys on Lezer syntax nodes, and the tree under a
+`Math` node comes from `latexSourceLanguage` — a flat `StreamLanguage` tokenizer that emits token
+classes with no nesting. The `\textcolor` call, its colour argument, and the argument's braces are
+sibling tokens; there is no wrapper node for the facet to match and no `subNodeNameToHide` that names
+the markup. A source-range scan is the only mechanism that sees the wrapper as a unit.
+
+**Reveal rule**: the math case inverts the prose rule. A formula's source is unfolded because the
+caret is inside the math block, not inside a particular highlight — so the wrapper conceals whenever
+the caret is outside _that highlight's_ wrapper-or-inner range and reveals when the caret enters it
+(`rangeTouchesRange` over the whole `[wrapperFrom, wrapperTo)` span). Concealment uses
+`Decoration.replace`, not a `font-size: 0` mark: a collapsed bounding rect destabilises
+`view.coordsAtPos`, which the bar's own placement depends on (research R4's geometry argument).
