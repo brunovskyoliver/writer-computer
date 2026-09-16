@@ -81,6 +81,32 @@ async function refreshSidebarParent(path: string) {
   });
 }
 
+/**
+ * One in-flight write per canonical path. `mcp:request` dispatch is
+ * fire-and-forget and each handler's awaits let later requests start before
+ * earlier ones finish, so without this chain two writes to the same file
+ * could settle out of order and the earlier request would win on disk.
+ * Admission order is commit order; a failed op never blocks the next.
+ */
+const pathWriteQueues = new Map<string, Promise<unknown>>();
+
+function enqueuePathWrite<T>(path: string, op: () => Promise<T>): Promise<T> {
+  const queued = (pathWriteQueues.get(path) ?? Promise.resolve()).then(op, op);
+  pathWriteQueues.set(path, queued);
+  const cleanup = () => {
+    if (pathWriteQueues.get(path) === queued) pathWriteQueues.delete(path);
+  };
+  void queued.then(cleanup, cleanup);
+  return queued;
+}
+
+function unsavedConflict(relativePath: string, when: string): McpToolFailure {
+  return new McpToolFailure(
+    "unsaved_conflict",
+    `${relativePath} ${when}; the user's text is preserved — retry after they save`,
+  );
+}
+
 function describeWindow() {
   const { root, chromeMode } = useWorkspaceStore.getState();
   const { activeFilePath } = useEditorStore.getState();
@@ -105,38 +131,71 @@ function listTabs() {
 
 async function createFile(args: unknown) {
   const { path, relativePath, content } = resolvedContentTarget(args);
-  if (await tauri.fileExists(path)) {
-    throw new McpToolFailure("already_exists", `${relativePath} already exists`);
-  }
-  try {
-    await tauri.createFile(path);
-  } catch (error) {
-    if (isAlreadyExistsError(error)) {
+  return enqueuePathWrite(path, async () => {
+    if (await tauri.fileExists(path)) {
       throw new McpToolFailure("already_exists", `${relativePath} already exists`);
     }
-    throw error;
-  }
-  const written = await tauri.writeFile(path, content);
-  await refreshSidebarParent(path);
-  return { path, relative_path: relativePath, modified_at: written.modified_at };
+    // A dirty open tab on a deleted path still owns it — the autosave engine
+    // will recreate the file with the user's text.
+    if (useEditorStore.getState().openFiles.get(path)?.isDirty) {
+      throw unsavedConflict(relativePath, "is open with unsaved changes");
+    }
+    try {
+      await tauri.createFile(path);
+    } catch (error) {
+      if (isAlreadyExistsError(error)) {
+        throw new McpToolFailure("already_exists", `${relativePath} already exists`);
+      }
+      throw error;
+    }
+    try {
+      const written = await tauri.writeFile(path, content);
+      await refreshSidebarParent(path);
+      return { path, relative_path: relativePath, modified_at: written.modified_at };
+    } catch (error) {
+      // The create already committed a placeholder; leaving it would make a
+      // retry report already_exists. Remove only what this request made —
+      // through the same trash path the UI's delete uses.
+      await tauri.deleteEntry(path).catch((cleanupError: unknown) => {
+        console.warn("[mcp] placeholder cleanup failed", cleanupError);
+      });
+      await refreshSidebarParent(path);
+      throw error;
+    }
+  });
 }
 
 async function writeFile(args: unknown) {
   const { path, relativePath, content } = resolvedContentTarget(args);
-  const open = useEditorStore.getState().openFiles.get(path);
-  if (open?.isDirty) {
-    throw new McpToolFailure(
-      "unsaved_conflict",
-      `${relativePath} is open with unsaved changes; the user's text is preserved — retry after they save`,
-    );
+  return enqueuePathWrite(path, () => writeFileResolved(path, relativePath, content));
+}
+
+async function writeFileResolved(path: string, relativePath: string, content: string) {
+  const admitted = useEditorStore.getState().openFiles.get(path);
+  if (admitted?.isDirty) {
+    throw unsavedConflict(relativePath, "is open with unsaved changes");
   }
   const written = await tauri.writeFile(path, content);
-  // A clean open tab must show the new content without user action (FR-017)
-  // — the same refresh the file watcher applies to an external change. If the
-  // tab went dirty during the write the user's text wins: it stays open and
-  // the autosave engine writes it back over this write.
+  // Re-check the tab's state after the write resolves, not just at
+  // admission: an edit landing mid-await either leaves the tab dirty (an
+  // autosave is queued and will write the user's text back over ours) or
+  // moves `diskContent` (a save or external reload completed during the
+  // write, so disk no longer matches what the editor shows). Both mean this
+  // write lost the race — report the conflict and restore the editor's text
+  // instead of reloading ours over it.
   const settled = useEditorStore.getState().openFiles.get(path);
-  if (settled && !settled.isDirty) {
+  if (settled && (settled.isDirty || settled.diskContent !== admitted?.diskContent)) {
+    if (!settled.isDirty) {
+      // Clean in the store but our write outran the save that set this
+      // diskContent: re-dirtying queues an autosave that restores the
+      // user's text to disk.
+      useEditorStore.getState().updateContent(path, settled.content);
+    }
+    throw unsavedConflict(relativePath, "changed while the write was in flight");
+  }
+  // A clean open tab must show the new content without user action (FR-017)
+  // — the same refresh the file watcher applies to an external change.
+  if (settled) {
     useEditorStore.getState().reloadFromDisk(path, content);
   }
   return { path, relative_path: relativePath, modified_at: written.modified_at };
@@ -144,19 +203,21 @@ async function writeFile(args: unknown) {
 
 async function createFolder(args: unknown) {
   const { path, relativePath } = resolvedTarget(args);
-  if (await tauri.fileExists(path)) {
-    throw new McpToolFailure("already_exists", `${relativePath} already exists`);
-  }
-  try {
-    await tauri.createDirectory(path);
-  } catch (error) {
-    if (isAlreadyExistsError(error)) {
+  return enqueuePathWrite(path, async () => {
+    if (await tauri.fileExists(path)) {
       throw new McpToolFailure("already_exists", `${relativePath} already exists`);
     }
-    throw error;
-  }
-  await refreshSidebarParent(path);
-  return { path, relative_path: relativePath };
+    try {
+      await tauri.createDirectory(path);
+    } catch (error) {
+      if (isAlreadyExistsError(error)) {
+        throw new McpToolFailure("already_exists", `${relativePath} already exists`);
+      }
+      throw error;
+    }
+    await refreshSidebarParent(path);
+    return { path, relative_path: relativePath };
+  });
 }
 
 /** FR-020: open in the window's active tab — a fresh tab when `new_tab` —

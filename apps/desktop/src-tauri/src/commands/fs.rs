@@ -128,6 +128,19 @@ const DRAWING_EXTENSION: &str = ".excalidraw.svg";
 /// `.md`-filtered fuzzy index in `commands/search.rs`.
 const PDF_EXTENSION: &str = ".pdf";
 
+/// A Markdown note: `.md` or `.markdown`, case-insensitive. The one kind
+/// check shared by the sidebar, the search index, the watcher, recents,
+/// standalone opens, and the MCP kind gates so the listed, indexed, and
+/// writable document sets cannot drift apart.
+pub(crate) fn is_markdown_file(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    let lower = name.to_ascii_lowercase();
+    (lower.ends_with(".md") && name.len() > ".md".len())
+        || (lower.ends_with(".markdown") && name.len() > ".markdown".len())
+}
+
 /// The file kinds the sidebar surfaces: Markdown notes, drawings and PDFs. One
 /// predicate so listing and folder visibility cannot drift apart — a drawing
 /// visible in a folder that the tree hides is the failure this prevents.
@@ -136,7 +149,7 @@ pub(crate) fn is_sidebar_file(path: &Path) -> bool {
         return false;
     };
     let lower = name.to_ascii_lowercase();
-    lower.ends_with(".md") && name.len() > 3
+    is_markdown_file(path)
         || (lower.ends_with(DRAWING_EXTENSION) && name.len() > DRAWING_EXTENSION.len())
         || (lower.ends_with(PDF_EXTENSION) && name.len() > PDF_EXTENSION.len())
 }
@@ -281,10 +294,7 @@ pub fn read_directory_impl(
             // `is_markdown` stays literal — it gates the file context menu and
             // title extraction, neither of which applies to a drawing (whose
             // title is its filename stem and whose body is SVG, not prose).
-            let is_markdown = entry_path
-                .extension()
-                .and_then(|e| e.to_str())
-                .is_some_and(|e| e.eq_ignore_ascii_case("md"));
+            let is_markdown = is_markdown_file(&entry_path);
             files.push(DirEntry {
                 name,
                 path: entry_path.to_string_lossy().to_string(),
@@ -375,11 +385,7 @@ pub async fn write_file(
 }
 
 pub(crate) fn markdown_file_entry(path: &Path) -> Option<DirEntry> {
-    if !path.is_file()
-        || !path
-            .extension()
-            .is_some_and(|e| e.eq_ignore_ascii_case("md"))
-    {
+    if !path.is_file() || !is_markdown_file(path) {
         return None;
     }
 

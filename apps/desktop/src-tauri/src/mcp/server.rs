@@ -3,7 +3,7 @@
 //! forwarded to the owning window's webview iff it needs live editor state
 //! or a UI action.
 
-use crate::commands::fs::{is_sidebar_file, modified_time, read_file_impl};
+use crate::commands::fs::{is_markdown_file, is_sidebar_file, modified_time, read_file_impl};
 use crate::commands::search::fuzzy_search_from;
 use crate::error::{McpErrorKind, McpToolError};
 use crate::ignore::WorkspaceIgnore;
@@ -709,8 +709,7 @@ fn is_readable_kind(path: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
         return false;
     };
-    let lower = name.to_ascii_lowercase();
-    lower.ends_with(".md") || lower.ends_with(".markdown") || lower.ends_with(".excalidraw.svg")
+    is_markdown_file(path) || name.to_ascii_lowercase().ends_with(".excalidraw.svg")
 }
 
 /// The kinds the write tools accept: markdown only. Drawings carry no dirty
@@ -718,14 +717,7 @@ fn is_readable_kind(path: &Path) -> bool {
 /// edits — the unsaved-conflict rule (FR-016) only holds where `openFiles`
 /// sees the file.
 fn check_writable_kind(canonical: &Path, relative: &str) -> Result<(), McpToolError> {
-    let Some(name) = canonical.file_name().and_then(|n| n.to_str()) else {
-        return Err(McpToolError::new(
-            McpErrorKind::UnsupportedKind,
-            format!("{relative} is not a writable kind (.md, .markdown)"),
-        ));
-    };
-    let lower = name.to_ascii_lowercase();
-    if !lower.ends_with(".md") && !lower.ends_with(".markdown") {
+    if !is_markdown_file(canonical) {
         return Err(McpToolError::new(
             McpErrorKind::UnsupportedKind,
             format!("{relative} is not a writable kind (.md, .markdown)"),
@@ -824,16 +816,16 @@ mod tests {
             .iter()
             .map(|e| e["relative_path"].as_str().unwrap())
             .collect();
-        for expected in ["a.md", "d.excalidraw.svg", "p.pdf", "sub/nested.md"] {
+        for expected in [
+            "a.md",
+            "b.markdown",
+            "d.excalidraw.svg",
+            "p.pdf",
+            "sub/nested.md",
+        ] {
             assert!(rels.contains(&expected), "missing {expected}");
         }
-        for excluded in [
-            "b.markdown",
-            "note.txt",
-            "build/out.md",
-            ".git/ignored.md",
-            ".gitignore",
-        ] {
+        for excluded in ["note.txt", "build/out.md", ".git/ignored.md", ".gitignore"] {
             assert!(!rels.contains(&excluded), "unexpected {excluded}");
         }
 
@@ -849,6 +841,7 @@ mod tests {
         assert_eq!(kinds["d.excalidraw.svg"], "drawing");
         assert_eq!(kinds["p.pdf"], "pdf");
         assert_eq!(kinds["a.md"], "markdown");
+        assert_eq!(kinds["b.markdown"], "markdown");
 
         // `path` restricts the listing to a subdirectory.
         let (entries, _) = list_files_impl(&state, &resolved, Some("sub"), 5000).unwrap();

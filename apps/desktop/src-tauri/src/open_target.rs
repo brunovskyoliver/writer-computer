@@ -89,8 +89,7 @@ fn classify(path: &Path) -> Result<PendingOpenPayload, OpenTargetError> {
 }
 
 fn is_markdown(path: &Path) -> bool {
-    path.extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("markdown"))
+    crate::commands::fs::is_markdown_file(path)
 }
 
 #[cfg(test)]

@@ -203,7 +203,7 @@ fn remove_subtree_from_index(state: &WorkspaceState, dir: &Path, root: &Path) {
     *state.dirs_with_markdown.write() = state::rebuild_dirs_from_index(&index, root);
 }
 
-/// Walk `dir` and merge every `.md` descendant into the file index.
+/// Walk `dir` and merge every Markdown descendant into the file index.
 ///
 /// Required for membership-change events that introduce a populated folder
 /// — Create(Folder) of a folder copied from outside the workspace, or
@@ -505,10 +505,7 @@ pub fn start_watcher(
                         continue;
                     }
 
-                    if !is_dir
-                        && path.extension().and_then(|e| e.to_str()) == Some("md")
-                        && path.exists()
-                    {
+                    if !is_dir && crate::commands::fs::is_markdown_file(path) && path.exists() {
                         let modified_at = crate::commands::fs::modified_time(path);
                         publish_prepared_index_for_snapshot(
                             &state,
@@ -597,9 +594,9 @@ pub fn start_watcher(
                     // FSEvents coalesces Create+Remove for the same path
                     // within one watch window, and Modify(Name) doesn't tell
                     // us which side of the rename this path is.
-                    let is_md = path.extension().and_then(|e| e.to_str()) == Some("md");
+                    let is_markdown = crate::commands::fs::is_markdown_file(path);
                     let path_exists = path.exists();
-                    if is_md {
+                    if is_markdown {
                         if path_exists {
                             let modified_at = crate::commands::fs::modified_time(path);
                             let found = vec![discovered_file(path, modified_at)];

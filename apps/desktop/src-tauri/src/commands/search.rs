@@ -191,7 +191,7 @@ pub fn index_workspace_impl(
                     return ignore::WalkState::Continue;
                 }
                 if entry.file_type().is_some_and(|ft| ft.is_file())
-                    && entry.path().extension().and_then(|e| e.to_str()) == Some("md")
+                    && crate::commands::fs::is_markdown_file(entry.path())
                 {
                     let rel = entry
                         .path()

@@ -30,6 +30,22 @@ import { useWorkspaceStore } from "../src/stores/workspace-store";
 
 const mockedInvoke = vi.mocked(invoke);
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+async function flushMicrotasks() {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 function fileTab(id: string, path: string): Tab {
   return { id, location: { kind: "file", path }, back: [], forward: [] };
 }
@@ -215,6 +231,148 @@ describe("dispatchMcpRequest write tools", () => {
     const file = useEditorStore.getState().openFiles.get("/ws/a.md");
     expect(file?.content).toBe("user text");
     expect(file?.isDirty).toBe(true);
+  });
+
+  test("write_file calls to one path commit in admission order", async () => {
+    const first = deferred<{ path: string; modified_at: number }>();
+    const writes: string[] = [];
+    mockedInvoke.mockImplementation((cmd, payload) => {
+      if (cmd === "write_file") {
+        const content = (payload as { content: string }).content;
+        writes.push(content);
+        return content === "first"
+          ? first.promise
+          : Promise.resolve({ path: "/ws/a.md", modified_at: 2 });
+      }
+      return Promise.reject(new Error(`unexpected command ${cmd}`));
+    });
+
+    const a = dispatchMcpRequest({
+      request_id: 1,
+      tool: "write_file",
+      args: { path: "/ws/a.md", relative_path: "a.md", content: "first" },
+    });
+    const b = dispatchMcpRequest({
+      request_id: 2,
+      tool: "write_file",
+      args: { path: "/ws/a.md", relative_path: "a.md", content: "second" },
+    });
+    await flushMicrotasks();
+    // The second op is queued behind the first — it hasn't invoked yet.
+    expect(writes).toEqual(["first"]);
+    first.resolve({ path: "/ws/a.md", modified_at: 1 });
+    const [dispatchA, dispatchB] = await Promise.all([a, b]);
+    expect(dispatchA.ok && dispatchB.ok).toBe(true);
+    expect(writes).toEqual(["first", "second"]);
+  });
+
+  test("write_file reports unsaved_conflict when a save lands mid-write and restores the user's text", async () => {
+    vi.useFakeTimers();
+    try {
+      useEditorStore.setState({
+        openFiles: new Map([["/ws/a.md", openFile("/ws/a.md", "old", false)]]),
+      });
+      const agentWrite = deferred<{ path: string; modified_at: number }>();
+      const writes: string[] = [];
+      mockedInvoke.mockImplementation((cmd, payload) => {
+        if (cmd === "write_file") {
+          const content = (payload as { content: string }).content;
+          writes.push(content);
+          return content === "agent"
+            ? agentWrite.promise
+            : Promise.resolve({ path: "/ws/a.md", modified_at: 4 });
+        }
+        return Promise.reject(new Error(`unexpected command ${cmd}`));
+      });
+
+      const dispatchPromise = dispatchMcpRequest({
+        request_id: 1,
+        tool: "write_file",
+        args: { path: "/ws/a.md", relative_path: "a.md", content: "agent" },
+      });
+      await flushMicrotasks(); // the agent's write_file invoke is in flight
+
+      // The user types while the agent's write is in flight; their autosave
+      // lands before it resolves.
+      useEditorStore.getState().updateContent("/ws/a.md", "user");
+      await flushMicrotasks();
+      agentWrite.resolve({ path: "/ws/a.md", modified_at: 4 });
+      const dispatch = await dispatchPromise;
+
+      expect(dispatch.ok).toBe(false);
+      if (!dispatch.ok) expect(dispatch.error.kind).toBe("unsaved_conflict");
+
+      // The re-dirtied tab's queued autosave restores the user's text to disk.
+      await vi.runOnlyPendingTimersAsync();
+      const file = useEditorStore.getState().openFiles.get("/ws/a.md");
+      expect(file?.content).toBe("user");
+      expect(file?.diskContent).toBe("user");
+      expect(file?.isDirty).toBe(false);
+      expect(writes).toEqual(["agent", "user", "user"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("write_file reports unsaved_conflict when an unsaved edit lands mid-write", async () => {
+    useEditorStore.setState({
+      openFiles: new Map([["/ws/a.md", openFile("/ws/a.md", "old", false)]]),
+    });
+    const agentWrite = deferred<{ path: string; modified_at: number }>();
+    const userSave = deferred<{ path: string; modified_at: number }>();
+    mockedInvoke.mockImplementation((cmd, payload) => {
+      if (cmd === "write_file") {
+        const content = (payload as { content: string }).content;
+        return content === "agent" ? agentWrite.promise : userSave.promise;
+      }
+      return Promise.reject(new Error(`unexpected command ${cmd}`));
+    });
+
+    const dispatchPromise = dispatchMcpRequest({
+      request_id: 1,
+      tool: "write_file",
+      args: { path: "/ws/a.md", relative_path: "a.md", content: "agent" },
+    });
+    await flushMicrotasks();
+    // The user types mid-write; their autosave is still in flight when the
+    // agent's write resolves.
+    useEditorStore.getState().updateContent("/ws/a.md", "user");
+    agentWrite.resolve({ path: "/ws/a.md", modified_at: 4 });
+    const dispatch = await dispatchPromise;
+
+    expect(dispatch.ok).toBe(false);
+    if (!dispatch.ok) expect(dispatch.error.kind).toBe("unsaved_conflict");
+    let file = useEditorStore.getState().openFiles.get("/ws/a.md");
+    expect(file?.content).toBe("user");
+    expect(file?.isDirty).toBe(true);
+
+    // The pending autosave then writes the user's text over the agent's.
+    userSave.resolve({ path: "/ws/a.md", modified_at: 5 });
+    await flushMicrotasks();
+    file = useEditorStore.getState().openFiles.get("/ws/a.md");
+    expect(file?.diskContent).toBe("user");
+    expect(file?.isDirty).toBe(false);
+  });
+
+  test("create_file removes its placeholder when the content write fails", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "file_exists") return Promise.resolve(false);
+      if (cmd === "create_file")
+        return Promise.resolve({ path: "/ws/new.md", content: "# ", modified_at: 1 });
+      if (cmd === "write_file") return Promise.reject(new Error("disk full"));
+      if (cmd === "delete_entry") return Promise.resolve();
+      if (cmd === "read_directory") return Promise.resolve([]);
+      return Promise.reject(new Error(`unexpected command ${cmd}`));
+    });
+
+    const dispatch = await dispatchMcpRequest({
+      request_id: 1,
+      tool: "create_file",
+      args: { path: "/ws/new.md", relative_path: "new.md", content: "# Draft\n" },
+    });
+
+    expect(dispatch.ok).toBe(false);
+    expect(mockedInvoke).toHaveBeenCalledWith("delete_entry", { path: "/ws/new.md" });
   });
 
   test("write_file goes through the save path and refreshes a clean open tab", async () => {

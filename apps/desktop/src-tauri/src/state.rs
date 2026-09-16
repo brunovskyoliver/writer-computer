@@ -277,7 +277,7 @@ impl WorkspaceState {
     /// indexed files, or insert the file when the index does not know it.
     /// The write path suppresses the watcher's events as self-writes, so a
     /// file created and written back-to-back would otherwise stay invisible
-    /// to search until the next full index. Only `.md` files under the
+    /// to search until the next full index. Only Markdown files under the
     /// workspace root are indexed — the same filter the index walker and
     /// watcher use.
     pub fn index_written_file(&self, path: &Path, modified_at: u64) {
@@ -292,9 +292,7 @@ impl WorkspaceState {
                 file.modified_at = modified_at;
             } else {
                 let Some(root) = root.as_deref() else { return };
-                if !path.starts_with(root)
-                    || path.extension().and_then(|e| e.to_str()) != Some("md")
-                {
+                if !path.starts_with(root) || !crate::commands::fs::is_markdown_file(path) {
                     return;
                 }
                 index.push(IndexedFile {

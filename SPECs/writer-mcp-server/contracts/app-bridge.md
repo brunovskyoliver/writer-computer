@@ -59,3 +59,11 @@ tool result or the error kinds in `mcp-tools.md`.
 - Dispatch of an unknown tool name → `internal` error, logged.
 - The dispatcher never throws across the bridge: every handler outcome is a
   `result` or an `{kind, detail}` error (constitution IV).
+- Writes to one canonical path are serialized through a per-path promise
+  queue in the dispatcher — the single JS thread interleaves async I/O, so
+  admission order is made commit order explicitly.
+- `write_file` re-checks the tab after its write resolves: a mid-write edit
+  or a save/reload that moved `diskContent` answers `unsaved_conflict` and
+  the editor's text is restored to disk rather than clobbered.
+- `create_file` removes the placeholder it created when the content write
+  fails, so a retry doesn't hit `already_exists`.

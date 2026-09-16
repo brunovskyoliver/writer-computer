@@ -98,15 +98,12 @@ fn push_recent(recents: &mut Vec<RecentEntry>, path: String, opened_at: u64) {
     recents.truncate(MAX_RECENT_FILES);
 }
 
-// Match `markdown_file_entry`'s display filter (`.md` only) so every entry
-// this records can actually be shown by `get_recent_files_global` — entries
-// recorded under a wider filter were persisted but silently dropped at read
-// time, leaving the picker empty.
+// Match `markdown_file_entry`'s display filter so every entry this records
+// can actually be shown by `get_recent_files_global` — entries recorded
+// under a wider filter were persisted but silently dropped at read time,
+// leaving the picker empty.
 fn is_markdown_file(path: &Path) -> bool {
-    path.is_file()
-        && path
-            .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+    path.is_file() && crate::commands::fs::is_markdown_file(path)
 }
 
 /// Record a file open into the global recents list. Non-markdown and
