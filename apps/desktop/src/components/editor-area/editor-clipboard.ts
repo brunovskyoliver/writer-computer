@@ -76,7 +76,10 @@ async function handleImagePaste(
 
   let bytes: Uint8Array<ArrayBufferLike> = new Uint8Array(buffer);
   let format = file.type.split("/")[1] || "png";
-  if (bytes.byteLength > MAX_IMAGE_SIZE) {
+  // HEIC is always re-encoded: the Rust side has no extension for it, and the
+  // notes are meant to stay readable outside this app.
+  const needsReencode = bytes.byteLength > MAX_IMAGE_SIZE || format.startsWith("hei");
+  if (needsReencode) {
     const compressed = await compressImage(file, MAX_IMAGE_SIZE);
     if (isDisposed()) return;
     if (!compressed || compressed.size > MAX_IMAGE_SIZE) {
