@@ -56,7 +56,9 @@
 }
 
 .highlight-swatch:focus-visible,
-.highlight-remove:focus-visible {
+.highlight-swatch:focus,
+.highlight-remove:focus-visible,
+.highlight-remove:focus {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }

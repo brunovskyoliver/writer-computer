@@ -10,139 +10,131 @@
  * and the plugin republishes, so the bar re-anchors on its own.
  */
 
-import { EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
-import { create } from "zustand";
-import { findHighlightCoveringRange, highlightContext } from "@/lib/highlight/emit";
+import { useEffect, useRef, useState } from "react";
+import type { EditorView } from "@codemirror/view";
 import { HIGHLIGHT_PALETTE, type PaletteColour } from "@/lib/highlight/palette";
-import { treeChanged } from "@/lib/prosemark-core/utils";
-import { findOuterScroller } from "./editor-scroll";
 import { applyHighlight } from "./highlight-command";
+import { dismissHighlightBar, useHighlightBarStore } from "./highlight-bar-state";
 import "./highlight.css";
 
-interface BarSnapshot {
-  left: number;
-  top: number;
-  activeHex: string | null;
-}
-
-/** Per-view anchor positions; the component subscribes only to its own view's
- *  entry. Positions live in the scroller's content space so they survive
- *  scroll without republishing. */
-const useHighlightBarStore = create<{ snapshots: Map<EditorView, BarSnapshot> }>(() => ({
-  snapshots: new Map(),
-}));
-
-function publishSnapshot(view: EditorView, snap: BarSnapshot | null) {
-  useHighlightBarStore.setState((s) => {
-    const had = s.snapshots.get(view);
-    if (snap === null) {
-      if (!had) return s;
-      const next = new Map(s.snapshots);
-      next.delete(view);
-      return { snapshots: next };
-    }
-    if (had && had.left === snap.left && had.top === snap.top && had.activeHex === snap.activeHex) {
-      return s;
-    }
-    const next = new Map(s.snapshots);
-    next.set(view, snap);
-    return { snapshots: next };
-  });
-}
-
-const BAR_HEIGHT = 30;
-const BAR_OFFSET = 8;
-
-export const highlightBarPlugin = ViewPlugin.define((view) => ({
-  update(update: ViewUpdate) {
-    if (
-      !update.docChanged &&
-      !update.selectionSet &&
-      !update.viewportChanged &&
-      !treeChanged(update)
-    ) {
-      return;
-    }
-    const sel = update.state.selection.main;
-    // Empty selection, read-only surface, code, or a selection whose ends
-    // disagree (math into prose): the bar is hidden, never guessed. The
-    // context probe runs here so a doc change that moves the selection into
-    // code hides it without waiting for a press.
-    if (
-      sel.empty ||
-      update.state.readOnly ||
-      highlightContext(update.state, sel.from, sel.to) === null
-    ) {
-      publishSnapshot(view, null);
-      return;
-    }
-    // Layout reads go through requestMeasure, never inside the update
-    // handler itself (docs/editor.md). The measure re-resolves the live
-    // selection — a transaction landing between the update and the measure
-    // must not anchor the bar to a range that no longer exists (FR-017).
-    const recomputeActive = update.docChanged || update.selectionSet;
-    view.requestMeasure({
-      read() {
-        const live = view.state.selection.main;
-        const context = live.empty ? null : highlightContext(view.state, live.from, live.to);
-        if (live.empty || view.state.readOnly || context === null) {
-          return null;
-        }
-        const activeHex = recomputeActive
-          ? (findHighlightCoveringRange(
-              view.state.doc.toString(),
-              live.from,
-              live.to,
-              context.kind === "math" ? "math" : "prose",
-            )?.hex ?? null)
-          : (useHighlightBarStore.getState().snapshots.get(view)?.activeHex ?? null);
-        const scroller = findOuterScroller(view.dom);
-        const head = view.coordsAtPos(live.from);
-        const tail = view.coordsAtPos(live.to);
-        if (!scroller || !head) return null;
-        const rect = scroller.getBoundingClientRect();
-        // Content-space origin: the padding box, so the bar's absolute
-        // position tracks the text through scroll (editor-scroll.ts does the
-        // same clientTop dance for the safe zone).
-        const originTop = rect.top + scroller.clientTop;
-        const originLeft = rect.left + scroller.clientLeft;
-        const left = head.left - originLeft + scroller.scrollLeft;
-        const above = head.top - originTop + scroller.scrollTop - BAR_HEIGHT - BAR_OFFSET;
-        const top =
-          above >= 0
-            ? above
-            : (tail?.bottom ?? head.bottom) - originTop + scroller.scrollTop + BAR_OFFSET;
-        return { left, top, activeHex };
-      },
-      write(snap) {
-        publishSnapshot(view, snap);
-      },
-    });
-  },
-  destroy() {
-    publishSnapshot(view, null);
-  },
-}));
+export {
+  type BarSnapshot,
+  type HighlightBarState,
+  useHighlightBarStore,
+  resetHighlightBarStore,
+  publishSnapshot,
+  dismissHighlightBar,
+  isHighlightBarOpen,
+  measureHighlightBar,
+  openAndFocusHighlightBar,
+  handleHighlightBarEscape,
+  highlightBarKeymap,
+  highlightBarPlugin,
+} from "./highlight-bar-state";
 
 export function HighlightBar({ view, tabId }: { view: EditorView | null; tabId: string }) {
-  const snapshot = useHighlightBarStore((s) => (view ? s.snapshots.get(view) : undefined));
+  const snapshot = useHighlightBarStore((s) =>
+    view && !s.dismissedViews.has(view) ? s.snapshots.get(view) : undefined,
+  );
+  const focusRequest = useHighlightBarStore((s) => (view ? s.focusRequests.get(view) : undefined));
+
+  const hasRemove = Boolean(snapshot?.activeHex);
+  const totalItems = hasRemove ? HIGHLIGHT_PALETTE.length + 1 : HIGHLIGHT_PALETTE.length;
+  const [focusedIndex, setFocusedIndex] = useState(0);
+  const safeFocusedIndex = Math.min(focusedIndex, Math.max(0, totalItems - 1));
+  const buttonRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  useEffect(() => {
+    if (focusRequest === undefined || !snapshot) return;
+    const targetIndex = snapshot.activeHex
+      ? HIGHLIGHT_PALETTE.findIndex((c) => c.hex === snapshot.activeHex)
+      : 0;
+    const index = targetIndex >= 0 ? targetIndex : 0;
+    setFocusedIndex(index);
+    buttonRefs.current[index]?.focus();
+    const frame1 = requestAnimationFrame(() => {
+      buttonRefs.current[index]?.focus();
+      const frame2 = requestAnimationFrame(() => {
+        buttonRefs.current[index]?.focus();
+      });
+      return () => cancelAnimationFrame(frame2);
+    });
+    return () => cancelAnimationFrame(frame1);
+  }, [focusRequest, snapshot?.activeHex]);
+
   if (!view || !snapshot) return null;
+
+  const handleKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      dismissHighlightBar(view);
+      view.focus();
+      return;
+    }
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+      event.preventDefault();
+      const next = (safeFocusedIndex + 1) % totalItems;
+      setFocusedIndex(next);
+      buttonRefs.current[next]?.focus();
+      return;
+    }
+    if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const next = (safeFocusedIndex - 1 + totalItems) % totalItems;
+      setFocusedIndex(next);
+      buttonRefs.current[next]?.focus();
+      return;
+    }
+    if (event.key === "Home") {
+      event.preventDefault();
+      setFocusedIndex(0);
+      buttonRefs.current[0]?.focus();
+      return;
+    }
+    if (event.key === "End") {
+      event.preventDefault();
+      const last = totalItems - 1;
+      setFocusedIndex(last);
+      buttonRefs.current[last]?.focus();
+      return;
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      if (safeFocusedIndex < HIGHLIGHT_PALETTE.length) {
+        const colour = HIGHLIGHT_PALETTE[safeFocusedIndex];
+        if (applyHighlight(view, colour, tabId) === "invalid") {
+          dismissHighlightBar(view);
+        }
+      } else if (hasRemove) {
+        if (applyHighlight(view, null, tabId) === "invalid") {
+          dismissHighlightBar(view);
+        }
+      }
+    }
+  };
+
   return (
     <div
       role="toolbar"
       aria-label="Highlight colour"
       className="highlight-bar"
       style={{ left: snapshot.left, top: snapshot.top }}
+      onKeyDown={handleKeyDown}
     >
-      {HIGHLIGHT_PALETTE.map((colour: PaletteColour) => (
+      {HIGHLIGHT_PALETTE.map((colour: PaletteColour, i: number) => (
         <button
           key={colour.id}
+          ref={(el) => {
+            buttonRefs.current[i] = el;
+          }}
           type="button"
+          tabIndex={safeFocusedIndex === i ? 0 : -1}
           className="highlight-swatch"
           style={{ backgroundColor: colour.hex }}
           title={colour.name}
           aria-label={`Highlight ${colour.name}`}
           aria-pressed={snapshot.activeHex === colour.hex}
+          onFocus={() => setFocusedIndex(i)}
           // Keep the press from collapsing the selection before onClick can
           // re-resolve it — the same pattern the PDF block quote button uses.
           onMouseDown={(event) => event.preventDefault()}
@@ -150,21 +142,26 @@ export function HighlightBar({ view, tabId }: { view: EditorView | null; tabId: 
             // Apply resolves the selection and context at press time; an
             // external change since the bar appeared writes nothing.
             if (applyHighlight(view, colour, tabId) === "invalid") {
-              publishSnapshot(view, null);
+              dismissHighlightBar(view);
             }
           }}
         />
       ))}
       <button
+        ref={(el) => {
+          buttonRefs.current[HIGHLIGHT_PALETTE.length] = el;
+        }}
         type="button"
+        tabIndex={safeFocusedIndex === HIGHLIGHT_PALETTE.length ? 0 : -1}
         className="highlight-remove"
         title="Remove highlight"
         aria-label="Remove highlight"
         disabled={snapshot.activeHex === null}
+        onFocus={() => setFocusedIndex(HIGHLIGHT_PALETTE.length)}
         onMouseDown={(event) => event.preventDefault()}
         onClick={() => {
           if (applyHighlight(view, null, tabId) === "invalid") {
-            publishSnapshot(view, null);
+            dismissHighlightBar(view);
           }
         }}
       />

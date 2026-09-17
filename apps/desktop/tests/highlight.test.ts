@@ -1,5 +1,6 @@
 import { describe, expect, test, vi } from "vite-plus/test";
-import { EditorState } from "@codemirror/state";
+import { EditorSelection, EditorState } from "@codemirror/state";
+import type { EditorView } from "@codemirror/view";
 import { markdown } from "@codemirror/lang-markdown";
 import { GFM } from "@lezer/markdown";
 import { htmlBlockParserExtension } from "../src/components/editor-area/html-block-decorations";
@@ -19,11 +20,20 @@ import {
 } from "../src/lib/highlight/emit";
 import { expandAndValidate, passesGuards } from "../src/lib/highlight/math-range";
 import { HIGHLIGHT_PALETTE } from "../src/lib/highlight/palette";
+import {
+  dismissHighlightBar,
+  handleHighlightBarEscape,
+  isHighlightBarOpen,
+  openAndFocusHighlightBar,
+  resetHighlightBarStore,
+  useHighlightBarStore,
+} from "../src/components/editor-area/highlight-bar-state";
 
 /** A state parsed with the same extension stack the editor ships. */
-function parseState(doc: string) {
+function parseState(doc: string, selection?: { from: number; to: number }, readOnly = false) {
   return EditorState.create({
     doc,
+    selection: selection ? EditorSelection.range(selection.from, selection.to) : undefined,
     extensions: [
       markdown({
         extensions: [
@@ -33,6 +43,7 @@ function parseState(doc: string) {
           latexMathNesting,
         ],
       }),
+      EditorState.readOnly.of(readOnly),
     ],
   });
 }
@@ -462,5 +473,100 @@ describe("prose emitter", () => {
     expect(hits.every((h) => h.context === "prose")).toBe(true);
     expect(text.slice(hits[0].from, hits[0].to)).toBe("one");
     expect(text.slice(hits[1].from, hits[1].to)).toBe("two");
+  });
+});
+
+describe("highlight bar keyboard and command palette (US4)", () => {
+  function makeTestView(marked: string, readOnly = false) {
+    const from = marked.indexOf("«");
+    const to = marked.indexOf("»");
+    const doc = marked.replace("«", "").replace("»", "");
+    const state = parseState(
+      doc,
+      from >= 0 && to >= 0 ? { from, to: to - 1 } : undefined,
+      readOnly,
+    );
+    const requestMeasure = vi.fn();
+    const view = {
+      state,
+      requestMeasure,
+    } as unknown as EditorView;
+    return { view, requestMeasure };
+  }
+
+  test("openAndFocusHighlightBar is a no-op on empty selection", () => {
+    resetHighlightBarStore();
+    const { view, requestMeasure } = makeTestView("no selection anywhere");
+    expect(openAndFocusHighlightBar(view)).toBe(false);
+    expect(useHighlightBarStore.getState().focusRequests.has(view)).toBe(false);
+    expect(requestMeasure).not.toHaveBeenCalled();
+  });
+
+  test("openAndFocusHighlightBar is a no-op on read-only surface", () => {
+    resetHighlightBarStore();
+    const { view, requestMeasure } = makeTestView("read «only» text", true);
+    expect(openAndFocusHighlightBar(view)).toBe(false);
+    expect(useHighlightBarStore.getState().focusRequests.has(view)).toBe(false);
+    expect(requestMeasure).not.toHaveBeenCalled();
+  });
+
+  test("openAndFocusHighlightBar is a no-op inside code blocks", () => {
+    resetHighlightBarStore();
+    const { view, requestMeasure } = makeTestView("`«code»`");
+    expect(openAndFocusHighlightBar(view)).toBe(false);
+    expect(useHighlightBarStore.getState().focusRequests.has(view)).toBe(false);
+    expect(requestMeasure).not.toHaveBeenCalled();
+  });
+
+  test("openAndFocusHighlightBar opens and schedules measure on valid prose selection", () => {
+    resetHighlightBarStore();
+    const { view, requestMeasure } = makeTestView("select «this word» here");
+    expect(openAndFocusHighlightBar(view)).toBe(true);
+    expect(useHighlightBarStore.getState().focusRequests.get(view)).toBe(1);
+    expect(useHighlightBarStore.getState().dismissedViews.has(view)).toBe(false);
+    expect(requestMeasure).toHaveBeenCalledTimes(1);
+  });
+
+  test("openAndFocusHighlightBar opens and schedules measure on valid math selection", () => {
+    resetHighlightBarStore();
+    const { view, requestMeasure } = makeTestView("$$«a+b»$$");
+    expect(openAndFocusHighlightBar(view)).toBe(true);
+    expect(useHighlightBarStore.getState().focusRequests.get(view)).toBe(1);
+    expect(requestMeasure).toHaveBeenCalledTimes(1);
+  });
+
+  test("escape dismisses an open highlight bar and leaves closed bar untouched", () => {
+    resetHighlightBarStore();
+    const { view } = makeTestView("select «word» here");
+    expect(isHighlightBarOpen(view)).toBe(false);
+    expect(handleHighlightBarEscape(view)).toBe(false);
+
+    useHighlightBarStore.setState({
+      snapshots: new Map([[view, { left: 10, top: 20, activeHex: null }]]),
+    });
+    expect(isHighlightBarOpen(view)).toBe(true);
+
+    expect(handleHighlightBarEscape(view)).toBe(true);
+    expect(isHighlightBarOpen(view)).toBe(false);
+    expect(useHighlightBarStore.getState().dismissedViews.has(view)).toBe(true);
+
+    expect(handleHighlightBarEscape(view)).toBe(false);
+  });
+
+  test("openAndFocusHighlightBar re-opens a previously dismissed bar", () => {
+    resetHighlightBarStore();
+    const { view } = makeTestView("select «word» here");
+    dismissHighlightBar(view);
+    expect(useHighlightBarStore.getState().dismissedViews.has(view)).toBe(true);
+
+    expect(openAndFocusHighlightBar(view)).toBe(true);
+    expect(useHighlightBarStore.getState().dismissedViews.has(view)).toBe(false);
+    expect(useHighlightBarStore.getState().focusRequests.get(view)).toBe(1);
+  });
+
+  test("the first palette entry is the default colour Amber", () => {
+    expect(HIGHLIGHT_PALETTE[0].id).toBe("amber");
+    expect(HIGHLIGHT_PALETTE[0].name).toBe("Amber");
+    expect(HIGHLIGHT_PALETTE[0].hex).toBe("#e0a000");
   });
 });

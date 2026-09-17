@@ -85,6 +85,19 @@ Standard editing shortcuts provided by CodeMirror's basic setup.
 | Alt+Shift+ArrowLeft  | Extend selection by word left  |
 | Alt+Shift+ArrowRight | Extend selection by word right |
 
+## Highlight Bar
+
+The colour bar appears beside a non-empty text selection. It can also be opened
+focused with "Highlight Selection" in the command palette (a no-op with no
+selection). These keys apply while the bar is open.
+
+| Shortcut                                     | Action                                            |
+| -------------------------------------------- | ------------------------------------------------- |
+| ArrowLeft / ArrowRight / ArrowUp / ArrowDown | Cycle through the swatches and the remove action  |
+| Home / End                                   | Jump to the first / last item                     |
+| Enter or Space                               | Apply the focused colour, or remove the highlight |
+| Escape                                       | Close the bar, leaving the document unchanged     |
+
 ## Vim Mode
 
 Off by default. Turn it on under Settings → Editor → Vim Mode, or run "Toggle Vim Mode"

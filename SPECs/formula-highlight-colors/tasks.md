@@ -132,8 +132,8 @@ the prose half. The write path itself (T008) is already shared.
 **Independent Test**: With a selection active, apply the default colour from the keyboard and
 confirm the same result as clicking it in the bar (spec US4).
 
-- [ ] T038 [US4] Add one highlight command entry to `apps/desktop/src/components/command-palette/index.tsx` following the existing `id: "…"` entry shape (see `index.tsx:161` onward). It opens the bar focused on a selection and is a no-op when there is none (FR-018)
-- [ ] T039 [US4] Add keyboard navigation to `apps/desktop/src/components/editor-area/highlight-bar.tsx`: arrow keys move between swatches, Enter applies the focused colour, Escape closes the bar leaving the document unchanged (spec US4 scenarios 1–2)
+- [x] T038 [US4] Add one highlight command entry to `apps/desktop/src/components/command-palette/index.tsx` following the existing `id: "…"` entry shape (see `index.tsx:161` onward). It opens the bar focused on a selection and is a no-op when there is none (FR-018)
+- [x] T039 [US4] Add keyboard navigation to `apps/desktop/src/components/editor-area/highlight-bar.tsx`: arrow keys move between swatches, Enter applies the focused colour, Escape closes the bar leaving the document unchanged (spec US4 scenarios 1–2)
 
 **Checkpoint**: quickstart steps 17–18 pass.
 
@@ -142,11 +142,11 @@ confirm the same result as clicking it in the bar (spec US4).
 ## Phase 7: Polish & Cross-Cutting Concerns
 
 - [x] T040 Add the validate-before-write rule to `docs/editor.md` — it owns editor-extension rules, and the rule (candidate ladder, guards before `__parse`, refuse rather than write something unrenderable) belongs beside them (Constitution V, plan.md gate table)
-- [ ] T041 [P] Add the user-visible entry to `CHANGELOG.md` (Constitution V)
-- [ ] T042 [P] Update `docs/keyboard-shortcuts.md` **only if** a keyboard shortcut was bound in T039; if the command palette entry is the only access path, leave the doc alone (FR-018)
-- [ ] T043 [P] Move the feature task at `TODOS.md:5` from In Progress to Done, keeping the link to this spec
-- [ ] T044 Run the full gate: `vp check` and `vp test` from the repository root, and `cargo test`, `cargo clippy`, `cargo fmt --check` from `apps/desktop/src-tauri/` (unchanged by this frontend-only feature, but they are the gate — quickstart "Before calling it done")
-- [ ] T045 Walk the refusals and edges in [quickstart.md](./quickstart.md) steps 19–23 by hand: caret-only shows no bar; no bar inside fenced or inline code; a selection running out of a math block is treated as prose with the `$$` delimiters not swallowed; an external edit closes the open bar without writing; a hand-edited off-palette hex renders as written with no active swatch
+- [x] T041 [P] Add the user-visible entry to `CHANGELOG.md` (Constitution V)
+- [x] T042 [P] Update `docs/keyboard-shortcuts.md` **only if** a keyboard shortcut was bound in T039; if the command palette entry is the only access path, leave the doc alone (FR-018)
+- [x] T043 [P] Move the feature task at `TODOS.md:5` from In Progress to Done, keeping the link to this spec
+- [x] T044 Run the full gate: `vp check` and `vp test` from the repository root, and `cargo test`, `cargo clippy`, `cargo fmt --check` from `apps/desktop/src-tauri/` (unchanged by this frontend-only feature, but they are the gate — quickstart "Before calling it done")
+- [x] T045 Walk the refusals and edges in [quickstart.md](./quickstart.md) steps 19–23 by hand: caret-only shows no bar; no bar inside fenced or inline code; a selection running out of a math block is treated as prose with the `$$` delimiters not swallowed; an external edit closes the open bar without writing; a hand-edited off-palette hex renders as written with no active swatch — verified end-to-end in `apps/desktop/e2e/specs/highlight-edges.spec.js`
 
 ---
 

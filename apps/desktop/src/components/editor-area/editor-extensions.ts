@@ -26,7 +26,7 @@ import { editorClipboardExtension } from "./editor-clipboard";
 import { editorSearchExtensions } from "./editor-search-extensions";
 import { useEditorSearchStore } from "./editor-search-store";
 import { headingDecorations } from "./heading-decorations";
-import { highlightBarPlugin } from "./highlight-bar";
+import { highlightBarKeymap, highlightBarPlugin } from "./highlight-bar";
 import { highlightDecorations } from "./highlight-decorations";
 import { htmlBlockDecorations, htmlBlockParserExtension } from "./html-block-decorations";
 import { imageSrcResolver } from "./image-src-resolver";
@@ -223,6 +223,7 @@ export function createEditorExtensions(
     mathDecorations(),
     headingDecorations,
     highlightBarPlugin,
+    highlightBarKeymap,
     highlightDecorations(),
     imageSrcResolver(getFilePath),
     wikiLinkExtension(getFilePath, isDisposed),

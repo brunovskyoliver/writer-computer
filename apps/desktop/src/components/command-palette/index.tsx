@@ -38,6 +38,8 @@ import { DRAWING_EXTENSION, extractDrawingTitle, sanitizeDrawingStem } from "@/l
 import { showEditorNotice } from "@/components/editor-area/editor-notice-store";
 import { useFocusedPaneId } from "@/hooks/use-editor-layout";
 import { createAndOpenDrawing, createAndOpenFile } from "./open-routes";
+import { getEditorView } from "@/lib/editor-views";
+import { openAndFocusHighlightBar } from "@/components/editor-area/highlight-bar";
 import * as tauri from "@/lib/tauri";
 import type { RecentFile } from "@/lib/tauri";
 
@@ -249,6 +251,18 @@ export function CommandPalette() {
       run: () => {
         openSettingsTab();
         close();
+      },
+    },
+    activeTabId && {
+      id: "highlight",
+      label: "Highlight Selection",
+      description: "Command",
+      run: () => {
+        close();
+        const view = getEditorView(activeTabId);
+        if (view) {
+          openAndFocusHighlightBar(view);
+        }
       },
     },
   ].filter((c): c is Command => Boolean(c));
