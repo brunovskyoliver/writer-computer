@@ -107,7 +107,13 @@ pub(crate) fn open_new_workspace_window(
         .map_err(|e| AppError::Io(e.to_string()))?;
     let workspace_str = workspace.to_string_lossy().to_string();
 
-    if let Some(existing_label) = app.state::<AppState>().find_by_workspace(&workspace) {
+    // Held until `set_startup_open` below (or the early dedupe return) so a
+    // second open of this workspace can't pass `find_by_workspace` in the
+    // gap before the pending open is recorded.
+    let app_state = app.state::<AppState>();
+    let _open_guard = app_state.window_open_lock.lock();
+
+    if let Some(existing_label) = app_state.find_by_workspace(&workspace) {
         if let Some(window) = app.get_webview_window(&existing_label) {
             let _ = window.set_focus();
             queue_open_event(
@@ -151,7 +157,12 @@ pub(crate) fn open_standalone_file_window(
         .canonicalize()
         .map_err(|e| AppError::Io(e.to_string()))?;
 
-    if let Some(existing_label) = app.state::<AppState>().find_by_standalone_file(&file) {
+    // Same race as in `open_new_workspace_window`: hold the open lock until
+    // the pending open is recorded so concurrent opens can't both dedupe-miss.
+    let app_state = app.state::<AppState>();
+    let _open_guard = app_state.window_open_lock.lock();
+
+    if let Some(existing_label) = app_state.find_by_standalone_file(&file) {
         if let Some(window) = app.get_webview_window(&existing_label) {
             let _ = window.set_focus();
             return Ok(());

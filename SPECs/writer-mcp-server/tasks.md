@@ -135,10 +135,10 @@ description: "Task list for Writer MCP Server implementation"
 
 **Purpose**: Documentation, changelog, and full validation
 
-- [ ] T035 Write `docs/mcp-server.md` (FR-031): the complete tool list with each tool's inputs/outputs, the error-kind table from `contracts/mcp-tools.md`, documented caps (`read_file` ≤ 1 MiB, `search_files` limit default 50 / max 200, `list_files` cap 5,000), and the connection guide including the `{ "mcpServers": { "writer": { "command": "writer", "args": ["mcp"] } } }` snippet
-- [ ] T036 Add the `docs/mcp-server.md` entry to the `AGENTS.md` docs index and record the feature in `CHANGELOG.md` (user-visible change); move the feature's entry in `TODOS.md` to Done
-- [ ] T037 Run the full `SPECs/writer-mcp-server/quickstart.md` validation end to end (§1–§6 plus the `tools/list` smoke test)
-- [ ] T038 Run all quality gates: `vp check` and `vp test` from repo root; `cargo test`, `cargo clippy`, `cargo fmt --check` from `apps/desktop/src-tauri/`
+- [x] T035 Write `docs/mcp-server.md` (FR-031): the complete tool list with each tool's inputs/outputs, the error-kind table from `contracts/mcp-tools.md`, documented caps (`read_file` ≤ 1 MiB, `search_files` limit default 50 / max 200, `list_files` cap 5,000), and the connection guide including the `{ "mcpServers": { "writer": { "command": "writer", "args": ["mcp"] } } }` snippet
+- [x] T036 Add the `docs/mcp-server.md` entry to the `AGENTS.md` docs index and record the feature in `CHANGELOG.md` (user-visible change); move the feature's entry in `TODOS.md` to Done
+- [x] T037 Run the full `SPECs/writer-mcp-server/quickstart.md` validation end to end (§1–§6 plus the `tools/list` smoke test)
+- [x] T038 Run all quality gates: `vp check` and `vp test` from repo root; `cargo test`, `cargo clippy`, `cargo fmt --check` from `apps/desktop/src-tauri/`
 
 ---
 

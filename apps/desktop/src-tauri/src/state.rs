@@ -373,6 +373,11 @@ pub struct AppState {
     /// shares (the LaTeX snippet file, the global config). Started once in
     /// `setup`; held here only so it is not dropped.
     pub global_config_watcher: Mutex<Option<RecommendedWatcher>>,
+    /// Serializes the dedupe-check-then-create span in
+    /// `open_new_workspace_window` / `open_standalone_file_window`: two
+    /// concurrent opens of the same target must not both pass
+    /// `find_by_workspace` before either records its pending open.
+    pub window_open_lock: Mutex<()>,
     /// MCP server runtime: listener task, per-connection tasks, server
     /// status for `mcp_status`, and the pending map bridging webview-forwarded
     /// tool calls. See `mcp/mod.rs`.
@@ -391,6 +396,7 @@ impl AppState {
             sessions_file_lock: Mutex::new(()),
             recent_files_lock: Mutex::new(()),
             global_config_watcher: Mutex::new(None),
+            window_open_lock: Mutex::new(()),
             mcp: Mutex::new(crate::mcp::McpServerState::default()),
             app_handle: RwLock::new(None),
         }

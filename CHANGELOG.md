@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-09-20
+
+- Agents can now drive Writer's windows over MCP: `open_file` opens a note in the right window (the active tab, or a new one), `open_workspace` opens a folder or focuses the window already on it, `open_standalone_file` opens a single file in a compact window, `focus_window` brings a workspace forward, `reveal_in_sidebar` highlights a file without stealing focus, and `list_tabs` reports every open tab including non-file kinds. Settings also shows whether the server is running — with the bind error if it could not start — plus a copyable client snippet, or a pointer to install the `writer` command when it is missing. The complete tool reference is in [docs/mcp-server.md](./docs/mcp-server.md).
+
 ## 2026-09-17
 
 - Highlight colours are reachable without the mouse. With text selected, run "Highlight Selection" from the command palette to open the colour bar focused; the arrow keys move between the swatches and the remove action, Enter applies the focused one, and Escape closes the bar leaving the document unchanged.
