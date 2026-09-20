@@ -7,6 +7,8 @@ import * as editorApi from "./editor-api";
 import * as tauri from "@/lib/tauri";
 import { cancelSave, isSaveInFlight } from "@/lib/save";
 import { isWorkspaceEventCurrent, type WorkspaceIdentity } from "@/lib/workspace-events";
+import { isDrawingPath } from "@/lib/drawings";
+import { refreshDrawingEmbeds } from "@/lib/drawing-embed-sync";
 
 interface FileChangePayload {
   path: string;
@@ -33,6 +35,10 @@ export function useFileWatcher() {
       if (!isWorkspaceEventCurrent(workspace, currentWorkspaceIdentity())) return;
       if (WATCHER_DEBUG) console.debug("[watcher] fs:file-changed", kind, path);
       useWorkspaceStore.getState().bumpSidebarMetadataVersion();
+      if (isDrawingPath(path)) {
+        refreshDrawingEmbeds(path);
+      }
+
       const openFiles = editorApi.getOpenFiles();
       const file = openFiles.get(path);
 

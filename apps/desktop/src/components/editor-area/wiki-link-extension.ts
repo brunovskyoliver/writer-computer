@@ -15,7 +15,7 @@ import {
   type CompletionContext,
   type CompletionResult,
 } from "@codemirror/autocomplete";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { getVersionedImageSrc } from "@/lib/drawing-embed-sync";
 import * as tauri from "@/lib/tauri";
 import { getFileStem } from "@/lib/paths";
 import { isDrawingPath } from "@/lib/drawings";
@@ -176,7 +176,8 @@ class ImageEmbedWidget extends WidgetType {
     void resolveEmbed(this.target, this.workspaceRoot, this.currentFilePath)
       .then((absolutePath) => {
         if (absolutePath) {
-          image.src = convertFileSrc(absolutePath);
+          image.dataset.canonicalPath = absolutePath;
+          image.src = getVersionedImageSrc(absolutePath);
         } else {
           this.renderPlaceholder(elem, image);
         }

@@ -8,6 +8,12 @@ import { SectionRail } from "./section-rail";
 import { useCloseEditorSearchWhenInactive } from "./use-close-editor-search-when-inactive";
 import { useIsFileLoading } from "@/hooks/use-tabs";
 import { editorFlavorKey } from "@/lib/editor-flavor";
+import {
+  hasDrawingSession,
+  reportDrawingSaveError,
+  saveDrawingSessions,
+} from "@/lib/drawing-sessions";
+import { refreshDrawingEmbeds } from "@/lib/drawing-embed-sync";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -42,6 +48,36 @@ export const EditorPane = memo(function EditorPane({
   // The find overlay belongs to the focused editor, so losing focus closes it
   // exactly as switching tabs already did.
   useCloseEditorSearchWhenInactive(isFocused);
+
+  // When focusing a Markdown document, ensure any dirty drawing session is
+  // saved and any drawing embeds in the document are refreshed.
+  useEffect(() => {
+    if (isFocused) {
+      if (hasDrawingSession()) {
+        void saveDrawingSessions()
+          .then(() => refreshDrawingEmbeds())
+          .catch(reportDrawingSaveError);
+      } else {
+        refreshDrawingEmbeds();
+      }
+    }
+  }, [isFocused]);
+
+  useEffect(() => {
+    const scroller = scrollContainerRef.current;
+    if (!scroller) return;
+    const handleFocus = () => {
+      if (hasDrawingSession()) {
+        void saveDrawingSessions()
+          .then(() => refreshDrawingEmbeds())
+          .catch(reportDrawingSaveError);
+      } else {
+        refreshDrawingEmbeds();
+      }
+    };
+    scroller.addEventListener("focusin", handleFocus);
+    return () => scroller.removeEventListener("focusin", handleFocus);
+  }, []);
 
   const getScrollContainer = useCallback(() => scrollContainerRef.current, []);
 

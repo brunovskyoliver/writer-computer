@@ -1,5 +1,6 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import type { DrawingLocation } from "./page-kinds/drawing";
+import { getDrawingSession, reportDrawingSaveError } from "@/lib/drawing-sessions";
 
 // The whole Excalidraw surface — the package, its 144 KB of CSS, and the
 // asset-path wiring — lives in `./drawing-editor` so `React.lazy` can keep all
@@ -31,6 +32,26 @@ export function DrawingPane({
   isVisible: boolean;
   isFocused: boolean;
 }) {
+  useEffect(() => {
+    if (!isFocused || !isVisible) {
+      const session = getDrawingSession(location.path);
+      if (session?.isDirty()) {
+        void session.save().catch(reportDrawingSaveError);
+      }
+    }
+  }, [isFocused, isVisible, location.path]);
+
+  useEffect(() => {
+    const handleBlur = () => {
+      const session = getDrawingSession(location.path);
+      if (session?.isDirty()) {
+        void session.save().catch(reportDrawingSaveError);
+      }
+    };
+    window.addEventListener("blur", handleBlur);
+    return () => window.removeEventListener("blur", handleBlur);
+  }, [location.path]);
+
   return (
     // The drawing kind is `keepAlive`, so an inactive tab stays mounted — but
     // `visibility: hidden` is not enough to hide it: Excalidraw's own CSS puts

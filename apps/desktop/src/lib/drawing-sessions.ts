@@ -5,6 +5,7 @@ import type {
 } from "@excalidraw/excalidraw/element/types";
 import { deleteEntry } from "./tauri";
 import { saveDrawing, type DrawingScene } from "./drawings";
+import { notifyDrawingSaved } from "./drawing-embed-sync";
 
 /**
  * One drawing session per canonical path, however many panes show it.
@@ -141,6 +142,7 @@ function createSession(path: string, initial: DrawingScene) {
           if (signature === saved) return;
           await saveDrawing(path, scene);
           saved = signature;
+          notifyDrawingSaved(path);
         });
       pendingSaves++;
       queue = result.finally(() => {

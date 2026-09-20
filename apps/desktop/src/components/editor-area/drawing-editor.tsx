@@ -91,6 +91,15 @@ export default function DrawingEditor({
     [path, tabId],
   );
 
+  useEffect(() => {
+    if (isActive) {
+      const container = document.querySelector<HTMLElement>(
+        `[data-tab-host="${tabId}"] .excalidraw`,
+      );
+      container?.focus();
+    }
+  }, [isActive, tabId]);
+
   if (state.status === "loading") {
     return <div className="text-muted-foreground p-4 text-sm">Loading drawing…</div>;
   }
@@ -117,8 +126,8 @@ export default function DrawingEditor({
       theme={theme}
       onChange={handleChange}
       UIOptions={UI_OPTIONS}
-      handleKeyboardGlobally={false}
-      viewModeEnabled={!isActive}
+      handleKeyboardGlobally={isActive}
+      autoFocus={isActive}
     />
   );
 }
