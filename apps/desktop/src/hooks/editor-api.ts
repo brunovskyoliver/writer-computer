@@ -1,6 +1,13 @@
 import type { EditorView } from "@codemirror/view";
 import * as editorViews from "@/lib/editor-views";
-import { useEditorStore, type OpenTarget } from "@/stores/editor-store";
+import { applyLineTarget } from "@/components/editor-area/line-target";
+import { findOuterScroller } from "@/components/editor-area/editor-scroll";
+import { findPane } from "@/lib/editor-layout";
+import { setPendingLineTarget } from "@/lib/pending-anchor";
+import { encodeAnchorFragment } from "@/lib/pdf-anchor";
+import { requestPdfAnchor } from "@/stores/pdf-anchor-store";
+import { locationForPath, useEditorStore, type OpenTarget } from "@/stores/editor-store";
+import type { SearchMatch } from "@/types/fs";
 export type { OpenFile, Tab, OpenTarget } from "@/stores/editor-store";
 
 export function getOpenFile(path: string) {
@@ -59,6 +66,66 @@ export function openFile(path: string, target?: OpenTarget) {
 
 export function navigateToFile(path: string, target?: OpenTarget) {
   return useEditorStore.getState().navigateToFile(path, target);
+}
+
+/**
+ * Activate one content-search result (SPECs/global-content-search/
+ * contracts/line-target.md).
+ *
+ * `text`: the line handoff is keyed by the tab `navigateToFile` will resolve
+ * — the focused pane's active tab, the same target it picks with no explicit
+ * argument — and written before the navigation, per the handoff rule. Two
+ * edges don't reach the pending path: the tab already showing the file (no
+ * swap fires, so the live view is scrolled directly — a queued target would
+ * sit unread and replay on a later visit) and a path that opens as a
+ * standalone surface rather than an editor.
+ *
+ * `pdf`: reuse-or-open via `openFile`, then queue a `page=N&text=<hint>`
+ * anchor on the resolved tab; the pane consumes it reactively and re-finds
+ * the passage in its own coordinates.
+ */
+export function openSearchMatch(match: SearchMatch, needle: string) {
+  if (match.kind === "pdf") {
+    void openFile(match.path).then(() => {
+      if (match.page === null) return;
+      const state = useEditorStore.getState();
+      const tab = state.tabs.find(
+        (candidate) => candidate.location.kind === "pdf" && candidate.location.path === match.path,
+      );
+      if (!tab) return;
+      const anchor = { kind: "text", page: match.page, text: match.line_text } as const;
+      requestPdfAnchor(tab.id, encodeAnchorFragment(anchor));
+    });
+    return;
+  }
+
+  const state = useEditorStore.getState();
+  const pane = findPane(state.layout, state.layout.focusedPaneId);
+  const tab = state.tabs.find((candidate) => candidate.id === pane?.activeTabId) ?? null;
+  const lineTarget =
+    match.line_number !== null
+      ? {
+          line: match.line_number,
+          offset: match.match_ranges[0]?.[0] ?? 0,
+          length: match.match_ranges[0]?.[1] ?? 0,
+          needle,
+        }
+      : null;
+
+  if (tab && lineTarget) {
+    if (tab.location.kind === "file" && tab.location.path === match.path) {
+      const view = editorViews.getEditorView(tab.id);
+      const scrollContainer = view ? findOuterScroller(view.dom) : null;
+      if (view && scrollContainer) {
+        applyLineTarget(view, scrollContainer, lineTarget);
+        return;
+      }
+    }
+    if (locationForPath(match.path).kind === "file") {
+      setPendingLineTarget(tab.id, match.path, lineTarget);
+    }
+  }
+  void navigateToFile(match.path);
 }
 
 export function renameOpenFile(oldPath: string, newPath: string) {

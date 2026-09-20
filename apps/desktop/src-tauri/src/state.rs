@@ -42,6 +42,11 @@ pub struct WorkspaceState {
     /// walker exits within a directory boundary instead of running to
     /// completion; a fresh flag is installed for the new workspace.
     pub cancel_index: RwLock<Arc<AtomicBool>>,
+    /// Cancellation flag for the active `content_search` walk. Each invoke
+    /// installs a fresh flag after flipping the outgoing one, so at most one
+    /// scan runs per window and a superseded or orphaned walk exits at the
+    /// next directory entry.
+    pub cancel_search: RwLock<Arc<AtomicBool>>,
     /// Per-window settings: global layer is loaded from the app data dir
     /// (shared by all windows) but the workspace layer reflects *this*
     /// window's workspace. Two windows with different workspaces therefore
@@ -98,6 +103,7 @@ impl Default for WorkspaceState {
             workspace_ignore: RwLock::new(None),
             workspace_epoch: AtomicU64::new(0),
             cancel_index: RwLock::new(Arc::new(AtomicBool::new(false))),
+            cancel_search: RwLock::new(Arc::new(AtomicBool::new(false))),
             settings: RwLock::new(None),
             startup_open: Mutex::new(None),
             startup_open_taken: AtomicBool::new(false),
@@ -110,6 +116,7 @@ impl Default for WorkspaceState {
 impl WorkspaceState {
     fn reset_workspace_runtime(&self) -> WorkspaceRuntimeDrop {
         self.cancel_index.read().store(true, Ordering::SeqCst);
+        self.cancel_search.read().store(true, Ordering::SeqCst);
         *self.standalone_file.write() = None;
         let file_index = std::mem::take(&mut *self.file_index.write());
         self.file_index_revision.fetch_add(1, Ordering::SeqCst);

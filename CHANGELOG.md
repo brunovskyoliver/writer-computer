@@ -2,6 +2,10 @@
 
 ## 2026-09-20
 
+- Search inside every file with `Cmd+Shift+F`. The content-search palette scans text files and PDFs alike, streaming results as it walks the workspace: each hit shows the matched line with the query highlighted and its location (`L42`, `Page 3`), and hovering or arrowing through the list previews the surrounding lines. Pressing Enter opens text files on the matched line — selected — and PDFs on the matched page with the passage emphasised. Search is smart-case literal text, honours `.gitignore` and hidden files, and says so when a large result set is truncated.
+
+- Fix PDFs failing to open in packaged builds. The pdf.js worker pointed at a path that only existed in development, and the current pdf.js also needs a `ReadableStream` async-iteration polyfill WebKit lacks; the worker now ships as a bundled entry with the polyfill applied, so PDF tabs and content search work the same in the release app as in dev.
+
 - Agents can now drive Writer's windows over MCP: `open_file` opens a note in the right window (the active tab, or a new one), `open_workspace` opens a folder or focuses the window already on it, `open_standalone_file` opens a single file in a compact window, `focus_window` brings a workspace forward, `reveal_in_sidebar` highlights a file without stealing focus, and `list_tabs` reports every open tab including non-file kinds. Settings also shows whether the server is running — with the bind error if it could not start — plus a copyable client snippet, or a pointer to install the `writer` command when it is missing. The complete tool reference is in [docs/mcp-server.md](./docs/mcp-server.md).
 
 ## 2026-09-17

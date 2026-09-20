@@ -636,6 +636,7 @@ pub fn run() {
             commands::search::index_workspace,
             commands::search::fuzzy_search,
             commands::search::find_file_by_name,
+            commands::search::content_search,
             commands::images::save_clipboard_image,
             commands::settings::get_settings,
             commands::settings::get_setting,

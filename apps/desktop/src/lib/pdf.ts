@@ -1,6 +1,9 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 import type { PDFDocumentProxy } from "pdfjs-dist";
+import PdfWorker from "./pdf-worker?worker";
+import "./readable-stream-polyfill";
 import { getFileName } from "./paths";
+import { pdfTextItemsToLines, type PdfTextItemLike } from "./pdf-search";
 
 /**
  * The renderer boundary for pdf.js. See SPECs/pdf-quote-links/.
@@ -59,15 +62,10 @@ let lib: typeof import("pdfjs-dist") | null = null;
 async function pdfjs(): Promise<typeof import("pdfjs-dist")> {
   if (lib) return lib;
   const loaded = await import("pdfjs-dist");
-  // Vite resolves this `new URL(..., import.meta.url)` form at build time; it
-  // must be a literal specifier for that to happen. If worker resolution ever
-  // fails here, log what `workerSrc` actually resolved to before changing the
-  // approach — research.md R2 flags this as the one item likely to need
-  // iteration, and guessing a second path is how that turns into four.
-  loaded.GlobalWorkerOptions.workerSrc = new URL(
-    "pdfjs-dist/build/pdf.worker.min.mjs",
-    import.meta.url,
-  ).href;
+  // `workerPort` over `workerSrc`: the `?worker` import gives Vite an emitted
+  // entry it can bundle — including the stream polyfill — instead of pointing
+  // at a packaged URL that the wrapper cannot patch.
+  loaded.GlobalWorkerOptions.workerPort = new PdfWorker();
   lib = loaded;
   return lib;
 }
@@ -174,4 +172,31 @@ export async function releasePdf(path: string): Promise<void> {
 /** Test seam: how many paths are currently held. */
 export function cachedPdfCount(): number {
   return documents.size;
+}
+
+/**
+ * Each page's text as an array of reconstructed lines — `getTextContent`
+ * items joined, split on `hasEOL` (SPECs/global-content-search). The document
+ * goes through `acquirePdf`/`releasePdf`, so a search extraction shares the
+ * parse with any tab already showing the file instead of paying for a second
+ * one. `null` when the document won't load — a corrupt, encrypted or missing
+ * file simply doesn't match (the spec's skip rule), so callers don't need a
+ * failure channel.
+ */
+export async function pdfSearchLines(path: string): Promise<string[][] | null> {
+  const result = await acquirePdf(path);
+  if (!result.ok) return null;
+  try {
+    const pages: string[][] = [];
+    for (let pageNumber = 1; pageNumber <= result.doc.pageCount; pageNumber++) {
+      const page = await result.doc.proxy.getPage(pageNumber);
+      const content = await page.getTextContent();
+      // `TextMarkedContent` items carry no `str`; the splitter skips them.
+      // The cast bridges pdf.js's union to the structural item shape.
+      pages.push(pdfTextItemsToLines(content.items as readonly PdfTextItemLike[]));
+    }
+    return pages;
+  } finally {
+    await releasePdf(path);
+  }
 }

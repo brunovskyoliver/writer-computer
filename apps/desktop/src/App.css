@@ -601,6 +601,60 @@ body.editor-dragging [data-tab-host] {
   color: var(--text-muted);
 }
 
+/* Content-search palette — same dialog surface as Cmd+P, widened for the
+   result list plus the context preview beside it. */
+.content-search-dialog {
+  width: min(880px, 92vw);
+}
+
+.content-search-body {
+  display: flex;
+  min-height: 0;
+}
+
+.content-search-body [cmdk-list] {
+  flex: 1 1 56%;
+  min-width: 0;
+}
+
+.content-search-preview {
+  flex: 1 1 44%;
+  min-width: 0;
+  max-height: 320px;
+  overflow: auto;
+  border-left: 1px solid var(--line-subtler);
+  padding: 8px 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.content-search-preview-header {
+  padding: 2px 12px 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  user-select: none;
+}
+
+.content-search-preview-line {
+  display: flex;
+  padding: 0 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.content-search-preview-line.is-match {
+  background: var(--surface-subtle);
+}
+
+.content-search-preview-lineno {
+  flex: 0 0 2.5em;
+  padding-right: 8px;
+  text-align: right;
+  color: var(--text-muted);
+  user-select: none;
+}
+
 /* Excalidraw's dark theme is a display filter, not stored colours: a stroke
  * drawn "white" on a dark canvas is saved as near-black. The exported SVG is
  * therefore always canonical light-mode (so it also opens right in Obsidian,

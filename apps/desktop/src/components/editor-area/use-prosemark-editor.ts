@@ -6,13 +6,14 @@ import { closeEditorSearch } from "./editor-search-store";
 import { findOuterScroller, scrollPosToSafeTop } from "./editor-scroll";
 import { createEditorExtensions } from "./editor-extensions";
 import { findHeadingBySlug } from "./link-navigation";
+import { applyLineTarget } from "./line-target";
 import { advanceViewportParse } from "./viewport-parse";
 import { clampSelectionToHeadings } from "./heading-decorations";
 import * as editorApi from "@/hooks/editor-api";
 import { useReloadVersion } from "@/hooks/use-tabs";
 import { getFileName } from "@/lib/paths";
 import { editorFlavorForPath } from "@/lib/editor-flavor";
-import { consumePendingAnchor } from "@/lib/pending-anchor";
+import { consumePendingAnchor, type PendingTarget } from "@/lib/pending-anchor";
 import { logTimeline, mark } from "@/lib/startup-metrics";
 import { showEditorNotice } from "./editor-notice-store";
 
@@ -49,6 +50,38 @@ function restoreScrollPosition(
 
     // Always apply the initial scroll so a new file can reset a reused container back to the top.
     scrollContainer.scrollTo(0, Math.max(0, scrollPos));
+  });
+}
+
+/** Apply a consumed landing handoff — a heading anchor from a link, or a
+ *  content-search line target. Shared by the swap effect and a fresh mount:
+ *  a tab that had no editor (launcher, settings) mounts one when it resolves
+ *  to a file, and its pending target must land there too. */
+function applyPendingTarget(
+  view: EditorView,
+  scrollContainer: HTMLElement,
+  target: PendingTarget,
+  content: string,
+  filePath: string,
+  tabId: string,
+  isDisposed: () => boolean,
+) {
+  if (target.kind === "anchor") {
+    const heading = findHeadingBySlug(content, target.slug);
+    if (heading) {
+      requestAnimationFrame(() => {
+        if (isDisposed()) return;
+        scrollPosToSafeTop(view, scrollContainer, heading.pos, "auto");
+      });
+    } else {
+      scrollContainer.scrollTo({ top: 0, behavior: "auto" });
+      showEditorNotice(`Heading "#${target.slug}" not found in ${getFileName(filePath)}`, tabId);
+    }
+    return;
+  }
+  requestAnimationFrame(() => {
+    if (isDisposed()) return;
+    applyLineTarget(view, scrollContainer, target);
   });
 }
 
@@ -146,7 +179,22 @@ export function useProsemarkEditor(
 
     const scrollContainer = resolveScrollContainer(el, getScrollContainerRef.current);
     if (scrollContainer) {
-      restoreScrollPosition(scrollContainer, viewState.scroll, () => disposedRef.current);
+      // A landing handoff queued before this mount (e.g. a search match
+      // activated over a launcher tab) wins over the saved position.
+      const pendingTarget = consumePendingAnchor(currentTabId, currentPath);
+      if (pendingTarget !== undefined) {
+        applyPendingTarget(
+          view,
+          scrollContainer,
+          pendingTarget,
+          initialContent,
+          currentPath,
+          currentTabId,
+          () => disposedRef.current,
+        );
+      } else {
+        restoreScrollPosition(scrollContainer, viewState.scroll, () => disposedRef.current);
+      }
 
       const handleScroll = () => {
         editorApi.setTabScroll(tabIdRef.current, filePathRef.current, scrollContainer.scrollTop);
@@ -208,21 +256,17 @@ export function useProsemarkEditor(
         getScrollContainerRef.current,
       );
       if (scrollContainer) {
-        const pendingAnchor = consumePendingAnchor(tabId, filePath);
-        if (pendingAnchor !== undefined) {
-          const heading = findHeadingBySlug(content, pendingAnchor);
-          if (heading) {
-            requestAnimationFrame(() => {
-              if (disposedRef.current) return;
-              scrollPosToSafeTop(view, scrollContainer, heading.pos, "auto");
-            });
-          } else {
-            scrollContainer.scrollTo({ top: 0, behavior: "auto" });
-            showEditorNotice(
-              `Heading "#${pendingAnchor}" not found in ${getFileName(filePath)}`,
-              tabId,
-            );
-          }
+        const pendingTarget = consumePendingAnchor(tabId, filePath);
+        if (pendingTarget !== undefined) {
+          applyPendingTarget(
+            view,
+            scrollContainer,
+            pendingTarget,
+            content,
+            filePath,
+            tabId,
+            () => disposedRef.current,
+          );
         } else {
           restoreScrollPosition(
             scrollContainer,

@@ -3,6 +3,7 @@ import { beforeEach, expect, test, vi } from "vite-plus/test";
 const fixture = vi.hoisted(() => ({ destroy: vi.fn(async () => {}), loads: 0 }));
 
 vi.mock("@tauri-apps/api/core", () => ({ convertFileSrc: (path: string) => `asset://${path}` }));
+vi.mock("../src/lib/pdf-worker?worker", () => ({ default: class {} }));
 vi.mock("pdfjs-dist", () => ({
   GlobalWorkerOptions: {} as { workerSrc?: string },
   getDocument: () => {

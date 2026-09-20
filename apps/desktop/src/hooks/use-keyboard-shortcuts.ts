@@ -59,6 +59,14 @@ export function useKeyboardShortcuts() {
         return;
       }
 
+      // Cmd+Shift+F — search inside files (content search palette)
+      if (mod && e.shiftKey && (e.key === "f" || e.key === "F")) {
+        e.preventDefault();
+        if (isCompactFileMode) return;
+        if (root) openCommandPalette("content-search");
+        return;
+      }
+
       // Cmd+W — close current tab
       if (mod && e.key === "w") {
         if (isCompactFileMode) return;

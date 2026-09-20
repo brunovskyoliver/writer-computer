@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type CommandPaletteIntent = "search" | "create-file" | "create-drawing";
+export type CommandPaletteIntent = "search" | "create-file" | "create-drawing" | "content-search";
 
 interface UIState {
   isCommandPaletteOpen: boolean;

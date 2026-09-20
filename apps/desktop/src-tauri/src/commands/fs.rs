@@ -126,7 +126,7 @@ const DRAWING_EXTENSION: &str = ".excalidraw.svg";
 /// `apps/desktop/src/lib/pdf.ts` — a PDF is shown in the sidebar but is not
 /// Markdown, so `is_markdown` stays false for it and it never reaches the
 /// `.md`-filtered fuzzy index in `commands/search.rs`.
-const PDF_EXTENSION: &str = ".pdf";
+pub(crate) const PDF_EXTENSION: &str = ".pdf";
 
 /// A Markdown note: `.md` or `.markdown`, case-insensitive. The one kind
 /// check shared by the sidebar, the search index, the watcher, recents,

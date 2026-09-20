@@ -1,9 +1,10 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, Channel } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import sidebarEntryKinds from "@shared/sidebar-entry-kinds.json";
 import type { SessionV2 } from "@/lib/session";
 import type {
+  ContentSearchEvent,
   DirEntry,
   FileContent,
   IndexStats,
@@ -200,6 +201,13 @@ export function indexWorkspace(): Promise<IndexStats> {
 
 export function fuzzySearch(query: string, limit?: number): Promise<SearchResult[]> {
   return invoke("fuzzy_search", { query, limit });
+}
+
+/** Progressive content search across the workspace (SPECs/global-content-search).
+ *  The channel carries match batches, PDF candidates, and the terminal `done`
+ *  event; the promise resolves when the walk finishes or is superseded. */
+export function contentSearch(query: string, onEvent: Channel<ContentSearchEvent>): Promise<void> {
+  return invoke("content_search", { query, onEvent });
 }
 
 // Font commands

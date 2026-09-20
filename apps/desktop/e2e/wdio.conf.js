@@ -14,7 +14,7 @@ const APP_BINARY = resolve(
   "../src-tauri/target/release/bundle/macos/Writer.app/Contents/MacOS/desktop",
 );
 
-/** @type {import('node:child_process').ChildProcess | undefined} */
+/** @type {import('node:child_process').ChildProcess} */
 let proxy;
 
 /** @type {import('@wdio/types').Options.Testrunner} */

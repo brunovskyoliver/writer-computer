@@ -314,7 +314,7 @@ export function CommandPalette() {
 
   return (
     <CommandDialog
-      open={isOpen}
+      open={isOpen && intent !== "content-search"}
       onOpenChange={(open) => {
         if (!open) close();
       }}
