@@ -40,9 +40,23 @@ import { useFocusedPaneId } from "@/hooks/use-editor-layout";
 import { createAndOpenDrawing, createAndOpenFile } from "./open-routes";
 import { getEditorView } from "@/lib/editor-views";
 import { openAndFocusHighlightBar } from "@/components/editor-area/highlight-bar";
-import { runEditorCommand } from "@/components/editor-area/markdown-formatting";
+import {
+  runEditorCommand,
+  type EditorCommandId,
+} from "@/components/editor-area/markdown-formatting";
 import * as tauri from "@/lib/tauri";
 import type { RecentFile } from "@/lib/tauri";
+
+/** Matrix re-bracketing commands the palette exposes; the registry labels
+ *  carry the glyphs, so only the lookup table lives here. */
+const MATRIX_PALETTE = [
+  ["matrix-parens", "Matrix: Round Brackets", "matrix.parens"],
+  ["matrix-square", "Matrix: Square Brackets", "matrix.square"],
+  ["matrix-curly", "Matrix: Curly Braces", "matrix.curly"],
+  ["matrix-bars", "Matrix: Single Bars", "matrix.bars"],
+  ["matrix-double-bars", "Matrix: Double Bars", "matrix.doubleBars"],
+  ["matrix-cases", "Matrix: Cases Brace", "matrix.cases"],
+] as const satisfies ReadonlyArray<readonly [string, string, EditorCommandId]>;
 
 function toCreatePath(root: string, rawName: string) {
   const trimmed = rawName.trim();
@@ -286,6 +300,20 @@ export function CommandPalette() {
         if (view) runEditorCommand(view, "insert.overbrace");
       },
     },
+    ...(activeTabId
+      ? MATRIX_PALETTE.map(
+          ([id, label, command]): Command => ({
+            id,
+            label,
+            description: "Command",
+            run: () => {
+              close();
+              const view = getEditorView(activeTabId);
+              if (view) runEditorCommand(view, command);
+            },
+          }),
+        )
+      : []),
   ].filter((c): c is Command => Boolean(c));
 
   const visibleFiles: SearchResult[] =

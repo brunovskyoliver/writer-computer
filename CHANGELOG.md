@@ -6,6 +6,8 @@
 
 - Select any text or math and press `Cmd+Alt+U` / `Cmd+Alt+O` to wrap it in a `\underbrace` / `\overbrace` with the caret waiting in the annotation group — type the note, or `text` first for prose inside math. In prose the selection is wrapped as `$\underbrace{\text{…}}_{\text{…}}$`, so the bracket renders anywhere Markdown math does; complete `$…$` spans inside the prose are lifted out of `\text{}` and kept as math (`rows $*$ columns` wraps as one clean formula), and literal `$`, `{`, `}` and friends in the text escape instead of breaking it. Both commands are in the command palette and the editor's Format context menu, each is one undo step, and a wrap from Vim Normal or Visual mode drops into insert mode so the note types immediately.
 
+- Swap a matrix's brackets in place. With the caret anywhere inside a `\begin{…}` matrix environment, the new "Matrix: …" commands rewrite only the `\begin`/`\end` names — rows and cells are untouched: Parentheses (`pmatrix`), Square Brackets (`bmatrix`), Curly Braces (`Bmatrix`), Bars (`vmatrix`), Double Bars (`Vmatrix`), and Case Brace (`cases`). Reachable from the command palette and the editor's Matrix context submenu, one undo step; `array` is deliberately excluded since its `{…}` column spec would be mistaken for a group.
+
 - Fix `Cmd+Alt+<letter>` chords firing the plain `Cmd+<letter>` action as well. The global shortcut handler ignored the Alt key, so `Cmd+Alt+O` also opened "Go to file" and `Cmd+Alt+1…9` also jumped tabs on top of setting a heading. Those actions now require Cmd alone.
 
 ## 2026-09-20

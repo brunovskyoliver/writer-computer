@@ -72,6 +72,16 @@ const PARAGRAPH_SUBMENU: CommandMenuLayout = [
   ["para.codeblock", "format.codeBlock"],
 ];
 
+const MATRIX_SUBMENU: CommandMenuLayout = [
+  ["mtx.parens", "matrix.parens"],
+  ["mtx.square", "matrix.square"],
+  ["mtx.curly", "matrix.curly"],
+  ["mtx.bars", "matrix.bars"],
+  ["mtx.doubleBars", "matrix.doubleBars"],
+  "---",
+  ["mtx.cases", "matrix.cases"],
+];
+
 const INSERT_SUBMENU: CommandMenuLayout = [
   ["ins.link", "format.link"],
   ["ins.table", "insert.table"],
@@ -85,6 +95,7 @@ const EDITOR_COMMAND_SUBMENUS: ReadonlyArray<readonly [string, CommandMenuLayout
   ["Format", FORMAT_SUBMENU],
   ["Paragraph", PARAGRAPH_SUBMENU],
   ["Insert", INSERT_SUBMENU],
+  ["Matrix", MATRIX_SUBMENU],
 ];
 
 function buildCommandItems(

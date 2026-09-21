@@ -34,6 +34,17 @@ With text selected, `Cmd+Alt+U` wraps it in `\underbrace{…}_{}` and `Cmd+Alt+O
 4. One command press is one undo step.
 5. Both commands are in the command palette and the editor context menu (Format submenu).
 
+### US3 — Re-bracket an existing matrix (P2)
+
+The user has matrices written as `\begin{cases}…\end{cases}` — a habit that renders a lone left `{` instead of matrix brackets. With the caret anywhere inside the env (including a nested non-bracketed env like `aligned`), a "Matrix: …" command rewrites only the `\begin{…}`/`\end{…}` env names to `pmatrix`/`bmatrix`/`Bmatrix`/`vmatrix`/`Vmatrix`/`cases` — one undo step, rows and cells untouched.
+
+**Acceptance**:
+
+1. Caret inside `\begin{cases}` + "Matrix: square brackets" yields `\begin{bmatrix}…\end{bmatrix}`.
+2. Caret inside a nested non-bracketed env (e.g. `aligned` inside `cases`) re-brackets the enclosing bracketed env.
+3. `array` is never a target or a victim — its `{…}` colspec would be left as a literal group.
+4. No bracketed matrix around the caret shows a notice and writes nothing.
+
 ## Requirements
 
 - **FR-1**: Tab-out targets gain `&` (cell separator) and `\\` (row break), jumping just past them. This extends the latex-suite rule in `contracts/editor-extension.md` and FR-012a of that spec.
@@ -44,6 +55,7 @@ With text selected, `Cmd+Alt+U` wraps it in `\underbrace{…}_{}` and `Cmd+Alt+O
 - **FR-6**: Commands are `insert.underbrace` / `insert.overbrace` in the `editorCommands` registry — one entry gives keymap, context-menu, and palette access per the registry contract.
 - **FR-7**: A successful wrap puts Vim into insert mode (via `Vim.handleKey(cm, "i")` on the view's adapter), so the annotation can be typed immediately. No-op when Vim is off or already inserting.
 - **FR-8**: The prose form splits the fragment into text runs and `$…$`/`$$…$$` math islands — the same spans the markdown math scanner recognises (unescaped delimiters, Pandoc opener/closer guards). Islands emit raw inside the brace; text runs emit inside `\text{}` with `$ & # _ { } %` escaped to `\x`. A selection ending exactly on a math node's closing `$` counts as prose-with-islands, not a mix; starting inside a formula or ending mid-formula still refuses. The emitted formula never contains a `$`, so it re-parses as one math node.
+- **FR-9**: `enclosingMatrixEnv(formula, caret)` is pure: it returns the env name plus the two `\begin{…}`/`\end{…}` name spans of the nearest _re-bracketable_ env enclosing the caret (`[pbBvV]?matrix`, `[dr]?cases` — argument-free envs sharing the `\\`/`&` grammar). Six `matrix.*` registry commands rewrite just those spans; reachable from the palette and the context menu's Matrix submenu.
 
 ## Non-goals
 

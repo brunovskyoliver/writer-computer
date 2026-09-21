@@ -99,7 +99,7 @@ describe("buildEditorBodyMenuItemsSpec", () => {
     expect(submenus).toHaveLength(0);
   });
 
-  test("includes Format, Paragraph, Insert submenus when onRunCommand is provided", () => {
+  test("includes Format, Paragraph, Insert, Matrix submenus when onRunCommand is provided", () => {
     const handlers = makeBodyHandlers();
     handlers.onRunCommand = () => {};
     const spec = buildEditorBodyMenuItemsSpec(handlers, false);
@@ -113,6 +113,7 @@ describe("buildEditorBodyMenuItemsSpec", () => {
       "[Format]",
       "[Paragraph]",
       "[Insert]",
+      "[Matrix]",
       "select-all",
     ]);
   });
@@ -163,6 +164,24 @@ describe("buildEditorBodyMenuItemsSpec", () => {
     expect(items).toContain("ins.hr");
     expect(items).toContain("ins.date");
     expect(items).toContain("ins.time");
+  });
+
+  test("Matrix submenu contains the re-bracket commands", () => {
+    const handlers = makeBodyHandlers();
+    handlers.onRunCommand = () => {};
+    const spec = buildEditorBodyMenuItemsSpec(handlers, false);
+    const matrixSubmenu = spec.find((e) => e.kind === "submenu" && e.text === "Matrix");
+    expect(matrixSubmenu).toBeDefined();
+    if (matrixSubmenu?.kind !== "submenu") throw new Error("expected submenu");
+    const items = matrixSubmenu.items.filter((e) => e.kind === "item").map((e) => e.id);
+    expect(items).toEqual([
+      "mtx.parens",
+      "mtx.square",
+      "mtx.curly",
+      "mtx.bars",
+      "mtx.doubleBars",
+      "mtx.cases",
+    ]);
   });
 
   test("submenu items have accelerator strings", () => {

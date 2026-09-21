@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vite-plus/test";
-import { matrixRowBreak } from "../src/lib/latex-snippets/matrix-row";
+import { enclosingMatrixEnv, matrixRowBreak } from "../src/lib/latex-snippets/matrix-row";
 
 /** caret marker: `|` inside the formula string. */
 function check(formula: string): boolean {
@@ -54,5 +54,49 @@ describe("matrixRowBreak", () => {
   test("skips an array column spec when measuring the row", () => {
     expect(check("\\begin{array}{cc}|")).toBe(false);
     expect(check("\\begin{array}{cc} a|")).toBe(true);
+  });
+});
+
+describe("enclosingMatrixEnv", () => {
+  /** caret marker: `|` inside the formula string. */
+  function envAt(formula: string) {
+    const caret = formula.indexOf("|");
+    return enclosingMatrixEnv(formula.replace("|", ""), caret);
+  }
+
+  test("reports the env name and both marker spans", () => {
+    const span = envAt("\\begin{cases}\na \\\\\nb|\n\\end{cases}")!;
+    expect(span.name).toBe("cases");
+    const clean = "\\begin{cases}\na \\\\\nb\n\\end{cases}";
+    expect(clean.slice(span.beginName.from, span.beginName.to)).toBe("cases");
+    expect(clean.slice(span.endName.from, span.endName.to)).toBe("cases");
+  });
+
+  test("caret anywhere in the env counts, including the markers", () => {
+    expect(envAt("\\begin{|pmatrix} a \\end{pmatrix}")!.name).toBe("pmatrix");
+    expect(envAt("\\begin{pmatrix} a \\end{pmat|rix}")!.name).toBe("pmatrix");
+    expect(envAt("\\begin{pmatrix} a \\end{pmatrix} |")).toBeNull();
+  });
+
+  test("innermost delimited env wins over outer pairs", () => {
+    expect(envAt("\\begin{cases} \\begin{bmatrix} a| \\end{bmatrix} \\end{cases}")!.name).toBe(
+      "bmatrix",
+    );
+  });
+
+  test("a caret inside a non-delimited inner env reaches the outer matrix", () => {
+    // `aligned` has no brackets of its own — the re-bracket target is cases.
+    expect(envAt("\\begin{cases} \\begin{aligned} a| \\end{aligned} \\end{cases}")!.name).toBe(
+      "cases",
+    );
+  });
+
+  test("array refuses — its colspec would be left as a literal group", () => {
+    expect(envAt("\\begin{array}{cc} a| \\end{array}")).toBeNull();
+    expect(envAt("a + b|")).toBeNull();
+  });
+
+  test("an unclosed \\end or `\\\\begin` row text never matches", () => {
+    expect(envAt("\\begin{pmatrix} a \\\\begin{pmatrix} |")).toBeNull();
   });
 });

@@ -292,6 +292,34 @@ describe("Matrix rows and brace annotations", function () {
     );
   });
 
+  it("re-brackets the enclosing matrix env via the command palette", async function () {
+    await caretToLine("1 & 2");
+    await browser.execute(() => {
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "p",
+          metaKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    const item = await $('[cmdk-item][data-value="matrix-square"]');
+    await item.waitForExist({ timeout: 5_000 });
+    await item.click();
+
+    await browser.waitUntil(
+      async () => {
+        const lines = await docLines();
+        return (
+          lines.some((text) => text.includes("\\begin{bmatrix}")) &&
+          lines.some((text) => text.includes("\\end{bmatrix}"))
+        );
+      },
+      { timeout: 5_000, timeoutMsg: "matrix env was not re-bracketed to bmatrix" },
+    );
+  });
+
   it("drops into insert mode when a brace wraps from Vim visual/normal", async function () {
     await invoke("set_setting", { key: "editor.vim-mode", value: true, scope: "global" });
     await $('[data-vim-mode="NORMAL"]').waitForExist({ timeout: 10_000 });
@@ -319,6 +347,9 @@ describe("Matrix rows and brace annotations", function () {
     });
 
     // In insert mode the note types; in Normal it would have been motions.
+    // execCommand needs DOM focus inside the editable — the palette click in
+    // the previous test can leave it elsewhere.
+    await browser.execute(() => document.querySelector(".cm-content")?.focus());
     await typeText("note");
     await browser.waitUntil(
       async () => {

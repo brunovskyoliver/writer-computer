@@ -2,6 +2,7 @@ import { EditorSelection, type Extension, type StateCommand, Prec } from "@codem
 import { type EditorView, type KeyBinding, keymap } from "@codemirror/view";
 import { syntaxTree } from "@codemirror/language";
 import { braceAnnotation } from "./brace-command";
+import { matrixDelimiters } from "./matrix-delimiters";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -404,6 +405,30 @@ export const editorCommands = {
     run: braceAnnotation("over"),
     label: "Overbrace annotation",
     chord: "Mod-Alt-o",
+  },
+  "matrix.parens": {
+    run: matrixDelimiters("pmatrix"),
+    label: "Matrix: round brackets ( )",
+  },
+  "matrix.square": {
+    run: matrixDelimiters("bmatrix"),
+    label: "Matrix: square brackets [ ]",
+  },
+  "matrix.curly": {
+    run: matrixDelimiters("Bmatrix"),
+    label: "Matrix: curly braces { }",
+  },
+  "matrix.bars": {
+    run: matrixDelimiters("vmatrix"),
+    label: "Matrix: single bars | |",
+  },
+  "matrix.doubleBars": {
+    run: matrixDelimiters("Vmatrix"),
+    label: "Matrix: double bars ‖ ‖",
+  },
+  "matrix.cases": {
+    run: matrixDelimiters("cases"),
+    label: "Matrix: cases brace {",
   },
   "insert.table": { run: insertTable, label: "Table" },
   "insert.horizontalRule": { run: insertHorizontalRule, label: "Horizontal rule" },
