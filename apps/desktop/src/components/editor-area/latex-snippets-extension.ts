@@ -20,6 +20,7 @@ import {
 } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, keymap, type DecorationSet } from "@codemirror/view";
 import { autoFraction } from "@/lib/latex-snippets/auto-fraction";
+import { matrixRowBreak } from "@/lib/latex-snippets/matrix-row";
 import {
   expandSnippet,
   frameOf,
@@ -107,7 +108,9 @@ export const latexTabstopState: Extension = [
 
 // ---------- Shared helpers ----------
 
-function setting(key: "latex.snippets-enabled" | "latex.tab-out" | "latex.auto-fraction"): boolean {
+function setting(
+  key: "latex.snippets-enabled" | "latex.tab-out" | "latex.auto-fraction" | "latex.matrix-rows",
+): boolean {
   const value: unknown = useSettingsStore.getState().getSetting(key);
   return value !== false;
 }
@@ -334,6 +337,30 @@ function latexKeymap(getTabId: () => string) {
         }
         // Escape belongs to everyone else too (Vim, search, dialogs).
         return false;
+      },
+    },
+    {
+      // Inside a matrix-like environment in display math, Enter ends the row
+      // (`\\` + newline) instead of inserting a plain newline. Every other
+      // position falls through to the usual Enter handling.
+      key: "Enter",
+      run: (view: EditorView) => {
+        if (vimBlocks(getTabId)) return false;
+        if (!setting("latex.matrix-rows")) return false;
+        const caret = view.state.selection.main;
+        if (!caret.empty || view.state.selection.ranges.length > 1) return false;
+
+        const context = contextAt(view, caret.head);
+        if (context.kind !== "display") return false;
+
+        const formula = view.state.doc.sliceString(
+          context.node.formulaFrom,
+          context.node.formulaTo,
+        );
+        if (!matrixRowBreak(formula, caret.head - context.node.formulaFrom)) return false;
+
+        view.dispatch(view.state.replaceSelection("\\\\\n"), { userEvent: "input.type" });
+        return true;
       },
     },
     {

@@ -57,6 +57,15 @@ These shortcuts are handled by the `markdownFormatting` CodeMirror extension and
 | Cmd+Shift+Enter         | Task list                 |
 | Cmd+Alt+1 ... Cmd+Alt+6 | Heading 1-6               |
 | Cmd+Alt+0               | Paragraph (strip heading) |
+| Cmd+Alt+U               | Underbrace annotation     |
+| Cmd+Alt+O               | Overbrace annotation      |
+
+The brace commands need a selection: they wrap it in `\underbrace{…}_{}` /
+`\overbrace{…}^{}` in math, or `$\underbrace{\text{…}}_{\text{…}}$` in prose,
+and leave the caret inside the annotation group. Inside math, Tab also walks
+`&` cell separators and `\\` row breaks (tab-out), and Enter inside a matrix
+environment in display math starts a new row — see
+[`SPECs/matrix-brace-tools/spec.md`](../SPECs/matrix-brace-tools/spec.md).
 
 ## Editor (inherited from CodeMirror)
 

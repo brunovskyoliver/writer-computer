@@ -386,6 +386,15 @@
       "default": true
     },
     {
+      "key": "latex.matrix-rows",
+      "label": "Enter adds a matrix row",
+      "description": "Inside a matrix-like environment in display math, Enter ends the row (\\\\) and starts a new one",
+      "category": "LaTeX Suite",
+      "type": "boolean",
+      "scope": "global",
+      "default": true
+    },
+    {
       "key": "latex.snippet-variables",
       "label": "Snippet variables",
       "description": "NAME=alternation pairs referenced as ${NAME} in the snippet file",

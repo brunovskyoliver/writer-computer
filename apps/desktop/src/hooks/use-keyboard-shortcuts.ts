@@ -52,15 +52,20 @@ export function useKeyboardShortcuts() {
         return;
       }
 
+      // Plain Cmd+<key> only: Alt is not part of these shortcuts, and without
+      // the guard Cmd+Alt+O would fire "go to file" over the editor's own
+      // Mod-Alt chords (brace annotations, headings 1–6).
+      const plainMod = mod && !e.altKey;
+
       // Cmd+P / Cmd+Shift+P — unified search (files + commands)
-      if (mod && (e.key === "p" || e.key === "P")) {
+      if (plainMod && (e.key === "p" || e.key === "P")) {
         e.preventDefault();
         if (e.shiftKey || root) openCommandPalette("search");
         return;
       }
 
       // Cmd+Shift+F — search inside files (content search palette)
-      if (mod && e.shiftKey && (e.key === "f" || e.key === "F")) {
+      if (plainMod && e.shiftKey && (e.key === "f" || e.key === "F")) {
         e.preventDefault();
         if (isCompactFileMode) return;
         if (root) openCommandPalette("content-search");
@@ -68,7 +73,7 @@ export function useKeyboardShortcuts() {
       }
 
       // Cmd+W — close current tab
-      if (mod && e.key === "w") {
+      if (plainMod && e.key === "w") {
         if (isCompactFileMode) return;
         e.preventDefault();
         if (activeTabId) closeActiveTab();
@@ -76,7 +81,7 @@ export function useKeyboardShortcuts() {
       }
 
       // Cmd+\ — toggle sidebar
-      if (mod && e.key === "\\") {
+      if (plainMod && e.key === "\\") {
         e.preventDefault();
         if (isCompactFileMode) return;
         toggleSidebar();
@@ -84,21 +89,21 @@ export function useKeyboardShortcuts() {
       }
 
       // Cmd+N — create new note
-      if (mod && e.key === "n") {
+      if (plainMod && e.key === "n") {
         e.preventDefault();
         if (root) openCommandPalette("create-file");
         return;
       }
 
       // Cmd+O — go to file
-      if (mod && e.key === "o") {
+      if (plainMod && e.key === "o") {
         e.preventDefault();
         if (root) openCommandPalette("search");
         return;
       }
 
       // Cmd+T — new tab
-      if (mod && e.key === "t") {
+      if (plainMod && e.key === "t") {
         e.preventDefault();
         if (isCompactFileMode) return;
         if (root) openNewTab();
@@ -118,7 +123,7 @@ export function useKeyboardShortcuts() {
       }
 
       // Cmd+1 through Cmd+9 — jump to Nth tab
-      if (mod && e.key >= "1" && e.key <= "9") {
+      if (plainMod && e.key >= "1" && e.key <= "9") {
         e.preventDefault();
         if (isCompactFileMode) return;
         const n = parseInt(e.key) - 1;

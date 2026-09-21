@@ -336,11 +336,25 @@ export default [
         options: "rMA",
         description: "Matrix environments with new lines",
     },
+    // The longer names come first in the alternation: a regex trigger only has
+    // to match *ending* at the caret, so without them "smallmatrix" would
+    // expand as `small` + \begin{matrix} and "dcases" as `d` + \begin{cases}.
+    // (`aligned` and `split` are absent on purpose: `align` fires at its last
+    // letter and the Greek-letter rule rewrites `spi`, so neither word can be
+    // typed. `beg` + the env name still reaches them.)
     {
-        trigger: /(matrix|cases|align|array)/,
+        trigger: /(smallmatrix|dcases|rcases|gathered|matrix|cases|align)/,
         replacement: "\\begin{[[0]]}\n$0\n\\end{[[0]]}",
         options: "rMA",
         description: "Miscellaneous environments with new lines",
+    },
+    // `array` needs its column spec, so it gets its own entry with a tabstop
+    // on {cc} instead of riding the environment regex.
+    {
+        trigger: "array",
+        replacement: "\\begin{array}{${0:cc}}\n$1\n\\end{array}",
+        options: "MA",
+        description: "Array environment with a column spec",
     },
     {
         trigger: /([pbBvV]mat)/,
@@ -348,9 +362,14 @@ export default [
         options: "rnA",
     },
     {
-        trigger: /(matrix|cases|align|array)/,
+        trigger: /(smallmatrix|dcases|rcases|gathered|matrix|cases|align)/,
         replacement: "\\begin{[[0]]}$0\\end{[[0]]}",
         options: "rnA",
+    },
+    {
+        trigger: "array",
+        replacement: "\\begin{array}{${0:cc}}$1\\end{array}",
+        options: "nA",
     },
 
     // Brackets

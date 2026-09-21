@@ -49,6 +49,9 @@ const FORMAT_SUBMENU: CommandMenuLayout = [
   "---",
   ["fmt.link", "format.link", "Insert link\u2026"],
   "---",
+  ["fmt.underbrace", "insert.underbrace"],
+  ["fmt.overbrace", "insert.overbrace"],
+  "---",
   ["fmt.clear", "format.clearFormatting"],
 ];
 

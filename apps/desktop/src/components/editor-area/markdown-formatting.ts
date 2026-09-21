@@ -1,6 +1,7 @@
 import { EditorSelection, type Extension, type StateCommand, Prec } from "@codemirror/state";
 import { type EditorView, type KeyBinding, keymap } from "@codemirror/view";
 import { syntaxTree } from "@codemirror/language";
+import { braceAnnotation } from "./brace-command";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -394,6 +395,16 @@ export const editorCommands = {
   "format.heading5": { run: setHeading(5), label: "Heading 5", chord: "Mod-Alt-5" },
   "format.heading6": { run: setHeading(6), label: "Heading 6", chord: "Mod-Alt-6" },
   "format.paragraph": { run: setParagraph, label: "Paragraph", chord: "Mod-Alt-0" },
+  "insert.underbrace": {
+    run: braceAnnotation("under"),
+    label: "Underbrace annotation",
+    chord: "Mod-Alt-u",
+  },
+  "insert.overbrace": {
+    run: braceAnnotation("over"),
+    label: "Overbrace annotation",
+    chord: "Mod-Alt-o",
+  },
   "insert.table": { run: insertTable, label: "Table" },
   "insert.horizontalRule": { run: insertHorizontalRule, label: "Horizontal rule" },
   "insert.today": { run: insertToday, label: "Current date" },

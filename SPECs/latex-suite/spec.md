@@ -132,9 +132,10 @@ In the LaTeX Suite settings section the user can turn the whole feature off, tog
 
 **Tab-out and auto-fraction**
 
-- **FR-012a**: Inside a math region with no active tabstop, Tab MUST move the caret past the next closing `}`, `)`, `]`, `|` or the region's closing `$`/`$$` on the same line when one lies ahead of the caret; otherwise Tab keeps its ordinary behaviour.
+- **FR-012a**: Inside a math region with no active tabstop, Tab MUST move the caret past the next `}`, `)`, `]`, `|`, `&` (cell separator), `\\` (row break) or the region's closing `$`/`$$` on the same line when one lies ahead of the caret; otherwise Tab keeps its ordinary behaviour.
 - **FR-012b**: Inside a math region, typing `/` directly after an operand MUST convert the operand into a fraction: the operand is the preceding bracketed group, or the preceding run of non-space characters, or the whole content back to the previous unbalanced opener/operator; result is `\frac{operand}{|}` with the caret in the denominator and a tabstop after the closing brace. Typing `/` after a space or at the start of the region inserts a literal `/`.
-- **FR-012c**: Tab-out and auto-fraction MUST each be individually switchable in Settings and MUST be inert outside math regions and outside vim Insert mode.
+- **FR-012c**: Tab-out, auto-fraction and matrix-row Enter MUST each be individually switchable in Settings and MUST be inert outside math regions and outside vim Insert mode.
+- **FR-012d**: Inside a matrix-like environment (`*matrix*`, `array`, `cases`/`dcases`/`rcases`, `aligned`, `gathered`, `split`, `subarray`) in display math, Enter MUST insert `\\` and a newline when the current row has content; on an empty row or outside such an environment Enter MUST keep its ordinary behaviour. See [`SPECs/matrix-brace-tools/spec.md`](../matrix-brace-tools/spec.md).
 
 **Snippet file and reload**
 

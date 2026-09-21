@@ -101,6 +101,16 @@ bundle identifier (see below).
   this WebDriver, so widget click-to-edit handlers never fire. Specs that need
   a caret position drive it from the keyboard instead (see
   `latex-highlighting.spec.js`).
+- **Modifier chords through `browser.keys` can drop the modifier** on
+  WKWebView — `["Meta", "ArrowRight"]` may arrive as a bare ArrowRight.
+  Dispatch a synthetic `KeyboardEvent` on `.cm-content` instead; untrusted
+  events still reach the CodeMirror keymap (see `matrix-brace.spec.js`).
+- **`browser.keys` never produces text input** — character insertion goes
+  through the contenteditable `beforeinput` path, not `keydown`. Use
+  `document.execCommand("insertText", false, text)` inside `browser.execute`.
+- **Folded math is one widget line** — a `$…$`/`$$…$$` range only shows its
+  source `.cm-line`s once the caret is inside it, so navigate by polling the
+  caret's current line rather than by a precomputed index.
 - **A file seeded mid-session does not appear in the sidebar** — the workspace
   watcher is not enough. Reload (`window.location.reload()`) after
   `write_file`; startup rebuilds the file index from disk.

@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-09-21
+
+- Matrices are faster to write. The snippet set gains `smallmatrix`, `dcases`, `rcases` and `gathered` environments, and `array` now expands with a `{cc}` column-spec tabstop instead of a broken bare `\begin{array}`. Inside math, Tab now also walks `&` cell separators and `\\` row breaks, and Enter inside a matrix environment in display math ends the row and starts a new one (toggleable as "Enter adds a matrix row" under Settings → LaTeX Suite). Note: the new snippets land in the _shipped defaults_ — an existing snippet file keeps working unchanged; use Reset to defaults in Settings → LaTeX Suite to pick them up.
+
+- Select any text or math and press `Cmd+Alt+U` / `Cmd+Alt+O` to wrap it in a `\underbrace` / `\overbrace` with the caret waiting in the annotation group — type the note, or `text` first for prose inside math. In prose the selection is wrapped as `$\underbrace{\text{…}}_{\text{…}}$`, so the bracket renders anywhere Markdown math does. Both commands are in the command palette and the editor's Format context menu, and each is one undo step.
+
+- Fix `Cmd+Alt+<letter>` chords firing the plain `Cmd+<letter>` action as well. The global shortcut handler ignored the Alt key, so `Cmd+Alt+O` also opened "Go to file" and `Cmd+Alt+1…9` also jumped tabs on top of setting a heading. Those actions now require Cmd alone.
+
 ## 2026-09-20
 
 - Search inside every file with `Cmd+Shift+F`. The content-search palette scans text files and PDFs alike, streaming results as it walks the workspace: each hit shows the matched line with the query highlighted and its location (`L42`, `Page 3`), and hovering or arrowing through the list previews the surrounding lines. Pressing Enter opens text files on the matched line — selected — and PDFs on the matched page with the passage emphasised. Search is smart-case literal text, honours `.gitignore` and hidden files, and says so when a large result set is truncated.

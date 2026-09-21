@@ -41,8 +41,9 @@ The expansion transaction: `{ changes, selection, effects: [setFrames], userEven
 | `Shift-Tab` | 1. active frame → previous group · 2. `false`                                                                                                                                                                                        |
 | `Escape`    | 1. frames present → clear all, `false` (let others also see Escape)                                                                                                                                                                  |
 | `Backspace` | 1. `lastExpansionAt === current doc-change counter` and history has an undo → `undo`, `true` · 2. `false`                                                                                                                            |
+| `Enter`     | 1. `latex.matrix-rows` on and caret inside an unclosed matrix-like env in display math with a non-blank row → insert `\\` + newline, `true` · 2. `false`                                                                             |
 
-All four return `false` in vim Normal/Visual modes. Tab-to-next-stop dispatches a selection-only transaction (`userEvent: "select"`), so it adds no undo step.
+All five return `false` in vim Normal/Visual modes. Tab-to-next-stop dispatches a selection-only transaction (`userEvent: "select"`), so it adds no undo step.
 
 ## Tabstop state field
 
@@ -70,7 +71,11 @@ Operand search backwards from the caret on the current line: skip nothing; if th
 
 ## Tab-out (Tab in math, no frame, no Tab-snippet)
 
-From the caret to the end of the line: the first of `}`, `)`, `]`, `|` → move caret just past it; otherwise if the enclosing `Math` closes on this line → move past its closing delimiter; otherwise `false`.
+From the caret to the end of the line: the first of `}`, `)`, `]`, `|`, `&` (matrix/align cell separator) or `\\` (row break — moves past both characters) → move caret just past it; otherwise if the enclosing `Math` closes on this line → move past its closing delimiter; otherwise `false`. A lone `\` is a macro start, never a target.
+
+## Enter in a matrix row (`latex.matrix-rows`)
+
+In display math with the caret inside an unclosed `\begin{env}` where `env` is matrix-like (`*matrix*`, `array`, `subarray`, `cases`/`dcases`/`rcases`, `aligned`, `alignedat`, `gathered`, `split`) and the current row — text since the environment's opening group (skipping a `{…}` colspec) or the last `\\` — is non-blank, Enter dispatches `\\` + newline as `input.type` and returns `true`. Everywhere else it returns `false`.
 
 ## Highlighting
 
@@ -82,4 +87,4 @@ From the caret to the end of the line: the first of `}`, `)`, `]`, `|` → move 
 
 ## Settings read at runtime (no reconfigure)
 
-`latex.snippets-enabled`, `latex.tab-out`, `latex.auto-fraction` are read from `useSettingsStore.getState()` on each keystroke/Tab. `latex.highlight-source` drives the highlight compartment through a subscription (one `reconfigure` per change, no document change).
+`latex.snippets-enabled`, `latex.tab-out`, `latex.auto-fraction`, `latex.matrix-rows` are read from `useSettingsStore.getState()` on each keystroke/Tab. `latex.highlight-source` drives the highlight compartment through a subscription (one `reconfigure` per change, no document change).

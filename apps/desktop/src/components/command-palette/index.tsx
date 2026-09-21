@@ -40,6 +40,7 @@ import { useFocusedPaneId } from "@/hooks/use-editor-layout";
 import { createAndOpenDrawing, createAndOpenFile } from "./open-routes";
 import { getEditorView } from "@/lib/editor-views";
 import { openAndFocusHighlightBar } from "@/components/editor-area/highlight-bar";
+import { runEditorCommand } from "@/components/editor-area/markdown-formatting";
 import * as tauri from "@/lib/tauri";
 import type { RecentFile } from "@/lib/tauri";
 
@@ -263,6 +264,26 @@ export function CommandPalette() {
         if (view) {
           openAndFocusHighlightBar(view);
         }
+      },
+    },
+    activeTabId && {
+      id: "underbrace",
+      label: "Underbrace Annotation",
+      description: "Command",
+      run: () => {
+        close();
+        const view = getEditorView(activeTabId);
+        if (view) runEditorCommand(view, "insert.underbrace");
+      },
+    },
+    activeTabId && {
+      id: "overbrace",
+      label: "Overbrace Annotation",
+      description: "Command",
+      run: () => {
+        close();
+        const view = getEditorView(activeTabId);
+        if (view) runEditorCommand(view, "insert.overbrace");
       },
     },
   ].filter((c): c is Command => Boolean(c));

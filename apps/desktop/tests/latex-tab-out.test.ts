@@ -31,4 +31,16 @@ describe("tabOutTarget", () => {
     // `$\sqrt{x|}$` — the `}` comes first even though the `$` is on this line.
     expect(tabOutTarget("}$", 8, inline(0, 10), 10)).toBe(9);
   });
+
+  test("walks matrix cells: past & and past both chars of \\\\", () => {
+    // `$a & b|$` — caret at 2.
+    expect(tabOutTarget(" & b$", 2, inline(0, 7), 7)).toBe(4);
+    // `a & b \\\\` — caret at 5, the break is two chars.
+    expect(tabOutTarget(" \\\\ c", 5, inline(0, 11), 11)).toBe(8);
+  });
+
+  test("a lone backslash is a macro start, not a target", () => {
+    // `\alpha` after the caret: the `\` is not a `\\` break; the `}` wins.
+    expect(tabOutTarget("\\alpha}", 4, inline(0, 12), 12)).toBe(11);
+  });
 });
