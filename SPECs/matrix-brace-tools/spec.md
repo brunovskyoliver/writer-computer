@@ -18,9 +18,9 @@ The user types `pmat` inside `$$…$$`, gets `\begin{pmatrix}`/`\end{pmatrix}` w
 
 1. Typing `array` in math produces `\begin{array}{cc}` with the caret on the column spec — previously it emitted `\begin{array}` with no colspec, which does not render.
 2. Typing `smallmatrix` produces `\begin{smallmatrix}…\end{smallmatrix}` — not `small\begin{matrix}` (the bare `matrix` trigger is a suffix of `smallmatrix`; the alternation lists the longer name so the leftmost match covers the whole word).
-3. Tab inside a matrix row moves past the next `&` or `\\` on the line, then past `}`, then past `$$`.
+3. Tab inside a matrix row moves past the next `&` or `\\` on the line, then past `}`, then past `$$`. Inside a cell-capable environment Tab instead walks elements in the same row — past `&` or a thin-space separator (`\;`, `\,`, `\:`) — and at the row's last element it appends a separator in the env's existing style so a fresh element opens; the caret never crosses `\\` (Enter owns rows).
 4. Enter inside a matrix-like environment (`*matrix*`, `array`, `cases`/`dcases`/`rcases`, `aligned`, `gathered`, `split`, `subarray`) in display math inserts `\\` and a newline when the current row has content; on an empty row or outside such an environment Enter behaves as before.
-5. The behaviour is switchable per `latex.matrix-rows` in Settings → LaTeX Suite; default on.
+5. The behaviours are switchable per `latex.matrix-rows` and `latex.matrix-cells` in Settings → LaTeX Suite; default on.
 
 ### US2 — Annotate a selection with a brace (P1)
 
@@ -56,6 +56,7 @@ The user has matrices written as `\begin{cases}…\end{cases}` — a habit that 
 - **FR-7**: A successful wrap puts Vim into insert mode (via `Vim.handleKey(cm, "i")` on the view's adapter), so the annotation can be typed immediately. No-op when Vim is off or already inserting.
 - **FR-8**: The prose form splits the fragment into text runs and `$…$`/`$$…$$` math islands — the same spans the markdown math scanner recognises (unescaped delimiters, Pandoc opener/closer guards). Islands emit raw inside the brace; text runs emit inside `\text{}` with `$ & # _ { } %` escaped to `\x`. A selection ending exactly on a math node's closing `$` counts as prose-with-islands, not a mix; starting inside a formula or ending mid-formula still refuses. The emitted formula never contains a `$`, so it re-parses as one math node.
 - **FR-9**: `enclosingMatrixEnv(formula, caret)` is pure: it returns the env name plus the two `\begin{…}`/`\end{…}` name spans of the nearest _re-bracketable_ env enclosing the caret (`[pbBvV]?matrix`, `[dr]?cases` — argument-free envs sharing the `\\`/`&` grammar). Six `matrix.*` registry commands rewrite just those spans; reachable from the palette and the context menu's Matrix submenu.
+- **FR-10**: `matrixCellTarget(formula, caret)` is pure: inside a cell-capable env (`*matrix*`, `smallmatrix`, `array`, `subarray`, `[dr]?cases`, `aligned`, `alignedat`, `split` — not `gathered`, which has one column) it returns a `move` past the next top-level `&` or `\;`/`\,`/`\:` in the same row (skipping `{…}` groups and nested environments), or an `insert` that appends a separator matching the env's existing style (`&` or the thin space) after the last element when the row has none left. Null on an empty row, inside the `\\` pair, inside `\begin{…}`/`\end{…}`, or outside an env — plain tab-out keeps those. Runs between snippet expansion and tab-out in the Tab handler, gated by `latex.matrix-cells`, one undo step for the insert.
 
 ## Non-goals
 

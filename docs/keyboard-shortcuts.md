@@ -64,7 +64,9 @@ The brace commands need a selection: they wrap it in `\underbrace{…}_{}` /
 `\overbrace{…}^{}` in math, or `$\underbrace{\text{…}}_{\text{…}}$` in prose,
 and leave the caret inside the annotation group. Inside math, Tab also walks
 `&` cell separators and `\\` row breaks (tab-out), and Enter inside a matrix
-environment in display math starts a new row — see
+environment in display math starts a new row. Inside a matrix environment Tab
+walks elements in the same row — past `&` or `\;`-style separators — and
+appends a separator when the row's last element is reached — see
 [`SPECs/matrix-brace-tools/spec.md`](../SPECs/matrix-brace-tools/spec.md).
 
 ## Editor (inherited from CodeMirror)

@@ -39,14 +39,14 @@ function matchBrace(text: string, openIndex: number): number | null {
 }
 
 /**
- * @param formula the math node's content between its `$`/`$$` delimiters
- * @param caret   the caret position as an offset into `formula`
- * @returns true when Enter should emit `\\` + newline rather than a plain
- *          newline: the caret is inside an unclosed matrix-like environment
- *          and the row it sits on has content. On the `\begin{…}` line or an
- *          empty row the answer is false — Enter then means "leave".
+ * The innermost `\begin{env}` still open at `caret`, or null when the caret
+ * sits outside every environment. `bodyStart` is the end of the `\begin{…}`
+ * marker, past an `{…}` column spec for envs that take one.
  */
-export function matrixRowBreak(formula: string, caret: number): boolean {
+export function innermostEnvAt(
+  formula: string,
+  caret: number,
+): { name: string; bodyStart: number } | null {
   const before = formula.slice(0, caret);
 
   const stack: { name: string; end: number }[] = [];
@@ -67,14 +67,30 @@ export function matrixRowBreak(formula: string, caret: number): boolean {
   }
 
   const env = stack[stack.length - 1];
+  if (!env) return null;
+
+  let bodyStart = env.end;
+  if (COLSPEC_ENV.has(env.name) && formula[bodyStart] === "{") {
+    const close = matchBrace(formula, bodyStart);
+    if (close !== null) bodyStart = close + 1;
+  }
+  return { name: env.name, bodyStart };
+}
+
+/**
+ * @param formula the math node's content between its `$`/`$$` delimiters
+ * @param caret   the caret position as an offset into `formula`
+ * @returns true when Enter should emit `\\` + newline rather than a plain
+ *          newline: the caret is inside an unclosed matrix-like environment
+ *          and the row it sits on has content. On the `\begin{…}` line or an
+ *          empty row the answer is false — Enter then means "leave".
+ */
+export function matrixRowBreak(formula: string, caret: number): boolean {
+  const env = innermostEnvAt(formula, caret);
   if (!env || !MATRIX_ENV.test(env.name)) return false;
 
-  let rowStart = env.end;
-  if (COLSPEC_ENV.has(env.name) && formula[rowStart] === "{") {
-    const close = matchBrace(formula, rowStart);
-    if (close !== null) rowStart = close + 1;
-  }
-  const lastBreak = before.lastIndexOf("\\\\");
+  let rowStart = env.bodyStart;
+  const lastBreak = formula.slice(0, caret).lastIndexOf("\\\\");
   if (lastBreak !== -1 && lastBreak + 2 > rowStart) rowStart = lastBreak + 2;
 
   return formula.slice(rowStart, caret).trim() !== "";

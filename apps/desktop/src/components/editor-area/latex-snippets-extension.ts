@@ -20,6 +20,7 @@ import {
 } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, keymap, type DecorationSet } from "@codemirror/view";
 import { autoFraction } from "@/lib/latex-snippets/auto-fraction";
+import { matrixCellTarget } from "@/lib/latex-snippets/matrix-cell";
 import { matrixRowBreak } from "@/lib/latex-snippets/matrix-row";
 import {
   expandSnippet,
@@ -109,7 +110,12 @@ export const latexTabstopState: Extension = [
 // ---------- Shared helpers ----------
 
 function setting(
-  key: "latex.snippets-enabled" | "latex.tab-out" | "latex.auto-fraction" | "latex.matrix-rows",
+  key:
+    | "latex.snippets-enabled"
+    | "latex.tab-out"
+    | "latex.auto-fraction"
+    | "latex.matrix-rows"
+    | "latex.matrix-cells",
 ): boolean {
   const value: unknown = useSettingsStore.getState().getSetting(key);
   return value !== false;
@@ -301,6 +307,29 @@ function tabCommand(getTabId: () => string) {
       });
       if (match) {
         dispatchExpansion(view, match, line.from + match.from, caret.head);
+        return true;
+      }
+    }
+
+    if (
+      setting("latex.matrix-cells") &&
+      (context.kind === "inline" || context.kind === "display")
+    ) {
+      const formula = view.state.doc.sliceString(context.node.formulaFrom, context.node.formulaTo);
+      const cell = matrixCellTarget(formula, caret.head - context.node.formulaFrom);
+      if (cell) {
+        if (cell.kind === "move") {
+          view.dispatch({
+            selection: EditorSelection.cursor(context.node.formulaFrom + cell.to),
+            userEvent: "select",
+          });
+        } else {
+          view.dispatch({
+            changes: { from: context.node.formulaFrom + cell.at, insert: cell.text },
+            selection: EditorSelection.cursor(context.node.formulaFrom + cell.caret),
+            userEvent: "input.type",
+          });
+        }
         return true;
       }
     }

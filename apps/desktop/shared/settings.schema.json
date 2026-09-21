@@ -395,6 +395,15 @@
       "default": true
     },
     {
+      "key": "latex.matrix-cells",
+      "label": "Tab moves to the next matrix cell",
+      "description": "Inside a matrix environment, Tab jumps past the next & or \\; element separator in the row, or appends one at the end of the row",
+      "category": "LaTeX Suite",
+      "type": "boolean",
+      "scope": "global",
+      "default": true
+    },
+    {
       "key": "latex.snippet-variables",
       "label": "Snippet variables",
       "description": "NAME=alternation pairs referenced as ${NAME} in the snippet file",

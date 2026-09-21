@@ -29,6 +29,12 @@ describe("Matrix rows and brace annotations", function () {
     "",
     "It is rows $*$ columns wide.",
     "",
+    "$$",
+    "\\begin{bmatrix}",
+    "5\\;6\\;7",
+    "\\end{bmatrix}",
+    "$$",
+    "",
     "Wrap vim word too.",
     "",
   ].join("\n");
@@ -289,6 +295,24 @@ describe("Matrix rows and brace annotations", function () {
         );
       },
       { timeout: 5_000, timeoutMsg: "typed note did not land inside the annotation" },
+    );
+  });
+
+  it("Tabs between \\;-separated elements and appends one at the row end", async function () {
+    await caretToLine("5\\;6\\;7");
+    await press("Tab"); // caret lands before 6
+    await typeText("9");
+    await browser.waitUntil(
+      async () => (await docLines()).some((text) => text.includes("5\\;96\\;7")),
+      { timeout: 5_000, timeoutMsg: "Tab did not move to the next \\; element" },
+    );
+
+    await press("Tab"); // caret lands before 7
+    await press("Tab"); // no separator left: a fresh element opens
+    await typeText("8");
+    await browser.waitUntil(
+      async () => (await docLines()).some((text) => text.includes("5\\;96\\;7\\;8")),
+      { timeout: 5_000, timeoutMsg: "Tab at the row end did not append a new element" },
     );
   });
 
