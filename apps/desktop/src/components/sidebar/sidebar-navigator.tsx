@@ -32,7 +32,7 @@ import { ShowMoreButton, SidebarSection } from "./sidebar-section";
 import type { DirEntry } from "@/types/fs";
 
 interface SidebarNavigatorProps {
-  openFile?: (path: string) => Promise<void>;
+  openFile?: (path: string) => Promise<unknown>;
   enableContextMenus?: boolean;
   onOpenFileComplete?: () => void;
   className?: string;

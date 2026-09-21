@@ -19,8 +19,12 @@ function key(tabId: string, path: string) {
   return `${tabId}\n${path}`;
 }
 
+export function setPendingTarget(tabId: string, path: string, target: PendingTarget): void {
+  pending.set(key(tabId, path), target);
+}
+
 export function setPendingAnchor(tabId: string, path: string, anchor: string): void {
-  pending.set(key(tabId, path), { kind: "anchor", slug: anchor });
+  setPendingTarget(tabId, path, { kind: "anchor", slug: anchor });
 }
 
 export function setPendingLineTarget(
@@ -28,7 +32,7 @@ export function setPendingLineTarget(
   path: string,
   target: { line: number; offset: number; length: number; needle: string },
 ): void {
-  pending.set(key(tabId, path), { kind: "line", ...target });
+  setPendingTarget(tabId, path, { kind: "line", ...target });
 }
 
 export function consumePendingAnchor(tabId: string, path: string): PendingTarget | undefined {

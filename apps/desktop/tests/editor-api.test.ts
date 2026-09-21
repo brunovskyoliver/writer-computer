@@ -6,6 +6,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 import type { EditorView } from "@codemirror/view";
+import { invoke } from "@tauri-apps/api/core";
 import { useEditorStore } from "../src/stores/editor-store";
 import * as editorApi from "../src/hooks/editor-api";
 import {
@@ -14,7 +15,10 @@ import {
   resetEditorViews,
   rewriteEditorPaths,
 } from "../src/lib/editor-views";
+import { consumePendingAnchor } from "../src/lib/pending-anchor";
 import { createLayout } from "../src/lib/editor-layout";
+
+const mockedInvoke = vi.mocked(invoke);
 
 /** A view stub: `insertAtCursor` and the registry only read `state` and call
  *  `dispatch`, so nothing here needs a DOM. */
@@ -257,5 +261,49 @@ describe("editorApi", () => {
     editorApi.setTabCursor("tab-1", "/a.md", 12);
     clearTabViewState("tab-1");
     expect(editorApi.getTabViewState("tab-1", "/a.md").cursor).toBe(0);
+  });
+
+  test("openSearchMatch opens a fresh tab instead of moving the current one", async () => {
+    mockedInvoke
+      .mockResolvedValueOnce({ path: "/a.md", content: "a", modified_at: 1 })
+      .mockResolvedValueOnce({ path: "/b.md", content: "find me", modified_at: 2 });
+    await useEditorStore.getState().openFile("/a.md");
+    const aTabId = useEditorStore.getState().activeTabId!;
+
+    editorApi.openSearchMatch(
+      {
+        path: "/b.md",
+        relative_path: "b.md",
+        modified_at: 2,
+        kind: "text",
+        line_number: 1,
+        page: null,
+        line_text: "find me",
+        match_ranges: [[0, 4]],
+        context: [],
+      },
+      "find",
+    );
+    await vi.waitFor(() => {
+      expect(useEditorStore.getState().tabs).toHaveLength(2);
+    });
+
+    const state = useEditorStore.getState();
+    const bTab = state.tabs.find(
+      (tab) => tab.location.kind === "file" && tab.location.path === "/b.md",
+    )!;
+    expect(state.activeTabId).toBe(bTab.id);
+    // The tab the search ran from kept its document and its clean history.
+    const aTab = state.tabs.find((tab) => tab.id === aTabId)!;
+    expect(aTab.location).toEqual({ kind: "file", path: "/a.md" });
+    expect(aTab.back).toEqual([]);
+    // The line target is queued for the new tab's mount to consume.
+    expect(consumePendingAnchor(bTab.id, "/b.md")).toEqual({
+      kind: "line",
+      line: 1,
+      offset: 0,
+      length: 4,
+      needle: "find",
+    });
   });
 });

@@ -97,11 +97,17 @@ describe("palette open routes", () => {
     await pending;
 
     const state = useEditorStore.getState();
-    // The left pane's file tab navigated in place per the replace policy; the
-    // right pane never saw the new file.
+    // The created note is a new tab in the captured left pane — the file tab
+    // that was open there keeps its document rather than being replaced.
+    const leftPane = findPane(state.layout, left!.id)!;
+    const newTab = state.tabs.find(
+      (tab) => tab.location.kind === "file" && tab.location.path === "/ws/new.md",
+    )!;
+    expect(leftPane.tabIds).toEqual([a!.id, newTab.id]);
+    expect(leftPane.activeTabId).toBe(newTab.id);
     expect(state.tabs.find((tab) => tab.id === a!.id)!.location).toEqual({
       kind: "file",
-      path: "/ws/new.md",
+      path: "/ws/a.md",
     });
     expect(findPane(state.layout, right!.id)!.tabIds).toEqual([b!.id]);
     expect(state.tabs.find((tab) => tab.id === b!.id)!.location).toEqual({

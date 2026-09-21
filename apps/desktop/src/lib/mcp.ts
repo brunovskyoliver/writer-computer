@@ -220,10 +220,11 @@ async function createFolder(args: unknown) {
   });
 }
 
-/** FR-020: open in the window's active tab — a fresh tab when `new_tab` —
- *  then bring the window forward. The only webview-side tool allowed to
- *  steal focus; Rust already resolved the path (`not_found` never reaches
- *  here). */
+/** FR-020: open in the window — focuses the tab already showing the file or
+ *  opens a new one, never replacing a tab's document; `new_tab` forces a
+ *  fresh tab — then bring the window forward. The only webview-side tool
+ *  allowed to steal focus; Rust already resolved the path (`not_found` never
+ *  reaches here). */
 async function openFile(args: unknown) {
   const { path, relativePath } = resolvedTarget(args);
   const { new_tab } = (args ?? {}) as Record<string, unknown>;

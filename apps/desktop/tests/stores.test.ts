@@ -34,6 +34,7 @@ import {
   type TabDropTarget,
 } from "../src/lib/editor-layout";
 import { getTabViewState, setTabCursor } from "../src/lib/editor-views";
+import { consumePendingAnchor } from "../src/lib/pending-anchor";
 // Side-effect: registers the subscription that re-points the standalone
 // single-file watcher whenever the active file changes in a compact window.
 import "../src/lib/standalone-watch";
@@ -423,6 +424,81 @@ describe("editor-store", () => {
     await useEditorStore.getState().openFile("/a.md");
 
     expect(tabPaths()).toEqual(["/a.md", "/a.md"]);
+  });
+
+  test("openFile never moves a file tab's location — a second file gets its own tab", async () => {
+    mockedInvoke
+      .mockResolvedValueOnce({ path: "/a.md", content: "a", modified_at: 1 })
+      .mockResolvedValueOnce({ path: "/b.md", content: "b", modified_at: 2 });
+
+    await useEditorStore.getState().openFile("/a.md");
+    const firstTabId = useEditorStore.getState().activeTabId!;
+    await useEditorStore.getState().openFile("/b.md");
+
+    const state = useEditorStore.getState();
+    expect(tabPaths()).toEqual(["/a.md", "/b.md"]);
+    expect(state.activeFilePath).toBe("/b.md");
+    // The first tab kept its document and gained no history — an open is not
+    // a navigation.
+    const first = state.tabs.find((tab) => tab.id === firstTabId)!;
+    expect(first.location).toEqual({ kind: "file", path: "/a.md" });
+    expect(first.back).toEqual([]);
+    expect(first.forward).toEqual([]);
+  });
+
+  test("openFile focuses the tab already showing the file instead of duplicating it", async () => {
+    mockedInvoke
+      .mockResolvedValueOnce({ path: "/a.md", content: "a", modified_at: 1 })
+      .mockResolvedValueOnce({ path: "/b.md", content: "b", modified_at: 2 });
+
+    await useEditorStore.getState().openFile("/a.md");
+    await useEditorStore.getState().openFileInNewTab("/b.md");
+    const aTabId = useEditorStore.getState().tabs[0]!.id;
+
+    const returned = await useEditorStore.getState().openFile("/a.md");
+
+    const state = useEditorStore.getState();
+    expect(tabPaths()).toEqual(["/a.md", "/b.md"]);
+    expect(state.activeTabId).toBe(aTabId);
+    expect(returned?.id).toBe(aTabId);
+    // No second read: the file was already open.
+    expect(mockedInvoke.mock.calls.filter(([cmd]) => cmd === "read_file")).toHaveLength(2);
+  });
+
+  test("openFile queues a pendingTarget on the tab it creates", async () => {
+    mockedInvoke.mockResolvedValueOnce({ path: "/a.md", content: "a", modified_at: 1 });
+
+    const tab = await useEditorStore.getState().openFile("/a.md", {
+      pendingTarget: { kind: "line", line: 3, offset: 1, length: 4, needle: "find" },
+    });
+
+    expect(tab).not.toBeNull();
+    expect(consumePendingAnchor(tab!.id, "/a.md")).toEqual({
+      kind: "line",
+      line: 3,
+      offset: 1,
+      length: 4,
+      needle: "find",
+    });
+  });
+
+  test("openFile queues a pendingTarget on the launcher tab it fills", async () => {
+    mockedInvoke.mockResolvedValue({ path: "/a.md", content: "a", modified_at: 1 });
+    useEditorStore.getState().openNewTab();
+    const launcherTabId = useEditorStore.getState().activeTabId!;
+
+    const tab = await useEditorStore.getState().openFile("/a.md", {
+      pendingTarget: { kind: "line", line: 1, offset: 0, length: 2, needle: "hi" },
+    });
+
+    expect(tab?.id).toBe(launcherTabId);
+    expect(consumePendingAnchor(launcherTabId, "/a.md")).toEqual({
+      kind: "line",
+      line: 1,
+      offset: 0,
+      length: 2,
+      needle: "hi",
+    });
   });
 
   test("navigateToFile is a no-op on launcher tabs until a file is chosen", async () => {
@@ -1727,12 +1803,12 @@ describe("editor-store pane routing", () => {
     await useEditorStore.getState().openFile("/c.md", { paneId: left.id });
 
     const state = useEditorStore.getState();
-    // The left pane's active file tab navigated in place, as the existing
-    // replace policy says; the right pane was not touched.
-    expect(findPane(state.layout, left.id)!.tabIds).toEqual([a.id]);
+    // An open never moves a file tab: /c.md lands in a new tab in the left
+    // pane, and the tab that showed /a.md is untouched.
+    expect(findPane(state.layout, left.id)!.tabIds).toHaveLength(2);
     expect(state.tabs.find((tab) => tab.id === a.id)!.location).toEqual({
       kind: "file",
-      path: "/c.md",
+      path: "/a.md",
     });
     expect(findPane(state.layout, right.id)!.tabIds).toHaveLength(1);
   });
@@ -1774,8 +1850,8 @@ describe("editor-store pane routing", () => {
     expect(findPane(state.layout, right.id)!.tabIds).toHaveLength(1);
   });
 
-  test("a target pane that closed during the read drops the open instead of landing elsewhere", async () => {
-    const { b, left, right } = await twoPanes();
+  test("a target pane gone before the open lands in the focused pane as a new tab", async () => {
+    const { a, b, left, right } = await twoPanes();
     // Only a launcher in the right pane, so openFile takes the create-a-tab path.
     useEditorStore.getState().closeTab(b.id);
     expect(findPane(useEditorStore.getState().layout, right.id)).toBeNull();
@@ -1799,12 +1875,16 @@ describe("editor-store pane routing", () => {
 
     await useEditorStore.getState().openFile("/c.md", { paneId: target.id });
 
-    // The pane is gone, so the open falls back to the focused pane's policy:
-    // the focused file tab navigates in place rather than a tab appearing
-    // somewhere the user did not aim at.
+    // The pane is gone, so the open falls back to the focused pane — a new
+    // tab there, never a hijack of the file tab it holds.
     const state = useEditorStore.getState();
     expect(findPane(state.layout, target.id)).toBeNull();
-    expect(state.tabs).toHaveLength(before);
+    expect(state.tabs).toHaveLength(before + 1);
+    expect(state.activeFilePath).toBe("/c.md");
+    expect(state.tabs.find((tab) => tab.id === a.id)!.location).toEqual({
+      kind: "file",
+      path: "/a.md",
+    });
   });
 
   test("a read that completes after the editor was reset does not land in the new layout", async () => {

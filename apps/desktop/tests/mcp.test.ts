@@ -449,8 +449,8 @@ describe("dispatchMcpRequest write tools", () => {
 });
 
 describe("dispatchMcpRequest open/control tools", () => {
-  test("open_file navigates the active tab and brings the window forward", async () => {
-    const openFile = vi.fn(() => Promise.resolve());
+  test("open_file opens the file and brings the window forward", async () => {
+    const openFile = vi.fn(() => Promise.resolve(null));
     const openFileInNewTab = vi.fn(() => Promise.resolve());
     useEditorStore.setState({ openFile, openFileInNewTab });
 
@@ -467,7 +467,7 @@ describe("dispatchMcpRequest open/control tools", () => {
   });
 
   test("open_file with new_tab opens a fresh tab", async () => {
-    const openFile = vi.fn(() => Promise.resolve());
+    const openFile = vi.fn(() => Promise.resolve(null));
     const openFileInNewTab = vi.fn(() => Promise.resolve());
     useEditorStore.setState({ openFile, openFileInNewTab });
 
@@ -484,7 +484,7 @@ describe("dispatchMcpRequest open/control tools", () => {
 
   test("open_file in a compact window only focuses — its file is already shown", async () => {
     useWorkspaceStore.setState({ root: null, chromeMode: "compact-file" });
-    const openFile = vi.fn(() => Promise.resolve());
+    const openFile = vi.fn(() => Promise.resolve(null));
     useEditorStore.setState({ openFile });
 
     const dispatch = await dispatchMcpRequest({

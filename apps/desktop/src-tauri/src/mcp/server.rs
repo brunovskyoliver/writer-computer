@@ -409,7 +409,7 @@ impl WriterMcpServer {
     /// focuses its own window on success (FR-020). `resolve_path` answers
     /// `not_found` up front, so no tab is ever created for a missing file.
     #[tool(
-        description = "Open a file inside an open workspace — in the active tab, or a new tab with new_tab — and bring that window forward."
+        description = "Open a file inside an open workspace — focuses the tab already showing it or opens a new one (new_tab forces a fresh tab); never replaces a tab's document — and brings that window forward."
     )]
     async fn open_file(
         &self,

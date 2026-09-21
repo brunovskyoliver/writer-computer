@@ -2,11 +2,10 @@ import type { EditorView } from "@codemirror/view";
 import * as editorViews from "@/lib/editor-views";
 import { applyLineTarget } from "@/components/editor-area/line-target";
 import { findOuterScroller } from "@/components/editor-area/editor-scroll";
-import { findPane } from "@/lib/editor-layout";
 import { setPendingLineTarget } from "@/lib/pending-anchor";
 import { encodeAnchorFragment } from "@/lib/pdf-anchor";
 import { requestPdfAnchor } from "@/stores/pdf-anchor-store";
-import { locationForPath, useEditorStore, type OpenTarget } from "@/stores/editor-store";
+import { useEditorStore, type OpenTarget } from "@/stores/editor-store";
 import type { SearchMatch } from "@/types/fs";
 export type { OpenFile, Tab, OpenTarget } from "@/stores/editor-store";
 
@@ -72,36 +71,27 @@ export function navigateToFile(path: string, target?: OpenTarget) {
  * Activate one content-search result (SPECs/global-content-search/
  * contracts/line-target.md).
  *
- * `text`: the line handoff is keyed by the tab `navigateToFile` will resolve
- * — the focused pane's active tab, the same target it picks with no explicit
- * argument — and written before the navigation, per the handoff rule. Two
- * edges don't reach the pending path: the tab already showing the file (no
- * swap fires, so the live view is scrolled directly — a queued target would
- * sit unread and replay on a later visit) and a path that opens as a
- * standalone surface rather than an editor.
+ * A result is an *open*, not a navigation: `openFile` focuses a tab that
+ * already shows the file or mints a new one — it never moves a file tab's
+ * location. The line handoff then lands on whichever tab ended up showing
+ * the file: applied to its live view directly, or queued as a pending target
+ * — `OpenTarget.pendingTarget` is written inside the publish that creates
+ * the tab, so a pane mounting in the same commit already finds it.
  *
  * `pdf`: reuse-or-open via `openFile`, then queue a `page=N&text=<hint>`
- * anchor on the resolved tab; the pane consumes it reactively and re-finds
+ * anchor on the returned tab; the pane consumes it reactively and re-finds
  * the passage in its own coordinates.
  */
 export function openSearchMatch(match: SearchMatch, needle: string) {
   if (match.kind === "pdf") {
-    void openFile(match.path).then(() => {
-      if (match.page === null) return;
-      const state = useEditorStore.getState();
-      const tab = state.tabs.find(
-        (candidate) => candidate.location.kind === "pdf" && candidate.location.path === match.path,
-      );
-      if (!tab) return;
+    void openFile(match.path).then((tab) => {
+      if (!tab || match.page === null) return;
       const anchor = { kind: "text", page: match.page, text: match.line_text } as const;
       requestPdfAnchor(tab.id, encodeAnchorFragment(anchor));
     });
     return;
   }
 
-  const state = useEditorStore.getState();
-  const pane = findPane(state.layout, state.layout.focusedPaneId);
-  const tab = state.tabs.find((candidate) => candidate.id === pane?.activeTabId) ?? null;
   const lineTarget =
     match.line_number !== null
       ? {
@@ -112,20 +102,26 @@ export function openSearchMatch(match: SearchMatch, needle: string) {
         }
       : null;
 
-  if (tab && lineTarget) {
-    if (tab.location.kind === "file" && tab.location.path === match.path) {
-      const view = editorViews.getEditorView(tab.id);
-      const scrollContainer = view ? findOuterScroller(view.dom) : null;
-      if (view && scrollContainer) {
-        applyLineTarget(view, scrollContainer, lineTarget);
-        return;
-      }
+  void openFile(
+    match.path,
+    lineTarget ? { pendingTarget: { kind: "line", ...lineTarget } } : undefined,
+  ).then((tab) => {
+    if (!tab || !lineTarget) return;
+    const registration = editorViews.getEditorRegistration(tab.id);
+    if (registration) {
+      // A live view is landed directly: a queued target on an already
+      // mounted editor sits unread and replays on a later visit. A wrong
+      // path means the tab moved on — the target is stale, so drop it.
+      if (registration.path !== match.path) return;
+      const scrollContainer = findOuterScroller(registration.view.dom);
+      if (scrollContainer) applyLineTarget(registration.view, scrollContainer, lineTarget);
+      return;
     }
-    if (locationForPath(match.path).kind === "file") {
-      setPendingLineTarget(tab.id, match.path, lineTarget);
-    }
-  }
-  void navigateToFile(match.path);
+    // No live view yet — the tab is still loading. The pending write
+    // happened inside the publish for a tab this open created; for a
+    // dedupe-found tab it lands now, before its mount can run.
+    setPendingLineTarget(tab.id, match.path, lineTarget);
+  });
 }
 
 export function renameOpenFile(oldPath: string, newPath: string) {

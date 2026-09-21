@@ -35,7 +35,7 @@ import type { DirEntry } from "@/types/fs";
 
 interface FileTreeProps {
   rootPath: string;
-  openFile?: (path: string) => Promise<void>;
+  openFile?: (path: string) => Promise<unknown>;
   enableContextMenus?: boolean;
   renamingPath: string | null;
   onRenamingPathChange: (path: string | null) => void;

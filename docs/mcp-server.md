@@ -159,8 +159,10 @@ Create a folder inside a workspace.
 
 ### open_file
 
-Open a file in its workspace window — the active tab, or a new tab with
-`new_tab` — and bring that window forward. This tool may steal focus.
+Open a file in its workspace window — focuses the tab already showing it, or
+opens a new tab (`new_tab` forces a fresh tab even then) — and bring that
+window forward. An open never replaces the document showing in a tab. This
+tool may steal focus.
 
 - **Input**: `{ workspace?, path, new_tab? }` — `new_tab` defaults to false.
 - **Output**: `{ opened: relative_path }`
@@ -229,7 +231,8 @@ Tool failures are JSON-RPC errors whose `data` carries a machine-readable
 - `search_files` returns at most **200** results (default 50).
 - `list_files` returns at most **5,000** entries and reports `truncated`.
 - Only markdown (`.md`, `.markdown`) is writable; `.excalidraw.svg` is also
-  readable. PDFs appear in listings and tabs but cannot be read or written.
+  readable. PDFs appear in listings, search results, and tabs but cannot be
+  read or written.
 - **Deleting and renaming are not available in v1.** No tool removes or
   moves anything.
 - Only the open/focus tools (`open_file`, `open_workspace`,

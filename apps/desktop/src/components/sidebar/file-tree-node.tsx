@@ -16,7 +16,7 @@ interface FileTreeNodeProps {
   /** Dimmed because it is part of the active drag. */
   isDragging?: boolean;
   onToggleDir: (path: string) => Promise<void>;
-  onOpenFile: (path: string) => Promise<void>;
+  onOpenFile: (path: string) => Promise<unknown>;
   onClick?: (event: MouseEvent<HTMLElement>, entry: DirEntry) => void;
   onContextMenu?: (event: MouseEvent<HTMLElement>, entry: DirEntry) => void;
   onPointerDown?: (event: PointerEvent<HTMLElement>, entry: DirEntry) => void;

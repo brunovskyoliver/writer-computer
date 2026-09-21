@@ -20,7 +20,7 @@ import { createFolderTerminalAction } from "./sidebar-terminal-action";
 import type { DirEntry } from "@/types/fs";
 
 interface UseFileTreeContextMenusArgs {
-  openFile: (path: string) => Promise<void>;
+  openFile: (path: string) => Promise<unknown>;
   workspaceRoot: string | null;
   pinnedFiles: string[];
   togglePinnedFile: (path: string) => void;

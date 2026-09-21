@@ -37,6 +37,7 @@ import {
   type Layout,
 } from "@/lib/editor-layout";
 import { locationBehavior, type Location } from "@/components/editor-area/page-kinds";
+import { setPendingTarget, type PendingTarget } from "@/lib/pending-anchor";
 import { requestPdfAnchor } from "./pdf-anchor-store";
 
 export interface OpenFile {
@@ -94,6 +95,13 @@ export type FileDropOutcome =
 export interface OpenTarget {
   paneId?: string;
   tabId?: string;
+  /** A landing target for the file editor to consume on mount. Queued on the
+   *  tab this open creates or fills, inside the `set` that publishes it, so a
+   *  pane mounting in the same commit already finds it. Not applied when the
+   *  open focuses a tab that already shows the file (the caller lands live
+   *  views itself) nor on standalone surfaces (they carry their own anchor
+   *  grammar). */
+  pendingTarget?: PendingTarget;
 }
 
 interface EditorState {
@@ -108,7 +116,7 @@ interface EditorState {
   /** Derived from the focused pane's active tab — read freely, never assign. */
   activeFilePath: string | null;
 
-  openFile: (path: string, target?: OpenTarget) => Promise<void>;
+  openFile: (path: string, target?: OpenTarget) => Promise<Tab | null>;
   openCompactFile: (path: string, prefetched?: FileContent | null) => Promise<void>;
   openFileInNewTab: (path: string, target?: OpenTarget) => Promise<void>;
   openNewTab: () => void;
@@ -274,6 +282,22 @@ function cloneTab(tab: Tab): Tab {
   return { ...tab, back: [...tab.back], forward: [...tab.forward] };
 }
 
+// Browsers cap session history around 50; beyond that the stack stops being
+// something a user navigates and becomes a memory leak — `restoreSession`
+// loads every file referenced by history into `openFiles`, so an unbounded
+// stack is an unbounded preload list.
+const NAV_HISTORY_LIMIT = 50;
+
+function pushHistory(stack: Location[], entry: Location): Location[] {
+  const next = [...stack, entry];
+  return next.length > NAV_HISTORY_LIMIT ? next.slice(next.length - NAV_HISTORY_LIMIT) : next;
+}
+
+function unshiftHistory(stack: Location[], entry: Location): Location[] {
+  const next = [entry, ...stack];
+  return next.length > NAV_HISTORY_LIMIT ? next.slice(0, NAV_HISTORY_LIMIT) : next;
+}
+
 function locationPaths(location: Location): string[] {
   return locationBehavior(location).paths(location);
 }
@@ -294,6 +318,14 @@ function locationPrimaryPath(location: Location): string | null {
  */
 function isStandaloneSurface(location: Location): boolean {
   return locationPrimaryPath(location) === null;
+}
+
+/** The tab already showing `path` as `location`'s surface kind, if any —
+ *  the reuse match `navigateToFile` applies to standalone surfaces. */
+function findSurfaceTab(tabs: Tab[], location: Location, path: string): Tab | undefined {
+  return tabs.find(
+    (tab) => tab.location.kind === location.kind && locationPaths(tab.location).includes(path),
+  );
 }
 
 function deriveActiveFilePath(tabs: Tab[], activeTabId: string | null): string | null {
@@ -531,6 +563,16 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   activeTabId: null,
   activeFilePath: null,
 
+  /**
+   * Open `path` without disturbing whatever is already open: fill a launcher,
+   * focus a tab that already shows it, or append a new tab in the resolved
+   * pane. Moving a file tab to a different document is a *navigation* —
+   * `navigateToFile` — which link-following uses; a plain open never does.
+   *
+   * Returns the tab that ends up showing the file, or null when the open did
+   * not land (the target pane vanished mid-read, or the read failed), so a
+   * caller that needs the destination id gets it instead of re-finding it.
+   */
   openFile: async (path: string, target?: OpenTarget) => {
     const state = get();
     // Resolved before any await: a slow read must land in the pane the user
@@ -538,20 +580,31 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const { paneId: targetPaneId, tab: activeTab } = resolveOpenTarget(state, target);
 
     if (activeTab?.location.kind === "launcher") {
+      // A launcher holds nothing to lose; filling it is the one in-place open.
+      if (target?.pendingTarget) setPendingTarget(activeTab.id, path, target.pendingTarget);
       await state.replaceTabWithFile(activeTab.id, path);
-      return;
+      return get().tabs.find((tab) => tab.id === activeTab.id) ?? null;
     }
 
-    // Reuse the active file tab by navigating in-place. Standalone surfaces go
-    // the same way whatever the active tab is: `navigateToFile` owns the rule
-    // that they open in a tab of their own. Only the right half is a question
-    // about the path — the left half is about the *active tab* and stays.
-    if (activeTab?.location.kind === "file" || isStandaloneSurface(locationForPath(path))) {
+    // A standalone surface is a surface of its own, not a document, so it
+    // never takes over the tab it was opened from. `navigateToFile` owns the
+    // focus-or-create rule for those, whatever the active tab is.
+    const location = locationForPath(path);
+    if (isStandaloneSurface(location)) {
       await state.navigateToFile(path, { paneId: targetPaneId, tabId: activeTab?.id });
-      return;
+      return findSurfaceTab(get().tabs, location, path) ?? null;
     }
 
-    // No tabs at all — create one.
+    // Already open: focus the tab showing it rather than stacking a duplicate.
+    // `openFileInNewTab` remains the explicit "second copy" action.
+    const showing = state.tabs.find(
+      (tab) => tab.location.kind === "file" && tab.location.path === path,
+    );
+    if (showing) {
+      state.setActiveTab(showing.id);
+      return showing;
+    }
+
     const loadPromise = ensureFileLoaded(path, set as EditorStateSetter, get);
     loadPromise.catch(() => {});
 
@@ -562,25 +615,32 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       ),
       new Promise<false>((resolve) => setTimeout(() => resolve(false), OPEN_FILE_GRACE_MS)),
     ]);
-    if (loadFailedBeforeGrace) return;
+    if (loadFailedBeforeGrace) return null;
 
     const nextTab = createFileTab(path);
     set((state) => {
       // The pane this open was aimed at can disappear while the read is in
       // flight — a workspace switch, a compact-window reset, a closed pane.
       // Drop the result rather than landing it in whichever pane happens to
-      // be focused by now.
-      if (findPane(state.layout, targetPaneId)) return appendTab(state, nextTab, targetPaneId);
+      // be focused by now. The pending target is queued on the branch
+      // actually taken: a pane mounting in the same commit must already find
+      // it (the `revealPdfAnchor` rule).
+      if (findPane(state.layout, targetPaneId)) {
+        if (target?.pendingTarget) setPendingTarget(nextTab.id, path, target.pendingTarget);
+        return appendTab(state, nextTab, targetPaneId);
+      }
       const files = maybePruneFiles(state, state.tabs, [path]);
       return files ? { openFiles: files } : state;
     });
-    if (!get().tabs.some((tab) => tab.id === nextTab.id)) return;
+    if (!get().tabs.some((tab) => tab.id === nextTab.id)) return null;
 
     try {
       await loadPromise;
     } catch {
       get().closeTab(nextTab.id);
+      return null;
     }
+    return nextTab;
   },
 
   openCompactFile: async (path: string, prefetched: FileContent | null = null) => {
@@ -1040,10 +1100,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     // back here.
     const surfaceLocation = locationForPath(path);
     if (isStandaloneSurface(surfaceLocation)) {
-      const existing = state.tabs.find(
-        (tab) =>
-          tab.location.kind === surfaceLocation.kind && locationPaths(tab.location).includes(path),
-      );
+      const existing = findSurfaceTab(state.tabs, surfaceLocation, path);
       if (existing) {
         get().setActiveTab(existing.id);
         return;
@@ -1064,7 +1121,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const nextTab: Tab = {
       ...cloneTab(activeTab),
       location: nextLocation,
-      back: [...activeTab.back, activeTab.location],
+      back: pushHistory(activeTab.back, activeTab.location),
       forward: [],
     };
 
@@ -1108,7 +1165,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       ...cloneTab(activeTab),
       location: targetLocation,
       back: activeTab.back.slice(0, -1),
-      forward: [activeTab.location, ...activeTab.forward],
+      forward: unshiftHistory(activeTab.forward, activeTab.location),
     };
     const targetPath = locationPrimaryPath(targetLocation);
     const version = startNavigation(activeTab.id);
@@ -1149,7 +1206,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const nextTab: Tab = {
       ...cloneTab(activeTab),
       location: targetLocation!,
-      back: [...activeTab.back, activeTab.location],
+      back: pushHistory(activeTab.back, activeTab.location),
       forward: remainingForward,
     };
     const targetPath = locationPrimaryPath(targetLocation!);
