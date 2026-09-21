@@ -164,7 +164,9 @@ export const mathAlign: StateCommand = ({ state, dispatch }) => {
         to: run[run.length - 1]!.to,
         insert: `$$\n\\begin{aligned}\n${aligned}\n\\end{aligned}\n$$`,
       },
-      selection: EditorSelection.cursor(run[0]!.from),
+      // Inside the first row — on the `$$` delimiter boundary mathContext
+      // reads as outside math, which would refuse a follow-up split.
+      selection: EditorSelection.cursor(run[0]!.from + 3),
       userEvent: "input.format.mathAlign",
     }),
   );
@@ -193,7 +195,8 @@ export const mathSplit: StateCommand = ({ state, dispatch }) => {
   dispatch(
     state.update({
       changes: { from: node.from, to: node.to, insert },
-      selection: EditorSelection.cursor(node.from),
+      // `+3` lands on the first row inside the first new $$ block.
+      selection: EditorSelection.cursor(node.from + 3),
       userEvent: "input.format.mathSplit",
     }),
   );
