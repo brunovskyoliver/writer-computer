@@ -99,7 +99,7 @@ describe("buildEditorBodyMenuItemsSpec", () => {
     expect(submenus).toHaveLength(0);
   });
 
-  test("includes Format, Paragraph, Insert, Matrix submenus when onRunCommand is provided", () => {
+  test("includes Format, Paragraph, Insert, Matrix, Math submenus when onRunCommand is provided", () => {
     const handlers = makeBodyHandlers();
     handlers.onRunCommand = () => {};
     const spec = buildEditorBodyMenuItemsSpec(handlers, false);
@@ -114,6 +114,7 @@ describe("buildEditorBodyMenuItemsSpec", () => {
       "[Paragraph]",
       "[Insert]",
       "[Matrix]",
+      "[Math]",
       "select-all",
     ]);
   });

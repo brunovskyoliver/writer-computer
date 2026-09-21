@@ -2,6 +2,7 @@ import { EditorSelection, type Extension, type StateCommand, Prec } from "@codem
 import { type EditorView, type KeyBinding, keymap } from "@codemirror/view";
 import { syntaxTree } from "@codemirror/language";
 import { braceAnnotation } from "./brace-command";
+import { mathAlign, mathSplit, mathTidy } from "./math-commands";
 import { matrixDelimiters } from "./matrix-delimiters";
 
 // ---------------------------------------------------------------------------
@@ -430,6 +431,9 @@ export const editorCommands = {
     run: matrixDelimiters("cases"),
     label: "Matrix: cases brace {",
   },
+  "math.tidy": { run: mathTidy, label: "Tidy notation" },
+  "math.align": { run: mathAlign, label: "Align derivation steps" },
+  "math.split": { run: mathSplit, label: "Split aligned block into steps" },
   "insert.table": { run: insertTable, label: "Table" },
   "insert.horizontalRule": { run: insertHorizontalRule, label: "Horizontal rule" },
   "insert.today": { run: insertToday, label: "Current date" },

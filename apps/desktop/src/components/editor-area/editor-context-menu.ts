@@ -82,6 +82,13 @@ const MATRIX_SUBMENU: CommandMenuLayout = [
   ["mtx.cases", "matrix.cases"],
 ];
 
+const MATH_SUBMENU: CommandMenuLayout = [
+  ["math.tidy", "math.tidy"],
+  "---",
+  ["math.align", "math.align"],
+  ["math.split", "math.split"],
+];
+
 const INSERT_SUBMENU: CommandMenuLayout = [
   ["ins.link", "format.link"],
   ["ins.table", "insert.table"],
@@ -96,6 +103,7 @@ const EDITOR_COMMAND_SUBMENUS: ReadonlyArray<readonly [string, CommandMenuLayout
   ["Paragraph", PARAGRAPH_SUBMENU],
   ["Insert", INSERT_SUBMENU],
   ["Matrix", MATRIX_SUBMENU],
+  ["Math", MATH_SUBMENU],
 ];
 
 function buildCommandItems(

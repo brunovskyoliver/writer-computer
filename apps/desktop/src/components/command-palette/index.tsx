@@ -58,6 +58,14 @@ const MATRIX_PALETTE = [
   ["matrix-cases", "Matrix: Cases Brace", "matrix.cases"],
 ] as const satisfies ReadonlyArray<readonly [string, string, EditorCommandId]>;
 
+/** Derivation/notation commands — same lookup-table shape as the matrix
+ *  entries so both map through one row builder. */
+const MATH_PALETTE = [
+  ["math-tidy", "Math: Tidy Notation", "math.tidy"],
+  ["math-align", "Math: Align Derivation Steps", "math.align"],
+  ["math-split", "Math: Split Aligned Block Into Steps", "math.split"],
+] as const satisfies ReadonlyArray<readonly [string, string, EditorCommandId]>;
+
 function toCreatePath(root: string, rawName: string) {
   const trimmed = rawName.trim();
   const fileName = trimmed.endsWith(".md") ? trimmed : `${trimmed}.md`;
@@ -301,7 +309,7 @@ export function CommandPalette() {
       },
     },
     ...(activeTabId
-      ? MATRIX_PALETTE.map(
+      ? [...MATRIX_PALETTE, ...MATH_PALETTE].map(
           ([id, label, command]): Command => ({
             id,
             label,
