@@ -15,6 +15,7 @@ import { EditorSelection, type StateCommand } from "@codemirror/state";
 import { highlightContext } from "@/lib/highlight/emit";
 import { showEditorNotice } from "./editor-notice-store";
 import { validateMath } from "./math-renderer";
+import { enterVimInsertMode } from "./vim-mode";
 
 export type BraceSide = "under" | "over";
 
@@ -38,9 +39,12 @@ export function emitBraceWrap(fragment: string, side: BraceSide, math: boolean):
 const PARSE_BUDGET_MS = 50;
 
 /** The one write path for both commands (FR-4, FR-5). Returns whether the
- *  keypress was consumed — the notices explain the cases that write nothing. */
+ *  keypress was consumed — the notices explain the cases that write nothing.
+ *  A successful wrap drops Vim into insert mode (FR-7): the caret is already
+ *  in the note, so the next keypress must type, not move. */
 export function braceAnnotation(side: BraceSide): StateCommand {
-  return ({ state, dispatch }) => {
+  return (target) => {
+    const { state, dispatch } = target;
     const sel = state.selection.main;
     if (state.selection.ranges.length > 1) return false;
     if (sel.empty) {
@@ -77,6 +81,7 @@ export function braceAnnotation(side: BraceSide): StateCommand {
           userEvent: "input.format.brace",
         }),
       );
+      enterVimInsertMode(target);
       return true;
     }
 
@@ -103,6 +108,7 @@ export function braceAnnotation(side: BraceSide): StateCommand {
         userEvent: "input.format.brace",
       }),
     );
+    enterVimInsertMode(target);
     return true;
   };
 }

@@ -27,6 +27,8 @@ describe("Matrix rows and brace annotations", function () {
     "",
     "Euler: $e^{i\\pi}+1=0$",
     "",
+    "Wrap vim word too.",
+    "",
   ].join("\n");
 
   let workspaceRestored = false;
@@ -162,6 +164,13 @@ describe("Matrix rows and brace annotations", function () {
   });
 
   after(async function () {
+    if (workspaceRestored) {
+      await invoke("set_setting", {
+        key: "editor.vim-mode",
+        value: false,
+        scope: "global",
+      }).catch(() => {});
+    }
     if (filePath) await invoke("delete_entry", { path: filePath }).catch(() => {});
   });
 
@@ -243,6 +252,43 @@ describe("Matrix rows and brace annotations", function () {
         return lines.some((text) => text.includes("\\overbrace{\\text{Wrap}}^{\\text{note}}"));
       },
       { timeout: 5_000, timeoutMsg: "typed note did not land inside the prose annotation" },
+    );
+  });
+
+  it("drops into insert mode when a brace wraps from Vim visual/normal", async function () {
+    await invoke("set_setting", { key: "editor.vim-mode", value: true, scope: "global" });
+    await $('[data-vim-mode="NORMAL"]').waitForExist({ timeout: 10_000 });
+
+    // Vim motions, not caretToLine: select-all reads as a VISUAL selection to
+    // Vim and its block cursor hides the DOM caret line, so navigate with
+    // `G`/`k`/`l` through Vim's own key path. The vim test has its own prose
+    // line at the document end — earlier tests rewrote the first "Wrap".
+    await press("G", { shift: true }); // last line (blank)
+    await press("k"); // up to "Wrap vim word too."
+    await press("v"); // visual mode
+    await pressTimes("l", 3); // extend over "Wrap"
+    await press("o", { meta: true, alt: true });
+
+    await browser.waitUntil(
+      async () => {
+        const lines = await docLines();
+        return lines.some((text) => text.includes("\\overbrace{\\text{Wrap}}^{\\text{"));
+      },
+      { timeout: 5_000, timeoutMsg: "Cmd+Alt+O did not wrap the visual selection" },
+    );
+    await $('[data-vim-mode="INSERT"]').waitForExist({
+      timeout: 5_000,
+      timeoutMsg: "brace wrap left Vim outside insert mode",
+    });
+
+    // In insert mode the note types; in Normal it would have been motions.
+    await typeText("note");
+    await browser.waitUntil(
+      async () => {
+        const lines = await docLines();
+        return lines.some((text) => text.includes("\\overbrace{\\text{Wrap}}^{\\text{note}}"));
+      },
+      { timeout: 5_000, timeoutMsg: "typed note did not land inside the annotation" },
     );
   });
 

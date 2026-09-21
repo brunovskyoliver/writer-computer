@@ -42,6 +42,7 @@ With text selected, `Cmd+Alt+U` wraps it in `\underbrace{…}_{}` and `Cmd+Alt+O
 - **FR-4**: `emitBraceWrap(fragment, side, math)` is pure: it returns the insert text and the caret offset inside the annotation group.
 - **FR-5**: The write is validated with `validateMath` before dispatch (the same "never write what won't render" rule as highlights); failures show an `editor-notice` and leave the document unchanged.
 - **FR-6**: Commands are `insert.underbrace` / `insert.overbrace` in the `editorCommands` registry — one entry gives keymap, context-menu, and palette access per the registry contract.
+- **FR-7**: A successful wrap puts Vim into insert mode (via `Vim.handleKey(cm, "i")` on the view's adapter), so the annotation can be typed immediately. No-op when Vim is off or already inserting.
 
 ## Non-goals
 

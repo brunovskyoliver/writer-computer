@@ -415,7 +415,10 @@ export type EditorCommandId = keyof typeof editorCommands;
 
 export function runEditorCommand(view: EditorView, id: EditorCommandId): boolean {
   const command: EditorCommand = editorCommands[id];
-  return command.run({ state: view.state, dispatch: (tr) => view.dispatch(tr) });
+  // Pass the view itself: commands that need more than state+dispatch (Vim
+  // mode switches) can instanceof-check their target, and the keymap's own
+  // invocations already come in as the view.
+  return command.run(view);
 }
 
 const MODIFIER_LABELS: Record<string, string> = {

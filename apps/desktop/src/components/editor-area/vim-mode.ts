@@ -254,3 +254,28 @@ export function vimModeExtension(getTabId: () => string): Extension {
     ViewPlugin.define((view) => new VimModePlugin(view, compartment, getTabId)),
   ];
 }
+
+/**
+ * Put the view's Vim adapter into insert mode so the next keystroke types.
+ * Commands that plant the caret inside an editable group (brace annotations)
+ * call this after their write — without it a Normal-mode chord would wrap the
+ * text but leave the next keypress eaten as a motion. The `i` goes through
+ * `Vim.handleKey`, the same path a real keypress takes, so `vim-mode-change`
+ * fires and the footer mirror updates itself.
+ *
+ * No-op for non-view targets (the command registry's state-level callers),
+ * when Vim is off, or when the view is already inserting.
+ */
+export function enterVimInsertMode(target: unknown): void {
+  if (!(target instanceof EditorView)) return;
+  if (!isVimSettingOn()) return;
+  void loadVim().then((mod) => {
+    const cm = mod.getCM(target);
+    const vim = cm?.state.vim;
+    if (!cm || !vim || vim.insertMode) return;
+    if (vim.visualMode || vim.visualLine || vim.visualBlock) {
+      mod.Vim.handleKey(cm, "<Esc>", "user");
+    }
+    mod.Vim.handleKey(cm, "i", "user");
+  });
+}
