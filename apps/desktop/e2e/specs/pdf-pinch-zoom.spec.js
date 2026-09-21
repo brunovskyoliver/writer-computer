@@ -13,8 +13,10 @@ import { ok, strictEqual } from "node:assert/strict";
 //   QuarterlyReport.md             fuzzy target for "qr" / palette-open target
 //   roadmap.excalidraw.svg         drawing — must be indexed and findable
 //
-// A trackpad pinch arrives in WKWebView as a synthetic ctrl+wheel — dispatching
-// a WheelEvent with ctrlKey exercises the exact channel the gesture uses.
+// WKWebView delivers a trackpad pinch as gesturestart/change/end events with
+// a cumulative `scale` — it does NOT synthesize ctrl+wheel like Chrome. The
+// spec drives both channels: gesture events for the trackpad path and
+// WheelEvent ctrlKey for the Ctrl/Cmd-scroll path.
 
 async function pressKey(init) {
   await browser.execute((opts) => {
@@ -193,17 +195,46 @@ describe("pdf pinch zoom + open semantics + fuzzy index", function () {
     strictEqual(prevented, false, "an unmodified wheel event was swallowed");
   });
 
-  it("suppresses WKWebView gesture magnification", async function () {
-    const results = await browser.execute(() => {
+  it("zooms on WebKit gesture events — the real trackpad channel", async function () {
+    // WKWebView reports a trackpad pinch as gesturestart/change/end carrying a
+    // cumulative `scale`, not as ctrl+wheel. A synthetic Event has no `scale`
+    // field, so assign it — the handler reads it off the event object.
+    //
+    // The wheel test above left the scale high; the toolbar's % button resets
+    // to 100% so this assertion can't pass vacuously on a stale value.
+    const innerWidthBefore = await browser.execute(() => window.innerWidth);
+    await browser.execute(() => {
+      const page = document.querySelector("[data-pdf-page]");
+      const pane = page.closest("[data-pane-id]") ?? page.parentElement.parentElement.parentElement;
+      Array.from(pane.querySelectorAll("button"))
+        .find((b) => /^\d+%$/.test(b.textContent.trim()))
+        ?.click();
+    });
+    await waitForZoom("100%");
+
+    const prevented = await browser.execute(() => {
       const page = document.querySelector("[data-pdf-page]");
       const scroller = page.parentElement.parentElement;
-      return ["gesturestart", "gesturechange", "gestureend"].map((type) => {
+      const rect = scroller.getBoundingClientRect();
+      const dispatch = (type, scale) => {
         const e = new Event(type, { bubbles: true, cancelable: true });
+        if (scale !== undefined) {
+          e.scale = scale;
+          e.clientX = rect.left + rect.width / 2;
+          e.clientY = rect.top + rect.height / 2;
+        }
         scroller.dispatchEvent(e);
         return e.defaultPrevented;
-      });
+      };
+      return [dispatch("gesturestart", 1), dispatch("gesturechange", 2), dispatch("gestureend", 2)];
     });
-    ok(results.every(Boolean), `gesture events not suppressed: ${results}`);
+    ok(prevented.every(Boolean), `gesture events not suppressed: ${prevented}`);
+    await waitForZoom("200%");
+    strictEqual(
+      await browser.execute(() => window.innerWidth),
+      innerWidthBefore,
+      "webview magnified",
+    );
   });
 
   it("clamps pinch zoom between 40% and 400%", async function () {

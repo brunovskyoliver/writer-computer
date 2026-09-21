@@ -11,12 +11,14 @@ container.
 ## Problem
 
 - `PdfPane` has a toolbar zoom (`setScale`) but no wheel or gesture handler.
-- On macOS WKWebView a trackpad pinch surfaces as a synthetic `wheel` event
-  with `ctrlKey` set (the same channel `mermaid-canvas.ts` already consumes)
-  plus `gesturestart`/`gesturechange`/`gestureend` events whose default action
-  is whole-page magnification.
-- Unhandled, the synthetic pinch falls through to the webview default, which
-  zooms the entire window — perceived as the adjacent editor zooming.
+- On macOS WKWebView a trackpad pinch surfaces as
+  `gesturestart`/`gesturechange`/`gestureend` events carrying a cumulative
+  `scale` — unlike Chrome, this webview does NOT synthesize a `ctrl+wheel`
+  event for pinch (verified on hardware: ctrl+scroll zoomed, pinch did
+  nothing). A gesture's default action is whole-page magnification, which
+  `preventDefault` suppresses.
+- Unhandled, the pinch falls through to the webview default, which zooms the
+  entire window — perceived as the adjacent editor zooming.
 
 ## Behaviour
 
@@ -25,8 +27,9 @@ container.
   canvas).
 - Plain wheel/trackpad scrolling is untouched.
 - The gesture never reaches neighbouring panes or the webview default zoom:
-  pinch wheel events are `preventDefault`ed on the PDF scroll container, and
-  `gesture*` events are `preventDefault`ed so native magnification cannot run.
+  every `gesture*` event is `preventDefault`ed on the PDF scroll container,
+  so native magnification cannot run; the zoom is driven from `e.scale`
+  instead.
 - Zoom stays clamped to the existing `ZOOM_MIN`/`ZOOM_MAX` bounds.
 - After a zoom the document is re-anchored so the point under the cursor stays
   under the cursor; the toolbar's zoom keeps its existing "first visible page
@@ -34,21 +37,26 @@ container.
 
 ## Implementation Notes
 
-- A wheel listener on the scroll container, registered non-passive, checks
-  `ctrlKey || metaKey`, prevents default, and stops propagation.
-- Re-rasterizing pages on every wheel tick is too heavy for a pinch stream, so
-  the gesture previews with a CSS `transform: scale()` on the content div
-  (origin = the content-space point under the cursor) and commits `setScale`
-  only after ~120 ms of wheel silence. The commit goes through the existing
-  scale layout effect, which re-anchors the scroll and clears the preview in
-  the same paint.
+- Two channels share one pinch pipeline (`beginPinch`/`previewPinch`/
+  `commitPinch` on the scroll container):
+  - `gesturestart` captures the cursor anchor and `baseScale`;
+    `gesturechange` sets `pendingScale = baseScale × e.scale` (the event's
+    `scale` is cumulative from gesture start) and previews; `gestureend`
+    commits immediately.
+  - A non-passive `wheel` listener keeps Cmd/Ctrl-scroll working for mice:
+    `pendingScale` multiplies per event and commits after ~120 ms of wheel
+    silence, since a wheel pinch has no explicit end event.
+- Re-rasterizing pages on every gesture tick is too heavy, so the gesture
+  previews with a CSS `transform: scale()` on the content div (origin = the
+  content-space point under the cursor) and commits `setScale` once. The
+  commit goes through the existing scale layout effect, which re-anchors the
+  scroll and clears the preview in the same paint.
 - `zoomAnchorRef` widens from a page number to a point anchor:
   page index, fractional position inside that page's rendered box, and the
   anchor's offset within the viewport. The toolbar writes a page-top anchor;
   the pinch writes a cursor anchor.
-- `gesturestart`/`gesturechange`/`gestureend` are suppressed, not used for
-  zoom — the ctrl+wheel channel is the one this webview reports pinch deltas
-  on (verified by `mermaid-canvas.ts`), and driving both would double-apply.
+- `mermaid-canvas.ts` made the same wrong ctrl+wheel assumption and got the
+  same fix: gesture events converted to per-event `zoomAt` factors.
 
 ## Files Expected To Change
 

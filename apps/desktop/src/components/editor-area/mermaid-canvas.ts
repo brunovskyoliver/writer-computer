@@ -21,8 +21,10 @@ const ZOOM_MAX = 4;
 const BUTTON_ZOOM_FACTOR = 1.2;
 const KEY_ZOOM_FACTOR = 1.15;
 const WHEEL_ZOOM_SENSITIVITY = 0.0015;
-// WebKit reports trackpad pinch as a synthetic Ctrl-wheel event with small
-// pixel deltas; give that path a higher multiplier so pinch feels responsive.
+// Ctrl-wheel keeps the pinch sensitivity — some toolkits (and Chrome, which
+// WKWebView is not) report a trackpad pinch as a synthetic Ctrl-wheel event
+// with small pixel deltas; give that path a higher multiplier so pinch feels
+// responsive.
 const PINCH_ZOOM_SENSITIVITY = 0.01;
 const KEY_PAN_STEP = 24;
 const FIT_MARGIN_PX = 16;
@@ -316,10 +318,9 @@ export function mountMermaidCanvas(
   viewport.addEventListener("pointerup", endDrag);
   viewport.addEventListener("pointercancel", endDrag);
 
-  // Wheel: only zoom when a modifier is held (Cmd/Ctrl) or when a trackpad
-  // pinch fires the synthetic wheel event with ctrlKey set. Otherwise let the
+  // Wheel: only zoom when a modifier is held (Cmd/Ctrl). Otherwise let the
   // event bubble so the surrounding document scrolls past the canvas.
-  // Handler calls e.preventDefault() for Cmd/Ctrl-wheel zoom and trackpad pinch; a passive listener would ignore it. Already registered with {passive:false}.
+  // Handler calls e.preventDefault() for Cmd/Ctrl-wheel zoom; a passive listener would ignore it. Already registered with {passive:false}.
   // eslint-disable-next-line react-doctor/client-passive-event-listeners
   viewport.addEventListener(
     "wheel",
@@ -332,6 +333,31 @@ export function mountMermaidCanvas(
     },
     { passive: false },
   );
+
+  // Trackpad pinch: WKWebView delivers gesturestart/change/end with a
+  // cumulative `scale` — no synthetic ctrl+wheel. Convert to per-event
+  // factors for zoomAt; preventDefault keeps native magnification off.
+  // GestureEvent is not in the TS DOM lib.
+  type Gesture = Event & { scale?: number; clientX?: number; clientY?: number };
+  let gestureScale = 1;
+  viewport.addEventListener("gesturestart", (e) => {
+    e.preventDefault();
+    gestureScale = 1;
+  });
+  viewport.addEventListener("gesturechange", (e) => {
+    e.preventDefault();
+    const ge = e as Gesture;
+    if (typeof ge.scale !== "number" || !Number.isFinite(ge.scale)) return;
+    const factor = ge.scale / gestureScale;
+    gestureScale = ge.scale;
+    const rect = viewport.getBoundingClientRect();
+    zoomAt(
+      ge.clientX ?? rect.left + rect.width / 2,
+      ge.clientY ?? rect.top + rect.height / 2,
+      factor,
+    );
+  });
+  viewport.addEventListener("gestureend", (e) => e.preventDefault());
 
   host.addEventListener("keydown", (e) => {
     // Don't hijack keys typed inside the inline source editor.

@@ -405,6 +405,8 @@ export function PdfPane({
   // whole gesture.
   const pinchRef = useRef<{
     pendingScale: number;
+    /** Scale at gesture start — gesture events report cumulative `scale`. */
+    baseScale: number;
     originX: number;
     originY: number;
     settle: ReturnType<typeof setTimeout> | null;
@@ -527,77 +529,123 @@ export function PdfPane({
   }, [isVisible]);
 
   // Trackpad pinch and Cmd-scroll zoom the PDF under the cursor. WKWebView
-  // reports a trackpad pinch as a synthetic `ctrl+wheel` — left alone, its
-  // default action is whole-webview zoom, which reads as the neighbouring
-  // pane zooming. `preventDefault` is the whole guard: the gesture stays
-  // inside this scroll container. (mermaid-canvas.ts relies on the same
-  // channel.)
+  // delivers a real pinch as `gesturestart`/`gesturechange`/`gestureend`
+  // events carrying a cumulative `scale` — it does NOT synthesize ctrl+wheel
+  // the way Chrome does. Left alone, a gesture's default action is
+  // whole-webview magnification, which reads as the neighbouring pane
+  // zooming; `preventDefault` keeps the gesture inside this scroll
+  // container and we zoom manually. The wheel path stays for mouse users
+  // holding Ctrl/Cmd.
   useEffect(() => {
     const container = scrollRef.current;
     const content = contentRef.current;
     if (!container || !content || !offsets || !sizes) return;
 
-    const onWheel = (e: WheelEvent) => {
-      if (!(e.metaKey || e.ctrlKey)) return;
-      e.preventDefault();
-      const factor = wheelZoomFactor(e);
-      const geometry: Parameters<typeof capturePointAnchor>[0]["geometry"] = {
-        offsets,
-        sizes,
-        scale: scaleRef.current,
-        contentWidth,
-        pageCount,
+    const clampScale = (v: number) => Math.min(Math.max(v, ZOOM_MIN), ZOOM_MAX);
+    const geometryFor = (): Parameters<typeof capturePointAnchor>[0]["geometry"] => ({
+      offsets,
+      sizes,
+      scale: scaleRef.current,
+      contentWidth,
+      pageCount,
+    });
+
+    const beginPinch = (clientX: number, clientY: number) => {
+      if (pinchRef.current) return pinchRef.current;
+      const rect = container.getBoundingClientRect();
+      const anchor = capturePointAnchor({
+        clientX,
+        clientY,
+        containerLeft: rect.left,
+        containerTop: rect.top,
+        scrollLeft: container.scrollLeft,
+        scrollTop: container.scrollTop,
+        geometry: geometryFor(),
+      });
+      zoomAnchorRef.current = anchor;
+      if (anchor.kind !== "point") return null;
+      const point = anchorContentPoint(anchor, geometryFor());
+      pinchRef.current = {
+        pendingScale: scaleRef.current,
+        baseScale: scaleRef.current,
+        originX: point.x,
+        originY: point.y,
+        settle: null,
       };
-      if (!pinchRef.current) {
-        const rect = container.getBoundingClientRect();
-        const anchor = capturePointAnchor({
-          clientX: e.clientX,
-          clientY: e.clientY,
-          containerLeft: rect.left,
-          containerTop: rect.top,
-          scrollLeft: container.scrollLeft,
-          scrollTop: container.scrollTop,
-          geometry,
-        });
-        zoomAnchorRef.current = anchor;
-        if (anchor.kind === "point") {
-          const point = anchorContentPoint(anchor, geometry);
-          pinchRef.current = {
-            pendingScale: scaleRef.current,
-            originX: point.x,
-            originY: point.y,
-            settle: null,
-          };
-        }
-      }
-      const pinch = pinchRef.current;
-      if (!pinch) return;
-      pinch.pendingScale = Math.min(Math.max(pinch.pendingScale * factor, ZOOM_MIN), ZOOM_MAX);
+      return pinchRef.current;
+    };
+
+    const previewPinch = (pinch: NonNullable<typeof pinchRef.current>) => {
       const k = pinch.pendingScale / scaleRef.current;
       content.style.transformOrigin = `${pinch.originX}px ${pinch.originY}px`;
       content.style.transform = k === 1 ? "" : `scale(${k})`;
       content.style.willChange = "transform";
-      if (pinch.settle) clearTimeout(pinch.settle);
-      pinch.settle = setTimeout(() => {
-        pinchRef.current = null;
-        setScale(pinch.pendingScale);
-      }, PINCH_SETTLE_MS);
     };
 
-    // WKWebView can also surface gesture events; their default is native
-    // magnification — suppress it so nothing but this handler zooms.
-    const suppress = (e: Event) => e.preventDefault();
+    const commitPinch = (pinch: NonNullable<typeof pinchRef.current>) => {
+      pinchRef.current = null;
+      if (pinch.settle) clearTimeout(pinch.settle);
+      setScale(pinch.pendingScale);
+    };
+
+    const onWheel = (e: WheelEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      e.preventDefault();
+      const pinch = beginPinch(e.clientX, e.clientY);
+      if (!pinch) return;
+      pinch.pendingScale = clampScale(pinch.pendingScale * wheelZoomFactor(e));
+      previewPinch(pinch);
+      // Wheel gestures end implicitly — commit once the stream goes quiet.
+      if (pinch.settle) clearTimeout(pinch.settle);
+      pinch.settle = setTimeout(() => commitPinch(pinch), PINCH_SETTLE_MS);
+    };
+
+    // WebKit's GestureEvent is not in the TS DOM lib.
+    type Gesture = Event & { scale?: number; clientX?: number; clientY?: number };
+    const gesturePoint = (e: Gesture) => {
+      const rect = container.getBoundingClientRect();
+      return {
+        x: e.clientX ?? rect.left + rect.width / 2,
+        y: e.clientY ?? rect.top + rect.height / 2,
+      };
+    };
+
+    const onGestureStart = (e: Event) => {
+      e.preventDefault();
+      // A real gesture always starts fresh — if a gestureend was ever lost,
+      // reusing the stale pinch would apply its old baseScale to the new
+      // gesture's cumulative scale and jump the zoom.
+      if (pinchRef.current?.settle) clearTimeout(pinchRef.current.settle);
+      pinchRef.current = null;
+      const ge = e as Gesture;
+      const { x, y } = gesturePoint(ge);
+      beginPinch(x, y);
+    };
+    const onGestureChange = (e: Event) => {
+      e.preventDefault();
+      const ge = e as Gesture;
+      const pinch = pinchRef.current;
+      if (!pinch || typeof ge.scale !== "number" || !Number.isFinite(ge.scale)) return;
+      pinch.pendingScale = clampScale(pinch.baseScale * ge.scale);
+      previewPinch(pinch);
+    };
+    const onGestureEnd = (e: Event) => {
+      e.preventDefault();
+      const pinch = pinchRef.current;
+      if (!pinch) return;
+      commitPinch(pinch);
+    };
 
     // eslint-disable-next-line react-doctor/client-passive-event-listeners
     container.addEventListener("wheel", onWheel, { passive: false });
-    container.addEventListener("gesturestart", suppress);
-    container.addEventListener("gesturechange", suppress);
-    container.addEventListener("gestureend", suppress);
+    container.addEventListener("gesturestart", onGestureStart);
+    container.addEventListener("gesturechange", onGestureChange);
+    container.addEventListener("gestureend", onGestureEnd);
     return () => {
       container.removeEventListener("wheel", onWheel);
-      container.removeEventListener("gesturestart", suppress);
-      container.removeEventListener("gesturechange", suppress);
-      container.removeEventListener("gestureend", suppress);
+      container.removeEventListener("gesturestart", onGestureStart);
+      container.removeEventListener("gesturechange", onGestureChange);
+      container.removeEventListener("gestureend", onGestureEnd);
       if (pinchRef.current?.settle) clearTimeout(pinchRef.current.settle);
       pinchRef.current = null;
       content.style.transform = "";

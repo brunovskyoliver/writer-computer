@@ -21,8 +21,10 @@ export function pageAt(offsets: number[], y: number): number {
   return low;
 }
 
-/** WebKit reports trackpad pinch as a synthetic Ctrl-wheel event with small
- *  deltas — the same channel `mermaid-canvas.ts` consumes. */
+/** Ctrl-wheel keeps the pinch sensitivity — some toolkits (and Chrome, which
+ *  WKWebView is not) report a trackpad pinch as a synthetic Ctrl-wheel event
+ *  with small deltas; give that path a higher multiplier. Real WebKit
+ *  pinches arrive as `gesture*` events handled in `pdf-pane.tsx`. */
 const PINCH_ZOOM_SENSITIVITY = 0.01;
 const WHEEL_ZOOM_SENSITIVITY = 0.0015;
 
