@@ -100,7 +100,7 @@ pub fn index_workspace(
     let displaced = state.with_workspace_snapshot(&root, epoch, || {
         let old_index = std::mem::replace(&mut *state.file_index.write(), indexed);
         let old_cache = state.recent_files_cache.write().take();
-        let old_dirs = std::mem::replace(&mut *state.dirs_with_markdown.write(), dirs);
+        let old_dirs = std::mem::replace(&mut *state.dirs_with_files.write(), dirs);
         state.file_index_revision.fetch_add(1, Ordering::SeqCst);
         state.index_ready.store(true, Ordering::Relaxed);
         (old_index, old_cache, old_dirs)
@@ -136,6 +136,87 @@ pub fn fuzzy_search(
     fuzzy_search_from(&query, &index, limit)
 }
 
+/// Exact-substring hits always outrank subsequence hits: a contiguous match
+/// in a directory name is a stronger signal than a scattered match inside a
+/// filename. Fuzzy scores are clamped below this base so the two tiers can
+/// never interleave.
+const EXACT_SCORE_BASE: u32 = 1_000_000;
+const FUZZY_SCORE_CAP: u32 = EXACT_SCORE_BASE - 1;
+/// Filename bonus inside the fuzzy tier — large enough to dominate the
+/// per-char bonuses so a filename hit always beats a path-segment hit.
+const FUZZY_FILENAME_BONUS: u32 = 400_000;
+
+// Subsequence matcher weights. Boundary hits (path start, after a
+// separator, camelCase hump) and consecutive runs earn bonuses; gaps and a
+// leading run of unmatched chars cost points.
+const FUZZY_CHAR_SCORE: i64 = 8;
+const FUZZY_CONSECUTIVE_BONUS: i64 = 16;
+const FUZZY_BOUNDARY_BONUS: i64 = 24;
+const FUZZY_GAP_PENALTY: i64 = 1;
+const FUZZY_LEAD_PENALTY: i64 = 2;
+
+/// Greedy leftmost subsequence match of `needle` against `hay` (both
+/// lowercased, char-wise). Returns the matched char indices plus a raw
+/// score. Greedy matching is O(n) and predictable — the scorer rewards the
+/// properties (boundaries, runs, tight span) that make a fuzzy hit feel
+/// right rather than searching for the optimal alignment.
+fn subsequence_score(
+    needle: &[char],
+    hay: &[char],
+    boundaries: &[bool],
+) -> Option<(i64, Vec<u32>)> {
+    if needle.is_empty() || needle.len() > hay.len() {
+        return None;
+    }
+    let mut indices: Vec<u32> = Vec::with_capacity(needle.len());
+    let mut score: i64 = 0;
+    let mut n = 0;
+    for (i, &c) in hay.iter().enumerate() {
+        if n == needle.len() {
+            break;
+        }
+        if c != needle[n] {
+            continue;
+        }
+        if let Some(&prev) = indices.last() {
+            score -= FUZZY_GAP_PENALTY * (i as i64 - prev as i64 - 1);
+            if i as u32 == prev + 1 {
+                score += FUZZY_CONSECUTIVE_BONUS;
+            }
+        } else {
+            score -= FUZZY_LEAD_PENALTY * i as i64;
+        }
+        if boundaries[i] {
+            score += FUZZY_BOUNDARY_BONUS;
+        }
+        score += FUZZY_CHAR_SCORE;
+        indices.push(i as u32);
+        n += 1;
+    }
+    (n == needle.len()).then_some((score.max(0), indices))
+}
+
+/// Per-position boundary flags over `path`, aligned to the chars of its
+/// lowercase form: a position is a boundary at the start, after a
+/// separator, or at a camelCase hump. Built alongside the lowercase chars
+/// so multi-char lowercase expansions keep the two arrays the same length.
+fn lowercase_with_boundaries(path: &str) -> (Vec<char>, Vec<bool>) {
+    let mut chars = Vec::with_capacity(path.len());
+    let mut boundaries = Vec::with_capacity(path.len());
+    let mut prev: Option<char> = None;
+    for (i, c) in path.chars().enumerate() {
+        let boundary = i == 0
+            || prev.is_some_and(|p| matches!(p, '/' | '-' | '_' | ' ' | '.'))
+            || (prev.is_some_and(|p| p.is_lowercase()) && c.is_uppercase());
+        for lc in c.to_lowercase() {
+            chars.push(lc);
+            boundaries.push(boundary);
+        }
+        prev = Some(c);
+    }
+    (chars, boundaries)
+}
+
 pub(crate) fn fuzzy_search_from(
     query: &str,
     index: &[IndexedFile],
@@ -155,36 +236,58 @@ pub(crate) fn fuzzy_search_from(
     if !needles.contains(&space_query) {
         needles.push(space_query);
     }
+    let needle_chars: Vec<Vec<char>> = needles.iter().map(|n| n.chars().collect()).collect();
 
     let mut results: Vec<SearchResult> = index
         .iter()
         .filter_map(|file| {
             let haystack = file.relative_path.to_lowercase();
-            let (byte_start, needle) = needles
+            let path_chars = file.relative_path.chars().count() as u32;
+            let filename_start_bytes = file.relative_path.rfind('/').map(|i| i + 1).unwrap_or(0);
+            let filename_start_chars =
+                file.relative_path[..filename_start_bytes].chars().count() as u32;
+
+            // Exact substring first — the strongest tier.
+            let exact = needles
                 .iter()
                 .filter_map(|needle| haystack.find(needle).map(|start| (start, needle)))
-                .min_by_key(|(start, _)| *start)?;
+                .min_by_key(|(start, _)| *start);
 
-            let char_start = haystack[..byte_start].chars().count();
-            let char_len = needle.chars().count();
+            let (score, match_indices) = match exact {
+                Some((byte_start, needle)) => {
+                    let char_start = haystack[..byte_start].chars().count();
+                    let char_len = needle.chars().count();
 
-            let filename_start_bytes = file.relative_path.rfind('/').map(|i| i + 1).unwrap_or(0);
-            let in_filename = byte_start >= filename_start_bytes;
+                    // Matches inside the filename beat matches in a parent
+                    // directory; earlier matches beat later ones; shorter
+                    // paths tiebreak.
+                    let mut score = EXACT_SCORE_BASE;
+                    if byte_start >= filename_start_bytes {
+                        score += FUZZY_FILENAME_BONUS;
+                    }
+                    score += 10_000u32.saturating_sub(byte_start as u32);
+                    score += 1_000u32.saturating_sub(path_chars.min(1_000));
 
-            // Higher score ranks first. Matches inside the filename beat matches
-            // in a parent directory; earlier matches beat later ones; shorter
-            // paths tiebreak.
-            let mut score: u32 = 0;
-            if in_filename {
-                score += 1_000_000;
-            }
-            score += 10_000u32.saturating_sub(byte_start as u32);
-            score +=
-                1_000u32.saturating_sub((file.relative_path.chars().count() as u32).min(1_000));
-
-            let match_indices: Vec<u32> = (char_start..char_start + char_len)
-                .map(|i| i as u32)
-                .collect();
+                    let indices: Vec<u32> = (char_start..char_start + char_len)
+                        .map(|i| i as u32)
+                        .collect();
+                    (score, indices)
+                }
+                None => {
+                    // Fuzzy tier: every query char must appear in order.
+                    let (hay_chars, boundaries) = lowercase_with_boundaries(&file.relative_path);
+                    let (raw, indices) = needle_chars
+                        .iter()
+                        .filter_map(|needle| subsequence_score(needle, &hay_chars, &boundaries))
+                        .max_by_key(|(score, _)| *score)?;
+                    let mut score = raw as u32;
+                    if indices.first().is_some_and(|&i| i >= filename_start_chars) {
+                        score += FUZZY_FILENAME_BONUS;
+                    }
+                    score += 1_000u32.saturating_sub(path_chars.min(1_000));
+                    (score.min(FUZZY_SCORE_CAP), indices)
+                }
+            };
 
             Some(SearchResult {
                 path: file.path.to_string_lossy().to_string(),
@@ -202,7 +305,7 @@ pub(crate) fn fuzzy_search_from(
 }
 
 /// Parallel file indexing using the `ignore` crate's walker.
-/// Returns the indexed files and a set of directories containing markdown.
+/// Returns the indexed files and a set of directories containing them.
 ///
 /// The `cancel` flag lets a concurrent workspace switch stop this walk early:
 /// each walker thread checks the flag at every directory entry and returns
@@ -250,7 +353,7 @@ pub fn index_workspace_impl(
                     return ignore::WalkState::Continue;
                 }
                 if entry.file_type().is_some_and(|ft| ft.is_file())
-                    && crate::commands::fs::is_markdown_file(entry.path())
+                    && crate::commands::fs::is_sidebar_file(entry.path())
                 {
                     let rel = entry
                         .path()
@@ -280,16 +383,18 @@ fn index_workspace_test(root: &Path) -> (Vec<IndexedFile>, HashSet<PathBuf>) {
     index_workspace_impl(root, Arc::new(AtomicBool::new(false)))
 }
 
-pub fn fuzzy_search_impl(query: &str, index: &[IndexedFile], limit: usize) -> Vec<SearchResult> {
+/// Test-only convenience: search without the `AppError` envelope.
+#[cfg(test)]
+fn fuzzy_search_impl(query: &str, index: &[IndexedFile], limit: usize) -> Vec<SearchResult> {
     fuzzy_search_from(query, index, limit).unwrap_or_default()
 }
 
 /// Find a file under `root` by case-insensitive basename. Used by Obsidian
 /// wiki image embeds (`![[image.png]]`), which reference attachments by bare
 /// filename regardless of where they live in the vault. The workspace file
-/// index only covers markdown, so this walks on demand (gitignore-aware,
-/// parallel) instead of maintaining a second media index plus watcher
-/// plumbing; callers cache positive results.
+/// index only covers sidebar-visible files, so this walks on demand
+/// (gitignore-aware, parallel) instead of maintaining a second media index
+/// plus watcher plumbing; callers cache positive results.
 ///
 /// Deterministic on duplicates: the match with the fewest path components
 /// wins, ties broken lexicographically — "shortest path" like Obsidian.
@@ -355,9 +460,10 @@ const CONTEXT_RADIUS: usize = 2;
 
 /// Literal smart-case substring matching on one line (FR-011). Returns
 /// `[char_start, len]` pairs in document order, non-overlapping. Char units,
-/// not bytes, so the frontend can slice `line_text` safely.
-fn find_match_ranges(line: &str, needle: &str, case_sensitive: bool) -> Vec<(u32, u32)> {
-    let needle: Vec<char> = needle.chars().collect();
+/// not bytes, so the frontend can slice `line_text` safely. The needle
+/// arrives pre-split — the caller scans every line of every file with the
+/// same query, so its char vec is built once per scan, not once per line.
+fn find_match_ranges_chars(line: &str, needle: &[char], case_sensitive: bool) -> Vec<(u32, u32)> {
     if needle.is_empty() {
         return Vec::new();
     }
@@ -383,6 +489,14 @@ fn find_match_ranges(line: &str, needle: &str, case_sensitive: bool) -> Vec<(u32
         }
     }
     ranges
+}
+
+/// `&str` convenience for tests — the scan loop calls
+/// `find_match_ranges_chars` with the needle already split.
+#[cfg(test)]
+fn find_match_ranges(line: &str, needle: &str, case_sensitive: bool) -> Vec<(u32, u32)> {
+    let needle: Vec<char> = needle.chars().collect();
+    find_match_ranges_chars(line, &needle, case_sensitive)
 }
 
 /// The matched line plus up to `CONTEXT_RADIUS` lines either side. Fewer near
@@ -427,6 +541,7 @@ pub(crate) fn content_search_impl(
     emit: &(dyn Fn(ContentSearchEvent) + Sync),
 ) {
     let case_sensitive = query.chars().any(|c| c.is_uppercase());
+    let needle_chars: Vec<char> = query.chars().collect();
     let total_emitted = std::sync::atomic::AtomicUsize::new(0);
     let truncated = AtomicBool::new(false);
 
@@ -439,7 +554,7 @@ pub(crate) fn content_search_impl(
     let total_ref = &total_emitted;
     let truncated_ref = &truncated;
     let cancel_walk = Arc::clone(&cancel);
-    let query_ref = query;
+    let needle_ref = &needle_chars;
 
     WalkBuilder::new(root)
         .hidden(true)
@@ -513,7 +628,7 @@ pub(crate) fn content_search_impl(
                         truncated_ref.store(true, Ordering::Relaxed);
                         break;
                     }
-                    let ranges = find_match_ranges(line, query_ref, case_sensitive);
+                    let ranges = find_match_ranges_chars(line, needle_ref, case_sensitive);
                     if ranges.is_empty() {
                         continue;
                     }
@@ -629,10 +744,28 @@ mod tests {
     }
 
     #[test]
-    fn test_index_workspace_counts_md_files() {
+    fn test_index_workspace_counts_indexed_files() {
         let dir = setup_workspace();
         let (index, _dirs) = index_workspace_test(dir.path());
         assert_eq!(index.len(), 3); // readme.md, notes.md, docs/guide.md
+    }
+
+    #[test]
+    fn test_index_workspace_covers_all_sidebar_files() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("note.md"), "# Note").unwrap();
+        fs::write(dir.path().join("report.pdf"), [0u8]).unwrap();
+        fs::write(dir.path().join("sketch.excalidraw.svg"), "<svg/>").unwrap();
+        // Kinds the sidebar does not list stay out of the index.
+        fs::write(dir.path().join("plain.svg"), "<svg/>").unwrap();
+        fs::write(dir.path().join("photo.png"), [0u8]).unwrap();
+        fs::write(dir.path().join("data.txt"), "x").unwrap();
+
+        let (index, dirs) = index_workspace_test(dir.path());
+        let mut names: Vec<&str> = index.iter().map(|f| f.name.as_str()).collect();
+        names.sort_unstable();
+        assert_eq!(names, ["note.md", "report.pdf", "sketch.excalidraw.svg"]);
+        assert!(dirs.contains(&dir.path().to_path_buf()));
     }
 
     #[test]
@@ -644,7 +777,7 @@ mod tests {
     }
 
     #[test]
-    fn test_index_workspace_builds_dirs_with_markdown() {
+    fn test_index_workspace_builds_dirs_with_files() {
         let dir = setup_workspace();
         let root = dir.path().to_path_buf();
         let (_index, dirs) = index_workspace_test(dir.path());
@@ -721,6 +854,98 @@ mod tests {
         let (index, _dirs) = index_workspace_test(dir.path());
         let results = fuzzy_search_impl("md", &index, 1);
         assert!(results.len() <= 1);
+    }
+
+    #[test]
+    fn test_fuzzy_search_subsequence_match() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("meeting-notes.md"), "# x").unwrap();
+        let (index, _dirs) = index_workspace_test(dir.path());
+
+        let results = fuzzy_search_impl("mtns", &index, 50);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].filename, "meeting-notes.md");
+        // Indices are the real matched positions — in order, non-contiguous.
+        // "meeting-notes.md": m@0, t@3, n@5, s@12.
+        assert_eq!(results[0].match_indices, vec![0, 3, 5, 12]);
+    }
+
+    #[test]
+    fn test_fuzzy_search_rejects_non_subsequence() {
+        let dir = setup_workspace();
+        let (index, _dirs) = index_workspace_test(dir.path());
+        let results = fuzzy_search_impl("zxq", &index, 50);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_fuzzy_search_exact_substring_beats_subsequence() {
+        // "draft" is a literal substring of the `drafts` directory name but
+        // only a scattered subsequence inside `d-r-a-f-t.md`. The exact tier
+        // always ranks first — fuzzy is the fallback, not a competitor.
+        let dir = TempDir::new().unwrap();
+        fs::create_dir(dir.path().join("drafts")).unwrap();
+        fs::write(dir.path().join("drafts").join("meeting.md"), "# x").unwrap();
+        fs::write(dir.path().join("d-r-a-f-t.md"), "# x").unwrap();
+        let (index, _dirs) = index_workspace_test(dir.path());
+
+        let results = fuzzy_search_impl("draft", &index, 50);
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].relative_path, "drafts/meeting.md");
+        assert_eq!(results[1].relative_path, "d-r-a-f-t.md");
+    }
+
+    #[test]
+    fn test_fuzzy_search_finds_pdf_and_drawing() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("annual-report.pdf"), [0u8]).unwrap();
+        fs::write(dir.path().join("roadmap.excalidraw.svg"), "<svg/>").unwrap();
+        let (index, _dirs) = index_workspace_test(dir.path());
+
+        let results = fuzzy_search_impl("report", &index, 50);
+        assert_eq!(results[0].filename, "annual-report.pdf");
+
+        // Subsequence matching works on drawings too.
+        let results = fuzzy_search_impl("rdmp", &index, 50);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].filename, "roadmap.excalidraw.svg");
+    }
+
+    #[test]
+    fn test_fuzzy_search_camel_case_boundary_match() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("QuarterlyReport.md"), "# x").unwrap();
+        let (index, _dirs) = index_workspace_test(dir.path());
+
+        let results = fuzzy_search_impl("qr", &index, 50);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].filename, "QuarterlyReport.md");
+    }
+
+    #[test]
+    fn test_subsequence_score_prefers_boundaries_and_tight_spans() {
+        // Same needle, two paths: the boundary-anchored match in
+        // "docs/guide.md" must outscore the scattered one in
+        // "digging-roads.md".
+        let needle: Vec<char> = "gd".chars().collect();
+
+        let (hay_a, boundaries_a) = lowercase_with_boundaries("docs/guide.md");
+        let (score_a, indices_a) = subsequence_score(&needle, &hay_a, &boundaries_a).unwrap();
+        assert_eq!(indices_a, vec![5, 8]);
+
+        let (hay_b, boundaries_b) = lowercase_with_boundaries("digging-roads.md");
+        let (score_b, _) = subsequence_score(&needle, &hay_b, &boundaries_b).unwrap();
+        assert!(score_a > score_b);
+    }
+
+    #[test]
+    fn test_subsequence_score_requires_every_char_in_order() {
+        let hay: Vec<char> = "abc".chars().collect();
+        let boundaries = vec![true, false, false];
+        let needle: Vec<char> = "cba".chars().collect();
+        assert!(subsequence_score(&needle, &hay, &boundaries).is_none());
+        let needle: Vec<char> = "abcd".chars().collect();
+        assert!(subsequence_score(&needle, &hay, &boundaries).is_none());
     }
 
     #[test]

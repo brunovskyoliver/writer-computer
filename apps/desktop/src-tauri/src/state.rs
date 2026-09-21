@@ -20,7 +20,7 @@ pub struct WorkspaceState {
     pub file_index: RwLock<Vec<IndexedFile>>,
     pub file_index_revision: AtomicU64,
     pub recent_files_cache: RwLock<Option<Vec<IndexedFile>>>,
-    pub dirs_with_markdown: RwLock<HashSet<PathBuf>>,
+    pub dirs_with_files: RwLock<HashSet<PathBuf>>,
     /// Set to `true` after the first full index completes.
     /// When `false`, `dir_contains_markdown` falls back to recursive check.
     pub index_ready: AtomicBool,
@@ -96,7 +96,7 @@ impl Default for WorkspaceState {
             file_index: RwLock::new(Vec::new()),
             file_index_revision: AtomicU64::new(0),
             recent_files_cache: RwLock::new(None),
-            dirs_with_markdown: RwLock::new(HashSet::new()),
+            dirs_with_files: RwLock::new(HashSet::new()),
             index_ready: AtomicBool::new(false),
             watcher_handle: RwLock::new(None),
             recent_writes: RwLock::new(HashMap::new()),
@@ -121,7 +121,7 @@ impl WorkspaceState {
         let file_index = std::mem::take(&mut *self.file_index.write());
         self.file_index_revision.fetch_add(1, Ordering::SeqCst);
         let recent_cache = self.recent_files_cache.write().take();
-        let dirs = std::mem::take(&mut *self.dirs_with_markdown.write());
+        let dirs = std::mem::take(&mut *self.dirs_with_files.write());
         self.index_ready.store(false, Ordering::SeqCst);
         let recent_writes = std::mem::take(&mut *self.recent_writes.write());
         let ignore = self.workspace_ignore.write().take();
@@ -284,8 +284,8 @@ impl WorkspaceState {
     /// indexed files, or insert the file when the index does not know it.
     /// The write path suppresses the watcher's events as self-writes, so a
     /// file created and written back-to-back would otherwise stay invisible
-    /// to search until the next full index. Only Markdown files under the
-    /// workspace root are indexed — the same filter the index walker and
+    /// to search until the next full index. Only sidebar-visible files under
+    /// the workspace root are indexed — the same filter the index walker and
     /// watcher use.
     pub fn index_written_file(&self, path: &Path, modified_at: u64) {
         let root = self.workspace_root.read().clone();
@@ -299,7 +299,7 @@ impl WorkspaceState {
                 file.modified_at = modified_at;
             } else {
                 let Some(root) = root.as_deref() else { return };
-                if !path.starts_with(root) || !crate::commands::fs::is_markdown_file(path) {
+                if !path.starts_with(root) || !crate::commands::fs::is_sidebar_file(path) {
                     return;
                 }
                 index.push(IndexedFile {
@@ -323,7 +323,7 @@ impl WorkspaceState {
         self.invalidate_recent_files_cache();
         if inserted {
             register_ancestors(
-                &mut self.dirs_with_markdown.write(),
+                &mut self.dirs_with_files.write(),
                 path,
                 root.as_deref().unwrap_or(path),
             );
@@ -537,7 +537,7 @@ pub fn register_ancestors(dirs: &mut HashSet<PathBuf>, file_path: &Path, root: &
     }
 }
 
-/// Rebuild dirs_with_markdown from the full file index.
+/// Rebuild dirs_with_files from the full file index.
 pub fn rebuild_dirs_from_index(files: &[IndexedFile], root: &Path) -> HashSet<PathBuf> {
     let mut dirs = HashSet::with_capacity(files.len());
     for file in files {
@@ -621,10 +621,7 @@ mod tests {
             assert_eq!(index[0].relative_path, "new.md");
             assert_eq!(index[0].modified_at, 10);
         }
-        assert!(state
-            .dirs_with_markdown
-            .read()
-            .contains(Path::new("/tmp/ws")));
+        assert!(state.dirs_with_files.read().contains(Path::new("/tmp/ws")));
 
         // A second write bumps the timestamp in place — no duplicate entry.
         state.index_written_file(&path, 20);
@@ -634,7 +631,23 @@ mod tests {
     }
 
     #[test]
-    fn index_written_file_skips_non_markdown_and_outside_root() {
+    fn index_written_file_indexes_all_sidebar_kinds() {
+        let state = WorkspaceState::default();
+        *state.workspace_root.write() = Some(PathBuf::from("/tmp/ws"));
+
+        state.index_written_file(Path::new("/tmp/ws/paper.pdf"), 5);
+        state.index_written_file(Path::new("/tmp/ws/sketch.excalidraw.svg"), 6);
+        // Not a sidebar kind — stays out.
+        state.index_written_file(Path::new("/tmp/ws/photo.png"), 7);
+
+        let index = state.file_index.read();
+        assert_eq!(index.len(), 2);
+        assert!(index.iter().any(|f| f.name == "paper.pdf"));
+        assert!(index.iter().any(|f| f.name == "sketch.excalidraw.svg"));
+    }
+
+    #[test]
+    fn index_written_file_skips_non_sidebar_and_outside_root() {
         let state = WorkspaceState::default();
         *state.workspace_root.write() = Some(PathBuf::from("/tmp/ws"));
 
@@ -773,7 +786,7 @@ mod tests {
         let second_root = second.path().canonicalize().unwrap();
         let state = WorkspaceState::default();
         let (first_epoch, _, _) = state.transition_to_workspace(first_root.clone());
-        state.dirs_with_markdown.write().insert(first_root.clone());
+        state.dirs_with_files.write().insert(first_root.clone());
         state.index_ready.store(true, Ordering::SeqCst);
         state
             .recent_writes
@@ -782,7 +795,7 @@ mod tests {
 
         state.clear_workspace_if_current(&first_root).unwrap();
         assert!(state.workspace_snapshot().is_none());
-        assert!(state.dirs_with_markdown.read().is_empty());
+        assert!(state.dirs_with_files.read().is_empty());
         assert!(!state.index_ready.load(Ordering::SeqCst));
         assert!(state.recent_writes.read().is_empty());
         assert!(state.workspace_ignore.read().is_none());

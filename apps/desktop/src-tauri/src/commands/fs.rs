@@ -124,14 +124,15 @@ const DRAWING_EXTENSION: &str = ".excalidraw.svg";
 
 /// Extension for PDFs. Mirrors `PDF_EXTENSION` in
 /// `apps/desktop/src/lib/pdf.ts` — a PDF is shown in the sidebar but is not
-/// Markdown, so `is_markdown` stays false for it and it never reaches the
-/// `.md`-filtered fuzzy index in `commands/search.rs`.
+/// Markdown, so `is_markdown` stays false for it. It does reach the
+/// `is_sidebar_file`-filtered fuzzy index in `commands/search.rs`.
 pub(crate) const PDF_EXTENSION: &str = ".pdf";
 
 /// A Markdown note: `.md` or `.markdown`, case-insensitive. The one kind
-/// check shared by the sidebar, the search index, the watcher, recents,
-/// standalone opens, and the MCP kind gates so the listed, indexed, and
-/// writable document sets cannot drift apart.
+/// check shared by the sidebar, recents, standalone opens, and the MCP kind
+/// gates so the writable document set cannot drift. The search index and
+/// watcher use the wider `is_sidebar_file` — they track drawings and PDFs
+/// too.
 pub(crate) fn is_markdown_file(path: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
         return false;
@@ -207,18 +208,18 @@ fn classify_directory_content(
     Ok(content)
 }
 
-/// O(1) Markdown check via the pre-built set once available. Directories not
-/// in that set still need a recursive classification: the index only knows
-/// about Markdown, so a folder holding nothing but drawings is absent from it
-/// and would otherwise be hidden. The walk also distinguishes durable empty
-/// folder trees from trees containing only files the sidebar does not list.
+/// O(1) check via the pre-built set once available. Directories not in that
+/// set still need a recursive classification: a folder whose indexed files
+/// were all removed, or that only ever held files the sidebar does not list,
+/// is absent from it. The walk also distinguishes durable empty folder trees
+/// from trees containing only unlisted file kinds.
 fn directory_is_sidebar_visible(
     path: &Path,
     state: Option<&WorkspaceState>,
 ) -> Result<bool, AppError> {
     if let Some(state) = state {
         let index_ready = state.index_ready.load(Ordering::Relaxed);
-        if index_ready && state.dirs_with_markdown.read().contains(path) {
+        if index_ready && state.dirs_with_files.read().contains(path) {
             return Ok(true);
         }
         // Snapshot the `Arc<WorkspaceIgnore>` under a brief read lock and
@@ -871,7 +872,7 @@ mod tests {
         let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let (indexed, dirs) = crate::commands::search::index_workspace_impl(dir.path(), cancel);
         *state.file_index.write() = indexed;
-        *state.dirs_with_markdown.write() = dirs;
+        *state.dirs_with_files.write() = dirs;
         state.index_ready.store(true, Ordering::Relaxed);
 
         let result = read_directory_impl(&dir.path().to_string_lossy(), Some(&state)).unwrap();
@@ -1281,7 +1282,7 @@ mod tests {
         let state = WorkspaceState::default();
         assert!(state.workspace_root.read().is_none());
         assert!(state.file_index.read().is_empty());
-        assert!(state.dirs_with_markdown.read().is_empty());
+        assert!(state.dirs_with_files.read().is_empty());
         assert!(!state.index_ready.load(Ordering::Relaxed));
         assert!(state.watcher_handle.read().is_none());
     }

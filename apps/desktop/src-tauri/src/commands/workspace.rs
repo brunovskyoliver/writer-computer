@@ -547,7 +547,7 @@ fn run_workspace_bootstrap(
     let displaced = state.with_workspace_snapshot(&root, epoch, || {
         let old_index = std::mem::replace(&mut *state.file_index.write(), indexed);
         let old_cache = state.recent_files_cache.write().take();
-        let old_dirs = std::mem::replace(&mut *state.dirs_with_markdown.write(), dirs);
+        let old_dirs = std::mem::replace(&mut *state.dirs_with_files.write(), dirs);
         state.file_index_revision.fetch_add(1, Ordering::SeqCst);
         state.index_ready.store(true, Ordering::Relaxed);
         (old_index, old_cache, old_dirs)

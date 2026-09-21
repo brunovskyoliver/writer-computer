@@ -5,6 +5,9 @@ import type { SearchResult } from "@/types/fs";
 export function useFuzzySearch(query: string, limit = 20) {
   const [results, setResults] = useState<SearchResult[]>([]);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  // In-flight requests can resolve out of order — the seq discards a reply
+  // that belongs to an older query.
+  const seqRef = useRef(0);
   const hasQuery = query.trim() !== "";
 
   useEffect(() => {
@@ -16,11 +19,15 @@ export function useFuzzySearch(query: string, limit = 20) {
       clearTimeout(debounceRef.current);
     }
 
+    const seq = ++seqRef.current;
     debounceRef.current = setTimeout(() => {
-      void tauri.fuzzySearch(query, limit).then(setResults);
+      void tauri.fuzzySearch(query, limit).then((next) => {
+        if (seq === seqRef.current) setResults(next);
+      });
     }, 50);
 
     return () => {
+      seqRef.current += 1;
       if (debounceRef.current) {
         clearTimeout(debounceRef.current);
       }

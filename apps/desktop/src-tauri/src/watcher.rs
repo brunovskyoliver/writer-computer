@@ -135,8 +135,8 @@ pub fn record_write(state: &WorkspaceState, path: &Path) {
 }
 
 /// Push `path` into the file index if not already present, then refresh the
-/// `dirs_with_markdown` ancestry so the sidebar's "directory contains
-/// markdown" check returns true for newly-populated subtrees.
+/// `dirs_with_files` ancestry so the sidebar's "directory contains
+/// indexed files" check returns true for newly-populated subtrees.
 #[cfg(test)]
 fn add_to_index(state: &WorkspaceState, path: &Path, root: &Path) {
     let modified_at = crate::commands::fs::modified_time(path);
@@ -173,11 +173,11 @@ fn add_to_index_with_modified(state: &WorkspaceState, path: &Path, root: &Path, 
     drop(index);
     state.invalidate_recent_files_cache();
 
-    state::register_ancestors(&mut state.dirs_with_markdown.write(), path, root);
+    state::register_ancestors(&mut state.dirs_with_files.write(), path, root);
 }
 
 /// Drop every indexed path under `dir` (a removed folder) and rebuild
-/// `dirs_with_markdown`. Needed because FSEvents may report a single
+/// `dirs_with_files`. Needed because FSEvents may report a single
 /// `Remove(Folder)` without per-child Remove events.
 #[cfg(test)]
 fn remove_subtree_from_index(state: &WorkspaceState, dir: &Path, root: &Path) {
@@ -200,10 +200,10 @@ fn remove_subtree_from_index(state: &WorkspaceState, dir: &Path, root: &Path) {
         state.invalidate_recent_files_cache();
     }
     let index = state.file_index.read();
-    *state.dirs_with_markdown.write() = state::rebuild_dirs_from_index(&index, root);
+    *state.dirs_with_files.write() = state::rebuild_dirs_from_index(&index, root);
 }
 
-/// Walk `dir` and merge every Markdown descendant into the file index.
+/// Walk `dir` and merge every sidebar-visible descendant into the file index.
 ///
 /// Required for membership-change events that introduce a populated folder
 /// — Create(Folder) of a folder copied from outside the workspace, or
@@ -236,16 +236,26 @@ fn prepare_index_removal(
     mut remove: impl FnMut(&crate::state::IndexedFile) -> bool,
 ) -> PreparedIndexUpdate {
     let revision = state.file_index_revision.load(Ordering::SeqCst);
+    // Cheap membership check under the read lock first: most membership
+    // events touch paths the index doesn't track (a vanished folder's prune
+    // scan, a non-indexed kind), and cloning the whole index to discover a
+    // no-op is the allocation this skip avoids.
+    if !state.file_index.read().iter().any(&mut remove) {
+        return PreparedIndexUpdate {
+            revision,
+            index: Vec::new(),
+            dirs: std::collections::HashSet::new(),
+            changed: false,
+        };
+    }
     let mut index = state.file_index.read().clone();
-    let before = index.len();
     index.retain(|file| !remove(file));
-    let changed = index.len() != before;
     let dirs = state::rebuild_dirs_from_index(&index, root);
     PreparedIndexUpdate {
         revision,
         index,
         dirs,
-        changed,
+        changed: true,
     }
 }
 
@@ -256,23 +266,30 @@ fn prepare_mtime_update(
     modified_at: u64,
 ) -> PreparedIndexUpdate {
     let revision = state.file_index_revision.load(Ordering::SeqCst);
+    // Skip the clone when the entry is absent or already carries this mtime —
+    // modify events arrive in bursts and most are not index-visible changes.
+    {
+        let index = state.file_index.read();
+        let current = index.iter().find(|file| file.path == path);
+        if current.is_none_or(|file| file.modified_at == modified_at) {
+            return PreparedIndexUpdate {
+                revision,
+                index: Vec::new(),
+                dirs: std::collections::HashSet::new(),
+                changed: false,
+            };
+        }
+    }
     let mut index = state.file_index.read().clone();
-    let changed = index
-        .iter_mut()
-        .find(|file| file.path == path)
-        .is_some_and(|file| {
-            if file.modified_at == modified_at {
-                return false;
-            }
-            file.modified_at = modified_at;
-            true
-        });
+    if let Some(file) = index.iter_mut().find(|file| file.path == path) {
+        file.modified_at = modified_at;
+    }
     let dirs = state::rebuild_dirs_from_index(&index, root);
     PreparedIndexUpdate {
         revision,
         index,
         dirs,
-        changed,
+        changed: true,
     }
 }
 
@@ -294,6 +311,30 @@ fn prepare_subtree_merge(
     root: &Path,
 ) -> PreparedIndexUpdate {
     let revision = state.file_index_revision.load(Ordering::SeqCst);
+    // Rename-out events fire for paths already indexed — when nothing in
+    // `found` is new, the merge is a no-op and the clone is wasted. Single
+    // paths get a linear scan; larger subtree walks build a borrowed set
+    // once instead of paying O(found × index).
+    {
+        let index = state.file_index.read();
+        let all_known = if found.len() <= 4 {
+            !found
+                .iter()
+                .any(|file| !index.iter().any(|known| known.path == file.path))
+        } else {
+            let paths: std::collections::HashSet<&Path> =
+                index.iter().map(|f| f.path.as_path()).collect();
+            found.iter().all(|f| paths.contains(f.path.as_path()))
+        };
+        if all_known {
+            return PreparedIndexUpdate {
+                revision,
+                index: Vec::new(),
+                dirs: std::collections::HashSet::new(),
+                changed: false,
+            };
+        }
+    }
     let mut index = state.file_index.read().clone();
     let mut paths = index
         .iter()
@@ -337,7 +378,7 @@ fn publish_index_update(
     }
     if prepared.changed {
         let old_index = std::mem::replace(&mut *index, prepared.index);
-        let old_dirs = std::mem::replace(&mut *state.dirs_with_markdown.write(), prepared.dirs);
+        let old_dirs = std::mem::replace(&mut *state.dirs_with_files.write(), prepared.dirs);
         let old_recent_cache = state.recent_files_cache.write().take();
         state.file_index_revision.fetch_add(1, Ordering::SeqCst);
         return Ok(DeferredIndexDrop {
@@ -505,7 +546,7 @@ pub fn start_watcher(
                         continue;
                     }
 
-                    if !is_dir && crate::commands::fs::is_markdown_file(path) && path.exists() {
+                    if !is_dir && crate::commands::fs::is_sidebar_file(path) && path.exists() {
                         let modified_at = crate::commands::fs::modified_time(path);
                         publish_prepared_index_for_snapshot(
                             &state,
@@ -594,9 +635,9 @@ pub fn start_watcher(
                     // FSEvents coalesces Create+Remove for the same path
                     // within one watch window, and Modify(Name) doesn't tell
                     // us which side of the rename this path is.
-                    let is_markdown = crate::commands::fs::is_markdown_file(path);
+                    let is_indexed_kind = crate::commands::fs::is_sidebar_file(path);
                     let path_exists = path.exists();
-                    if is_markdown {
+                    if is_indexed_kind {
                         if path_exists {
                             let modified_at = crate::commands::fs::modified_time(path);
                             let found = vec![discovered_file(path, modified_at)];
@@ -631,7 +672,7 @@ pub fn start_watcher(
                             || prepare_subtree_merge(&state, found.clone(), &watched_root),
                         );
                     } else if !path_exists {
-                        // A vanished non-`.md` path could be a renamed-
+                        // A vanished non-indexed path could be a renamed-
                         // away folder; FSEvents may not emit per-child
                         // events for the descendants, so prune anything
                         // the index still holds under it.
@@ -1097,7 +1138,7 @@ mod tests {
         add_to_index(&state, &path, &root);
 
         assert_eq!(state.file_index.read().len(), 1);
-        assert!(state.dirs_with_markdown.read().contains(&root));
+        assert!(state.dirs_with_files.read().contains(&root));
     }
 
     #[test]
@@ -1127,7 +1168,7 @@ mod tests {
         assert!(paths.contains(&nested.join("deeper/b.md")));
         assert_eq!(paths.len(), 2, "non-md files must not be indexed");
 
-        let dirs = state.dirs_with_markdown.read();
+        let dirs = state.dirs_with_files.read();
         assert!(dirs.contains(&nested));
         assert!(dirs.contains(&nested.join("deeper")));
         assert!(dirs.contains(&root), "ancestors register up to the root");
@@ -1201,7 +1242,7 @@ mod tests {
         assert!(!paths.contains(&inside), "direct child removed");
         assert!(!paths.contains(&inside2), "nested child removed");
 
-        let dirs = state.dirs_with_markdown.read();
+        let dirs = state.dirs_with_files.read();
         assert!(dirs.contains(&root));
         assert!(dirs.contains(&root.join("submarine")));
         assert!(!dirs.contains(&root.join("sub")));
