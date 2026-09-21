@@ -19,6 +19,14 @@ import { showEditorNotice } from "./editor-notice-store";
 import { PdfQuoteButton, type PdfQuoteCapture } from "./pdf-quote-button";
 import type { PdfLocation } from "./page-kinds/pdf";
 import { bindTextLayerSelection } from "./pdf-text-selection";
+import {
+  anchorContentPoint,
+  capturePointAnchor,
+  pageAt,
+  scrollForAnchor,
+  wheelZoomFactor,
+  type ZoomAnchor,
+} from "./pdf-zoom";
 import { useEscKey } from "./use-esc-key";
 import "./pdf-pane.css";
 
@@ -64,6 +72,11 @@ const ZOOM_STEP = 0.2;
 const ZOOM_MIN = 0.4;
 const ZOOM_MAX = 4;
 
+/** How long a pinch must go quiet before its preview commits to a real scale
+ *  change. Rasterizing at every wheel tick would cancel and restart page
+ *  renders for the whole gesture; the CSS transform preview costs nothing. */
+const PINCH_SETTLE_MS = 120;
+
 /** Unscaled page dimensions, in PDF units, plus the viewport's rotation —
  *  needed to map stored region anchors back onto the rendered box. Pages in
  *  one document are usually but not always the same size, so each is refined
@@ -106,19 +119,6 @@ function pageOffsets(sizes: PageSize[], scale: number): number[] {
   }
   offsets[sizes.length] = Math.round(y);
   return offsets;
-}
-
-/** Index of the last page starting at or above `y`. Binary search, so a
- *  500-page document costs the same per scroll frame as a 5-page one. */
-function pageAt(offsets: number[], y: number): number {
-  let low = 0;
-  let high = offsets.length - 2;
-  while (low < high) {
-    const mid = (low + high + 1) >> 1;
-    if (offsets[mid] <= y) low = mid;
-    else high = mid - 1;
-  }
-  return low;
 }
 
 /**
@@ -388,15 +388,27 @@ export function PdfPane({
   const [viewportHeight, setViewportHeight] = useState(0);
   const [viewportWidth, setViewportWidth] = useState(0);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
   // The container is `display: none` while the tab is in the background, which
   // zeroes its `scrollTop`. Keeping our own copy is what restores the reading
   // position when the tab comes back.
   const scrollTopRef = useRef(0);
   const restoredRef = useRef(false);
-  // Which page zoom should keep under the viewport, and the scale the scroll
-  // position currently belongs to.
-  const zoomAnchorRef = useRef(1);
+  // Which part of the document a zoom keeps in place — the current page's top
+  // for the toolbar, the point under the cursor for a pinch — and the scale
+  // the scroll position currently belongs to.
+  const zoomAnchorRef = useRef<ZoomAnchor>({ kind: "page-top", page: 1 });
   const scaleRef = useRef(scale);
+  // A pinch in flight: the scale it is heading toward and the debounce that
+  // commits it. The gesture previews through a CSS transform on the content
+  // div — re-rasterizing every wheel tick would churn pdf.js renders for the
+  // whole gesture.
+  const pinchRef = useRef<{
+    pendingScale: number;
+    originX: number;
+    originY: number;
+    settle: ReturnType<typeof setTimeout> | null;
+  } | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -514,6 +526,86 @@ export function PdfPane({
     if (container) container.scrollTop = scrollTopRef.current;
   }, [isVisible]);
 
+  // Trackpad pinch and Cmd-scroll zoom the PDF under the cursor. WKWebView
+  // reports a trackpad pinch as a synthetic `ctrl+wheel` — left alone, its
+  // default action is whole-webview zoom, which reads as the neighbouring
+  // pane zooming. `preventDefault` is the whole guard: the gesture stays
+  // inside this scroll container. (mermaid-canvas.ts relies on the same
+  // channel.)
+  useEffect(() => {
+    const container = scrollRef.current;
+    const content = contentRef.current;
+    if (!container || !content || !offsets || !sizes) return;
+
+    const onWheel = (e: WheelEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      e.preventDefault();
+      const factor = wheelZoomFactor(e);
+      const geometry: Parameters<typeof capturePointAnchor>[0]["geometry"] = {
+        offsets,
+        sizes,
+        scale: scaleRef.current,
+        contentWidth,
+        pageCount,
+      };
+      if (!pinchRef.current) {
+        const rect = container.getBoundingClientRect();
+        const anchor = capturePointAnchor({
+          clientX: e.clientX,
+          clientY: e.clientY,
+          containerLeft: rect.left,
+          containerTop: rect.top,
+          scrollLeft: container.scrollLeft,
+          scrollTop: container.scrollTop,
+          geometry,
+        });
+        zoomAnchorRef.current = anchor;
+        if (anchor.kind === "point") {
+          const point = anchorContentPoint(anchor, geometry);
+          pinchRef.current = {
+            pendingScale: scaleRef.current,
+            originX: point.x,
+            originY: point.y,
+            settle: null,
+          };
+        }
+      }
+      const pinch = pinchRef.current;
+      if (!pinch) return;
+      pinch.pendingScale = Math.min(Math.max(pinch.pendingScale * factor, ZOOM_MIN), ZOOM_MAX);
+      const k = pinch.pendingScale / scaleRef.current;
+      content.style.transformOrigin = `${pinch.originX}px ${pinch.originY}px`;
+      content.style.transform = k === 1 ? "" : `scale(${k})`;
+      content.style.willChange = "transform";
+      if (pinch.settle) clearTimeout(pinch.settle);
+      pinch.settle = setTimeout(() => {
+        pinchRef.current = null;
+        setScale(pinch.pendingScale);
+      }, PINCH_SETTLE_MS);
+    };
+
+    // WKWebView can also surface gesture events; their default is native
+    // magnification — suppress it so nothing but this handler zooms.
+    const suppress = (e: Event) => e.preventDefault();
+
+    // eslint-disable-next-line react-doctor/client-passive-event-listeners
+    container.addEventListener("wheel", onWheel, { passive: false });
+    container.addEventListener("gesturestart", suppress);
+    container.addEventListener("gesturechange", suppress);
+    container.addEventListener("gestureend", suppress);
+    return () => {
+      container.removeEventListener("wheel", onWheel);
+      container.removeEventListener("gesturestart", suppress);
+      container.removeEventListener("gesturechange", suppress);
+      container.removeEventListener("gestureend", suppress);
+      if (pinchRef.current?.settle) clearTimeout(pinchRef.current.settle);
+      pinchRef.current = null;
+      content.style.transform = "";
+      content.style.transformOrigin = "";
+      content.style.willChange = "";
+    };
+  }, [offsets, sizes, contentWidth, pageCount]);
+
   // Zoom keeps the page you were reading. Changing the scale rescales every
   // offset, so leaving `scrollTop` alone silently moves the document: zooming
   // in from page 20 lands near page 10, and the settle timer then writes that
@@ -522,12 +614,27 @@ export function PdfPane({
     if (scaleRef.current === scale) return;
     scaleRef.current = scale;
     const container = scrollRef.current;
-    if (!container || !offsets) return;
-    const target = offsets[Math.min(Math.max(zoomAnchorRef.current, 1), pageCount) - 1] ?? 0;
-    container.scrollTop = target;
-    scrollTopRef.current = target;
-    setScrollTop(target);
-  }, [scale, offsets, pageCount]);
+    if (!container || !offsets || !sizes) return;
+    const { top, left } = scrollForAnchor(zoomAnchorRef.current, {
+      offsets,
+      sizes,
+      scale,
+      contentWidth,
+      pageCount,
+    });
+    container.scrollTop = top;
+    if (left !== null) container.scrollLeft = left;
+    scrollTopRef.current = container.scrollTop;
+    setScrollTop(container.scrollTop);
+    // A pinch previews through a CSS transform; the committed layout replaces
+    // it, so clear the preview in the same frame — before paint.
+    const content = contentRef.current;
+    if (content) {
+      content.style.transform = "";
+      content.style.transformOrigin = "";
+      content.style.willChange = "";
+    }
+  }, [scale, offsets, pageCount, sizes, contentWidth]);
 
   // Write the page back on settle, never per scroll event: `setPdfPage` clones
   // the tab list, which has no business running on a scroll frame. The store
@@ -552,7 +659,6 @@ export function PdfPane({
   // sync with it, so there is one source of truth and no way for the button to
   // outlive the text it points at (scenario 2.6).
   const [capture, setCapture] = useState<PdfQuoteCapture | null>(null);
-  const contentRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (state.status !== "ready" || !isVisible) return;
@@ -881,7 +987,7 @@ export function PdfPane({
             disabled={state.status !== "ready"}
             onGoToPage={goToPage}
             onZoom={(next) => {
-              zoomAnchorRef.current = currentPage;
+              zoomAnchorRef.current = { kind: "page-top", page: currentPage };
               setScale(Math.min(Math.max(next, ZOOM_MIN), ZOOM_MAX));
             }}
           />

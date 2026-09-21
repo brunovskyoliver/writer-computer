@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-09-22
+
+- Pinch to zoom PDFs with the trackpad. The gesture zooms the document under the cursor and previews as it moves, so a pinch can no longer magnify the neighbouring editor pane or the whole window. `Cmd`-scroll zooms too, and the toolbar buttons keep the current page in place. Zoom stays between 0.4× and 4×.
+
 ## 2026-09-21
 
 - Matrices are faster to write. The snippet set gains `smallmatrix`, `dcases`, `rcases` and `gathered` environments, and `array` now expands with a `{cc}` column-spec tabstop instead of a broken bare `\begin{array}`. Inside math, Tab now also walks `&` cell separators and `\\` row breaks, and Enter inside a matrix environment in display math ends the row and starts a new one (toggleable as "Enter adds a matrix row" under Settings → LaTeX Suite). Note: the new snippets land in the _shipped defaults_ — an existing snippet file keeps working unchanged; use Reset to defaults in Settings → LaTeX Suite to pick them up.
