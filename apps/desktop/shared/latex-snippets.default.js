@@ -372,6 +372,22 @@ export default [
         options: "nA",
     },
 
+    // Solutions collected into a column — the bmatrix these notes end a
+    // derivation with (`x = \begin{bmatrix} 1 \\ -2 \end{bmatrix}`).
+    // `sol` carries the leading `=`, `ans` is the bare vector.
+    {
+        trigger: "sol",
+        replacement: "= \\begin{bmatrix}\n$0\n\\end{bmatrix}",
+        options: "mA",
+        description: "Solution column vector with =",
+    },
+    {
+        trigger: "ans",
+        replacement: "\\begin{bmatrix}\n$0\n\\end{bmatrix}",
+        options: "mA",
+        description: "Solution column vector",
+    },
+
     // Brackets
 	{trigger: "avg", replacement: "\\langle $0 \\rangle $1", options: "mA"},
 	{trigger: "norm", replacement: "\\lvert $0 \\rvert $1", options: "mA", priority: 1},
