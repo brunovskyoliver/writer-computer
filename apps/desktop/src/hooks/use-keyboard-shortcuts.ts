@@ -72,6 +72,13 @@ export function useKeyboardShortcuts() {
         return;
       }
 
+      // Cmd+Shift+M — insert a math symbol (symbol palette intent)
+      if (plainMod && e.shiftKey && (e.key === "m" || e.key === "M")) {
+        e.preventDefault();
+        if (activeTabId) openCommandPalette("insert-symbol");
+        return;
+      }
+
       // Cmd+W — close current tab
       if (plainMod && e.key === "w") {
         if (isCompactFileMode) return;

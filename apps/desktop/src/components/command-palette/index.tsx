@@ -44,6 +44,10 @@ import {
   runEditorCommand,
   type EditorCommandId,
 } from "@/components/editor-area/markdown-formatting";
+import { ensureSyntaxTree } from "@codemirror/language";
+import { mathContext } from "@/lib/latex-snippets/math-context";
+import { renderMath } from "@/components/editor-area/math-renderer";
+import { searchSymbols, symbolInsertion, type MathSymbol } from "@/lib/math/symbols";
 import * as tauri from "@/lib/tauri";
 import type { RecentFile } from "@/lib/tauri";
 
@@ -66,6 +70,19 @@ const MATH_PALETTE = [
   ["math-split", "Math: Split Aligned Block Into Steps", "math.split"],
   ["math-check", "Math: Check Step Against Previous", "math.check"],
 ] as const satisfies ReadonlyArray<readonly [string, string, EditorCommandId]>;
+
+/** The symbol's rendered glyph — KaTeX, same renderer the math widgets use. */
+function SymbolGlyph({ code }: { code: string }) {
+  const result = renderMath(code, false);
+  if (result.error !== undefined) return <span className="w-7 shrink-0" />;
+  return (
+    <span
+      className="w-7 shrink-0 text-center"
+      // KaTeX output from renderMath — trust:false, no document text inside.
+      dangerouslySetInnerHTML={{ __html: result.html }}
+    />
+  );
+}
 
 function toCreatePath(root: string, rawName: string) {
   const trimmed = rawName.trim();
@@ -115,8 +132,9 @@ export function CommandPalette() {
 
   const isCreateIntent = intent === "create-file";
   const isDrawingIntent = intent === "create-drawing";
+  const isSymbolIntent = intent === "insert-symbol";
   const trimmedSearch = search.trim();
-  const fileQuery = isCreateIntent || isDrawingIntent ? "" : search;
+  const fileQuery = isCreateIntent || isDrawingIntent || isSymbolIntent ? "" : search;
   // Standalone compact windows have no workspace index — search filters the
   // global recents list client-side instead of hitting fuzzy_search.
   const results = useFuzzySearch(isCompactFileMode ? "" : fileQuery);
@@ -164,6 +182,30 @@ export function CommandPalette() {
         `Could not create drawing: ${error instanceof Error ? error.message : String(error)}`,
       );
     });
+  }
+
+  /** Insert the symbol's `\code` at the editor caret — bare inside math,
+   *  wrapped in `$…$` in prose. A `{}` group in the code takes the caret. */
+  function handleInsertSymbol(symbol: MathSymbol) {
+    const view = activeTabId ? getEditorView(activeTabId) : null;
+    close();
+    if (!view) {
+      showEditorNotice("No editor to insert into.");
+      return;
+    }
+    const state = view.state;
+    const sel = state.selection.main;
+    ensureSyntaxTree(state, state.doc.lineAt(sel.head).to, 50);
+    const kind = mathContext(state, sel.head).kind;
+    const inMath = kind === "inline" || kind === "display" || kind === "text";
+
+    const { text, caret } = symbolInsertion(symbol.code, inMath);
+    view.dispatch({
+      changes: { from: sel.from, to: sel.to, insert: text },
+      selection: { anchor: sel.from + caret },
+      userEvent: "input.symbol",
+    });
+    view.focus();
   }
 
   async function handleOpenWorkspace() {
@@ -278,6 +320,12 @@ export function CommandPalette() {
       },
     },
     activeTabId && {
+      id: "insert-symbol",
+      label: "Insert Math Symbol",
+      description: "Command",
+      run: () => openCommandPalette("insert-symbol"),
+    },
+    activeTabId && {
       id: "highlight",
       label: "Highlight Selection",
       description: "Command",
@@ -337,18 +385,24 @@ export function CommandPalette() {
         )
       : [];
   const visibleCommands =
-    isCreateIntent || isDrawingIntent
+    isCreateIntent || isDrawingIntent || isSymbolIntent
       ? []
       : trimmedSearch
         ? commands.filter((c) => matchesSearch(c.label, trimmedSearch))
         : commands;
 
+  const visibleSymbols = isSymbolIntent ? searchSymbols(trimmedSearch) : [];
+
   const drawingActionValue = "create-drawing-action";
-  const firstValue = isDrawingIntent
-    ? drawingActionValue
-    : isCreateIntent
-      ? (createPath ?? "")
-      : (visibleCommands[0]?.id ?? visibleFiles[0]?.path ?? visibleRecents[0]?.path ?? "");
+  const firstValue = isSymbolIntent
+    ? visibleSymbols[0]
+      ? `sym-${visibleSymbols[0].code}`
+      : ""
+    : isDrawingIntent
+      ? drawingActionValue
+      : isCreateIntent
+        ? (createPath ?? "")
+        : (visibleCommands[0]?.id ?? visibleFiles[0]?.path ?? visibleRecents[0]?.path ?? "");
 
   const listRef = useRef<HTMLDivElement>(null);
   const [selectedValue, setSelectedValue] = useState(firstValue);
@@ -368,7 +422,9 @@ export function CommandPalette() {
     ? "Create a new note..."
     : isDrawingIntent
       ? "Drawing name (optional, press Enter to skip)..."
-      : "Search...";
+      : isSymbolIntent
+        ? "Insert a math symbol — search by name or \\code..."
+        : "Search...";
 
   return (
     <CommandDialog
@@ -412,6 +468,25 @@ export function CommandPalette() {
               </div>
             </CommandItem>
           </CommandGroup>
+        ) : isSymbolIntent ? (
+          <>
+            {visibleSymbols.length === 0 && <CommandEmpty>No matching symbol.</CommandEmpty>}
+            <CommandGroup heading="Math symbols">
+              {visibleSymbols.map((symbol) => (
+                <CommandItem
+                  key={symbol.code}
+                  value={`sym-${symbol.code}`}
+                  onSelect={() => handleInsertSymbol(symbol)}
+                >
+                  <div className="flex items-center gap-3">
+                    <SymbolGlyph code={symbol.code} />
+                    <span className="flex-1">{symbol.name}</span>
+                    <span className="text-[13px] text-text-muted">{symbol.code}</span>
+                  </div>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </>
         ) : (
           <>
             {visibleFiles.length === 0 &&

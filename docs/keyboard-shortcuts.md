@@ -10,6 +10,7 @@ These shortcuts are handled by the global `useKeyboardShortcuts` hook and work r
 | --------------- | ------------------------------------ |
 | Cmd+P           | File search (command palette)        |
 | Cmd+Shift+F     | Search inside files (content search) |
+| Cmd+Shift+M     | Insert math symbol (symbol palette)  |
 | Cmd+O           | Go to file                           |
 | Cmd+N           | Create new note                      |
 | Cmd+T           | New tab                              |
@@ -73,30 +74,30 @@ appends a separator when the row's last element is reached — see
 
 Standard editing shortcuts provided by CodeMirror's basic setup.
 
-| Shortcut             | Action                         |
-| -------------------- | ------------------------------ |
-| Cmd+Z                | Undo                           |
-| Cmd+Shift+Z          | Redo                           |
-| Cmd+A                | Select all                     |
-| Cmd+D                | Select next occurrence         |
-| Alt+ArrowUp          | Move line up                   |
-| Alt+ArrowDown        | Move line down                 |
-| Alt+Shift+ArrowUp    | Copy line up                   |
-| Alt+Shift+ArrowDown  | Copy line down                 |
-| Cmd+Shift+K          | Delete line                    |
-| Cmd+Enter            | Insert line below              |
-| Cmd+Shift+Enter      | Insert line above              |
-| Tab                  | Indent / accept completion     |
-| Shift+Tab            | Dedent                         |
-| Cmd+]                | Indent more                    |
-| Cmd+[                | Indent less                    |
-| Cmd+F                | Find                           |
-| Cmd+H                | Find and replace               |
-| Cmd+G                | Find next                      |
-| Cmd+Shift+G          | Find previous                  |
-| Escape               | Close find                     |
-| Alt+Shift+ArrowLeft  | Extend selection by word left  |
-| Alt+Shift+ArrowRight | Extend selection by word right |
+| Shortcut             | Action                                                           |
+| -------------------- | ---------------------------------------------------------------- |
+| Cmd+Z                | Undo                                                             |
+| Cmd+Shift+Z          | Redo                                                             |
+| Cmd+A                | Select all                                                       |
+| Cmd+D                | Select next occurrence                                           |
+| Alt+ArrowUp          | Move line up                                                     |
+| Alt+ArrowDown        | Move line down                                                   |
+| Alt+Shift+ArrowUp    | Copy line up                                                     |
+| Alt+Shift+ArrowDown  | Copy line down                                                   |
+| Cmd+Shift+K          | Delete line                                                      |
+| Cmd+Enter            | Insert line below (in math: copy the step into a new `$$` block) |
+| Cmd+Shift+Enter      | Insert line above                                                |
+| Tab                  | Indent / accept completion                                       |
+| Shift+Tab            | Dedent                                                           |
+| Cmd+]                | Indent more                                                      |
+| Cmd+[                | Indent less                                                      |
+| Cmd+F                | Find                                                             |
+| Cmd+H                | Find and replace                                                 |
+| Cmd+G                | Find next                                                        |
+| Cmd+Shift+G          | Find previous                                                    |
+| Escape               | Close find                                                       |
+| Alt+Shift+ArrowLeft  | Extend selection by word left                                    |
+| Alt+Shift+ArrowRight | Extend selection by word right                                   |
 
 ## Highlight Bar
 

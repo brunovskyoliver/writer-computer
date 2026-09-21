@@ -20,6 +20,18 @@
 
 - Fix `Cmd+Alt+<letter>` chords firing the plain `Cmd+<letter>` action as well. The global shortcut handler ignored the Alt key, so `Cmd+Alt+O` also opened "Go to file" and `Cmd+Alt+1…9` also jumped tabs on top of setting a heading. Those actions now require Cmd alone.
 
+- Derivations write themselves a step at a time. Inside any `$…$`/`$$…$$` formula `Cmd+Enter` closes the current formula and copies it into a fresh `$$` block below — the motion for "next step, slightly edited" — and Enter on the last line of a display formula opens an empty `$$` block instead of a bare newline (both toggleable as "Continue derivation steps" under Settings → LaTeX Suite). Typing `$` autopairs, and typing the closing `$` steps over it.
+
+- Long derivations tidy and reformat in one step. New "Math: …" commands in the palette and the editor's Math context submenu — "Tidy notation" rewrites `\;`-family separators to `&` inside matrix environments and `*` to `\cdot` (conjugates like `z^*` keep their star); "Align steps" folds a run of `$$` blocks into one `\begin{aligned}` with `&` before each top-level relation; "Split into steps" does the reverse, one `$$` per row. Every command is one undo step and says so when nothing applies.
+
+- Constant formulas check themselves. A formula with no free variables gains a muted `≈ 4.47` annotation in the rendered view, and a top-level `a = b` gets `✓`/`✗` when both sides evaluate (toggleable under Settings → LaTeX Suite). The evaluator covers arithmetic, `\frac`, roots, `\left(…\right)`, trig/hyperbolic/inverse functions, `\ln`/`\log`/`\exp`, absolute values, and complex numbers in `a+bj` form (`i` or `j`). "Math: check step" compares the current display formula with the previous one by numeric sampling and reports "looks equal" or a counterexample — explicitly numeric, no symbolic CAS.
+
+- ` ```plot ` fences draw functions inline. One `y = f(x)`-style expression per line, optional `domain=a:b`/`range=a:b` headers, ~240 samples per series, axes through zero where visible, breaks at non-finite values and steep jumps. The first series uses the accent colour, the rest reuse the formula-highlight palette; parse errors show inline instead of a blank widget.
+
+- Insert any LaTeX symbol by name with `Cmd+Shift+M` (or "Insert Math Symbol" in the palette). Search ~150 common commands by name, code, or group — each row previews the KaTeX-rendered glyph — and Enter inserts the code: bare inside math, wrapped in `$…$` in prose, caret landing inside the first `{}` group for templates like `\frac{}{}`.
+
+- The shipped snippet defaults gain `sol` and `ans`, expanding to the `\begin{bmatrix} … \end{bmatrix}` column-vector answer shape used throughout exercise notes. As with earlier additions, existing snippet files are untouched — Reset to defaults in Settings → LaTeX Suite picks them up.
+
 ## 2026-09-20
 
 - Search inside every file with `Cmd+Shift+F`. The content-search palette scans text files and PDFs alike, streaming results as it walks the workspace: each hit shows the matched line with the query highlighted and its location (`L42`, `Page 3`), and hovering or arrowing through the list previews the surrounding lines. Pressing Enter opens text files on the matched line — selected — and PDFs on the matched page with the passage emphasised. Search is smart-case literal text, honours `.gitignore` and hidden files, and says so when a large result set is truncated.

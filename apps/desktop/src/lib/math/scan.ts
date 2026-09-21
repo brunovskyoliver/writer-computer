@@ -55,7 +55,7 @@ export function envSpans(text: string): Array<{ from: number; to: number }> {
  * are the row grammar; anything deeper belongs to a nested structure.
  */
 export function topLevelMask(text: string): boolean[] {
-  const mask = new Array<boolean>(text.length).fill(true);
+  const mask = Array.from({ length: text.length }, () => true);
   for (const span of envSpans(text)) {
     for (let i = span.from; i < span.to; i += 1) mask[i] = false;
   }
