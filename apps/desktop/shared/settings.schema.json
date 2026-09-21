@@ -404,6 +404,15 @@
       "default": true
     },
     {
+      "key": "latex.derivation-steps",
+      "label": "Enter starts the next step",
+      "description": "At the end of a $$ block, Enter opens a fresh $$ block below; Cmd+Enter copies the current formula into it",
+      "category": "LaTeX Suite",
+      "type": "boolean",
+      "scope": "global",
+      "default": true
+    },
+    {
       "key": "latex.snippet-variables",
       "label": "Snippet variables",
       "description": "NAME=alternation pairs referenced as ${NAME} in the snippet file",

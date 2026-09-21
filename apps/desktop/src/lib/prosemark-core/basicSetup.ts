@@ -1,5 +1,5 @@
 import { keymap, dropCursor, EditorView } from "@codemirror/view";
-import { EditorState, type Extension } from "@codemirror/state";
+import { EditorState, Prec, type Extension } from "@codemirror/state";
 import { defaultKeymap, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { selectNextOccurrence, selectSelectionMatches } from "@codemirror/search";
 import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
@@ -29,6 +29,17 @@ export { prosemarkMarkdownSyntaxExtensions } from "./markdown";
  *  (`lib/editor-flavor.ts`). */
 export const codeMirrorBaseSetup = (): Extension => [
   dropCursor(),
+  // `$` joins the closeable brackets through language data (this vendored
+  // `closeBrackets` takes no arguments — the first `closeBrackets`
+  // language-data value wins, so Prec.high keeps the list authoritative).
+  // It still refuses to pair before a word character (`$5` stays literal),
+  // which keeps currency prose and `$$` typing working: the second `$`
+  // steps over the auto-inserted one.
+  Prec.high(
+    EditorState.languageData.of(() => [
+      { closeBrackets: { brackets: ["(", "[", "{", "'", '"', "`", "$"] } },
+    ]),
+  ),
   closeBrackets(),
   // `Mod-d` below builds a real second cursor, which needs this.
   EditorState.allowMultipleSelections.of(true),

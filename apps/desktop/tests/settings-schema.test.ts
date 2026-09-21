@@ -107,7 +107,7 @@ describe("default terminal setting", () => {
 });
 
 describe("LaTeX Suite settings", () => {
-  test("declare the six toggles and the snippet-variable list as global keys", () => {
+  test("declare the toggles and the snippet-variable list as global keys", () => {
     const defs = SETTINGS_SCHEMA.filter((def) => def.key.startsWith("latex."));
 
     expect(defs.map((def) => [def.key, def.label, def.type, def.default])).toEqual([
@@ -117,7 +117,8 @@ describe("LaTeX Suite settings", () => {
       ["latex.highlight-source", "Highlight math source", "boolean", true],
       ["latex.matrix-rows", "Enter adds a matrix row", "boolean", true],
       ["latex.matrix-cells", "Tab moves to the next matrix cell", "boolean", true],
-      ["latex.snippet-variables", "Snippet variables", "list", defs[6]?.default],
+      ["latex.derivation-steps", "Enter starts the next step", "boolean", true],
+      ["latex.snippet-variables", "Snippet variables", "list", defs[7]?.default],
     ]);
 
     for (const def of defs) {

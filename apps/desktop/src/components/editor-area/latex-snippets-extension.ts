@@ -22,6 +22,7 @@ import { Decoration, EditorView, ViewPlugin, keymap, type DecorationSet } from "
 import { autoFraction } from "@/lib/latex-snippets/auto-fraction";
 import { matrixCellTarget } from "@/lib/latex-snippets/matrix-cell";
 import { matrixRowBreak } from "@/lib/latex-snippets/matrix-row";
+import { atFormulaEnd, copyStepInsert, emptyStepInsert } from "@/lib/math/steps";
 import {
   expandSnippet,
   frameOf,
@@ -115,7 +116,8 @@ function setting(
     | "latex.tab-out"
     | "latex.auto-fraction"
     | "latex.matrix-rows"
-    | "latex.matrix-cells",
+    | "latex.matrix-cells"
+    | "latex.derivation-steps",
 ): boolean {
   const value: unknown = useSettingsStore.getState().getSetting(key);
   return value !== false;
@@ -370,12 +372,13 @@ function latexKeymap(getTabId: () => string) {
     },
     {
       // Inside a matrix-like environment in display math, Enter ends the row
-      // (`\\` + newline) instead of inserting a plain newline. Every other
-      // position falls through to the usual Enter handling.
+      // (`\\` + newline) instead of inserting a plain newline. At the very
+      // end of a display formula it closes the block and opens the next
+      // step's `$$` below. Every other position falls through to the usual
+      // Enter handling.
       key: "Enter",
       run: (view: EditorView) => {
         if (vimBlocks(getTabId)) return false;
-        if (!setting("latex.matrix-rows")) return false;
         const caret = view.state.selection.main;
         if (!caret.empty || view.state.selection.ranges.length > 1) return false;
 
@@ -386,9 +389,60 @@ function latexKeymap(getTabId: () => string) {
           context.node.formulaFrom,
           context.node.formulaTo,
         );
-        if (!matrixRowBreak(formula, caret.head - context.node.formulaFrom)) return false;
+        const offset = caret.head - context.node.formulaFrom;
 
-        view.dispatch(view.state.replaceSelection("\\\\\n"), { userEvent: "input.type" });
+        if (setting("latex.matrix-rows") && matrixRowBreak(formula, offset)) {
+          view.dispatch(view.state.replaceSelection("\\\\\n"), { userEvent: "input.type" });
+          return true;
+        }
+
+        // Step continuation only applies to block-level display math: the
+        // opener line must be a bare `$$`, which excludes a one-line
+        // `$$x$$` inside a paragraph.
+        if (view.state.doc.lineAt(context.node.from).text.trim() !== "$$") return false;
+        if (!setting("latex.derivation-steps") || !atFormulaEnd(formula, offset)) {
+          return false;
+        }
+        const step = emptyStepInsert();
+        view.dispatch({
+          changes: { from: caret.head, insert: step.insert },
+          selection: EditorSelection.cursor(caret.head + step.caretOffset),
+          userEvent: "input.type",
+        });
+        return true;
+      },
+    },
+    {
+      // Mod-Enter inside a display block copies the whole formula into a new
+      // `$$` block below — the "next step" of a derivation. Outside a
+      // block-level `$$` it falls through to CodeMirror's own binding.
+      key: "Mod-Enter",
+      run: (view: EditorView) => {
+        if (vimBlocks(getTabId)) return false;
+        if (!setting("latex.derivation-steps")) return false;
+        const caret = view.state.selection.main;
+        if (view.state.selection.ranges.length > 1) return false;
+
+        const context = contextAt(view, caret.head);
+        if (context.kind !== "display") return false;
+        // Only block-level display math: the opener line must be a bare `$$`,
+        // which excludes a one-line `$$x$$` inside a paragraph.
+        if (view.state.doc.lineAt(context.node.from).text.trim() !== "$$") return false;
+
+        const formula = view.state.doc.sliceString(
+          context.node.formulaFrom,
+          context.node.formulaTo,
+        );
+        if (formula.trim() === "") return false;
+
+        const step = copyStepInsert(formula);
+        const at = context.node.formulaFrom + formula.trimEnd().length;
+        view.dispatch({
+          changes: { from: at, insert: step.insert },
+          selection: EditorSelection.cursor(at + step.caretOffset),
+          userEvent: "input.type",
+          scrollIntoView: true,
+        });
         return true;
       },
     },
