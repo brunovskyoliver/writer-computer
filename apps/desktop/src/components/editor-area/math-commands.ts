@@ -16,6 +16,7 @@ import { mathContext, type MathContext, type MathNode } from "@/lib/latex-snippe
 import { mathFormulaSpan } from "@/lib/prosemark-core/main";
 import { tidyFormula } from "@/lib/math/tidy";
 import { alignRun, splitAligned } from "@/lib/math/align";
+import { checkEquivalent, formatComplex } from "@/lib/math/evaluate";
 import { showEditorNotice } from "./editor-notice-store";
 
 const PARSE_BUDGET_MS = 50;
@@ -196,5 +197,46 @@ export const mathSplit: StateCommand = ({ state, dispatch }) => {
       userEvent: "input.format.mathSplit",
     }),
   );
+  return true;
+};
+
+/**
+ * `math.check` — numerically compare the caret's `$$` step with the one
+ *  before it in the same run. Sampling, not a CAS: three deterministic
+ *  trials over the free variables must all agree within epsilon.
+ */
+export const mathCheck: StateCommand = ({ state, dispatch: _dispatch }) => {
+  const sel = state.selection.main;
+  const node = mathNodeAt(state, sel.head);
+  if (!node) {
+    showEditorNotice("Put the caret inside a $$ step first.");
+    return true;
+  }
+  const run = displayMathRunAt(state, sel.head);
+  const index = run?.findIndex((n) => n.from === node.from && n.to === node.to) ?? -1;
+  if (!run || index < 0) {
+    showEditorNotice("Put the caret inside a $$ block first.");
+    return true;
+  }
+  if (index === 0) {
+    showEditorNotice("No previous step to check against.");
+    return true;
+  }
+
+  const prev = state.doc.sliceString(run[index - 1]!.formulaFrom, run[index - 1]!.formulaTo);
+  const next = state.doc.sliceString(node.formulaFrom, node.formulaTo);
+  const result = checkEquivalent(prev, next);
+
+  if (result.kind === "equal") {
+    showEditorNotice("Step looks equal to the previous one (checked numerically).");
+  } else if (result.kind === "differs") {
+    const at = result.varName ? ` at ${result.varName}=${result.sample}` : "";
+    showEditorNotice(
+      `Step differs from the previous one${at}: ${formatComplex(result.prev)} vs ${formatComplex(result.next)}.`,
+    );
+  } else {
+    const detail = result.kind === "open" ? result.reason : result.message;
+    showEditorNotice(`Cannot check this step — ${detail}.`);
+  }
   return true;
 };

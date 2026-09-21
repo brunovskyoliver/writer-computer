@@ -1,0 +1,128 @@
+import { describe, expect, it } from "vite-plus/test";
+import {
+  checkEquivalent,
+  equalitySides,
+  evaluateSource,
+  formatComplex,
+  sameValue,
+} from "../src/lib/math/evaluate";
+
+const val = (src: string) => {
+  const out = evaluateSource(src);
+  if (out.kind !== "value") throw new Error(`expected value, got ${JSON.stringify(out)}`);
+  return out.value;
+};
+const re = (src: string) => val(src).re;
+const near = (a: number, b: number) => Math.abs(a - b) < 1e-9;
+
+describe("evaluateSource", () => {
+  it("evaluates arithmetic with LaTeX operators", () => {
+    expect(near(re("2+3*4"), 14)).toBe(true);
+    expect(near(re("2 \\cdot 3 + 4 \\times 5"), 26)).toBe(true);
+    expect(near(re("10 \\div 4"), 2.5)).toBe(true);
+    expect(near(re("-2^2"), -4)).toBe(true);
+    expect(near(re("(-2)^2"), 4)).toBe(true);
+  });
+
+  it("evaluates \\frac, roots and powers", () => {
+    expect(near(re("\\frac{3}{4}"), 0.75)).toBe(true);
+    expect(near(re("\\frac12"), 0.5)).toBe(true);
+    expect(near(re("\\sqrt{9}"), 3)).toBe(true);
+    expect(near(re("\\sqrt[3]{27}"), 3)).toBe(true);
+    expect(near(re("2^{10}"), 1024)).toBe(true);
+  });
+
+  it("evaluates functions and inverses", () => {
+    expect(near(re("\\sin{\\frac{\\pi}{2}}"), 1)).toBe(true);
+    expect(near(re("\\cosh^{-1}(2)"), Math.acosh(2))).toBe(true);
+    expect(near(re("\\ln(e^2)"), 2)).toBe(true);
+    expect(near(re("\\log(1000)"), 3)).toBe(true);
+    expect(near(re("\\sin^2(0.5) + \\cos^2(0.5)"), 1)).toBe(true);
+    expect(near(re("sin(0) + cos(0)"), 1)).toBe(true);
+  });
+
+  it("evaluates \\left(\\right) and absolute values", () => {
+    expect(near(re("\\left( 1+2 \\right) \\cdot 3"), 9)).toBe(true);
+    expect(near(re("\\lvert -4 \\rvert + |3-5|"), 6)).toBe(true);
+  });
+
+  it("does complex arithmetic with j and i", () => {
+    const z = val("2660-2565*j");
+    expect(z.re).toBe(2660);
+    expect(z.im).toBe(-2565);
+    // Euler identity.
+    const euler = val("e^{\\pi j} + 1");
+    expect(Math.abs(euler.re)).toBeLessThan(1e-9);
+    expect(Math.abs(euler.im)).toBeLessThan(1e-9);
+  });
+
+  it("reports free variables as open", () => {
+    const out = evaluateSource("x^2 - 4");
+    expect(out.kind).toBe("open");
+    if (out.kind === "open") expect(out.freeVars).toEqual(["x"]);
+  });
+
+  it("marks out-of-subset constructs open", () => {
+    for (const src of [
+      "\\text{hello}",
+      "\\begin{bmatrix} 1 \\end{bmatrix}",
+      "a \\\\ b",
+      "50\\%",
+      "\\hat{x}",
+    ]) {
+      expect(evaluateSource(src).kind).toBe("open");
+    }
+  });
+});
+
+describe("equalitySides", () => {
+  it("splits on top-level =", () => {
+    expect(equalitySides("x+1 = 5")).toEqual(["x+1", "5"]);
+    expect(equalitySides("a = b = c")).toEqual(["a", "b", "c"]);
+  });
+
+  it("ignores = inside braces and environments", () => {
+    expect(equalitySides("\\frac{a=b}{c} = 1")).toEqual(["\\frac{a=b}{c}", "1"]);
+    expect(equalitySides("\\begin{bmatrix} a = b \\end{bmatrix}")).toBeNull();
+  });
+
+  it("splits \\approx like =", () => {
+    expect(equalitySides("e \\approx 2.718")).toEqual(["e", "2.718"]);
+  });
+});
+
+describe("sameValue / formatComplex", () => {
+  it("compares within relative epsilon", () => {
+    expect(sameValue({ re: 1, im: 0 }, { re: 1 + 1e-10, im: 0 })).toBe(true);
+    expect(sameValue({ re: 1, im: 0 }, { re: 1.01, im: 0 })).toBe(false);
+  });
+
+  it("formats reals and j-form complexes", () => {
+    expect(formatComplex({ re: 1.5430000001, im: 0 })).toBe("1.543");
+    expect(formatComplex({ re: 42, im: 0 })).toBe("42");
+    expect(formatComplex({ re: 2660, im: -2565 })).toBe("2660 - 2565j");
+    expect(formatComplex({ re: 0, im: 2 })).toBe("2j");
+  });
+});
+
+describe("checkEquivalent", () => {
+  it("accepts algebraically equal steps with free variables", () => {
+    expect(checkEquivalent("x^2 + 3x", "x(x+3)").kind).toBe("equal");
+    expect(checkEquivalent("(a+b)^2", "a^2 + 2ab + b^2").kind).toBe("equal");
+  });
+
+  it("compares lhs - rhs when the step is an equation", () => {
+    expect(checkEquivalent("x^2 = 4", "x = 2")).toEqual(
+      expect.objectContaining({ kind: "differs" }),
+    );
+    expect(checkEquivalent("2x = 6", "x = 3").kind).toBe("equal");
+  });
+
+  it("flags a dropped sign", () => {
+    expect(checkEquivalent("(x-1)(x+1)", "x^2 - 2x - 1").kind).toBe("differs");
+  });
+
+  it("reports unparseable formulas as open", () => {
+    expect(checkEquivalent("x = \\text{done}", "x = 1").kind).toBe("open");
+  });
+});

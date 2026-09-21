@@ -64,6 +64,7 @@ const MATH_PALETTE = [
   ["math-tidy", "Math: Tidy Notation", "math.tidy"],
   ["math-align", "Math: Align Derivation Steps", "math.align"],
   ["math-split", "Math: Split Aligned Block Into Steps", "math.split"],
+  ["math-check", "Math: Check Step Against Previous", "math.check"],
 ] as const satisfies ReadonlyArray<readonly [string, string, EditorCommandId]>;
 
 function toCreatePath(root: string, rawName: string) {

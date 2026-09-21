@@ -87,6 +87,8 @@ const MATH_SUBMENU: CommandMenuLayout = [
   "---",
   ["math.align", "math.align"],
   ["math.split", "math.split"],
+  "---",
+  ["math.check", "math.check"],
 ];
 
 const INSERT_SUBMENU: CommandMenuLayout = [

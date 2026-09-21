@@ -118,7 +118,8 @@ describe("LaTeX Suite settings", () => {
       ["latex.matrix-rows", "Enter adds a matrix row", "boolean", true],
       ["latex.matrix-cells", "Tab moves to the next matrix cell", "boolean", true],
       ["latex.derivation-steps", "Enter starts the next step", "boolean", true],
-      ["latex.snippet-variables", "Snippet variables", "list", defs[7]?.default],
+      ["latex.eval-annotations", "Evaluate constant formulas", "boolean", true],
+      ["latex.snippet-variables", "Snippet variables", "list", defs[8]?.default],
     ]);
 
     for (const def of defs) {

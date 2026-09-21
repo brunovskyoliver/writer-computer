@@ -413,6 +413,15 @@
       "default": true
     },
     {
+      "key": "latex.eval-annotations",
+      "label": "Evaluate constant formulas",
+      "description": "Show a muted ≈ value next to rendered formulas that have no free variables, and ✓/✗ on simple equalities",
+      "category": "LaTeX Suite",
+      "type": "boolean",
+      "scope": "global",
+      "default": true
+    },
+    {
       "key": "latex.snippet-variables",
       "label": "Snippet variables",
       "description": "NAME=alternation pairs referenced as ${NAME} in the snippet file",

@@ -11,7 +11,7 @@
  * Rules: SPECs/math-workflow/spec.md (FR-5).
  */
 
-const ENV_RE = /\\(begin|end)\{([^}]*)\}/g;
+import { ENV_RE, matchBrace, topLevelMask } from "./scan";
 
 /** `&` gets its alignment column from these relations. Longest match first
  *  so `\implies` wins over `\impliedby`-prefix collisions and `=` loses to
@@ -37,76 +37,6 @@ const RELATIONS = [
 /** Envs that hold the `&`-aligned / `\\`-row grammar this module joins and
  *  splits on. */
 const SPLITTABLE_ENV = /^(?:aligned|alignedat|align|align\*|gathered|split)$/;
-
-/** Whole-env spans: `\begin{x}` through its matching `\end{x}`. */
-function envSpans(text: string): Array<{ from: number; to: number }> {
-  const stack: { name: string; from: number }[] = [];
-  const spans: Array<{ from: number; to: number }> = [];
-  for (const match of text.matchAll(ENV_RE)) {
-    if (match.index > 0 && text[match.index - 1] === "\\") continue;
-    const name = match[2]!;
-    if (match[1] === "begin") {
-      stack.push({ name, from: match.index });
-      continue;
-    }
-    for (let at = stack.length - 1; at >= 0; at -= 1) {
-      if (stack[at]!.name !== name) continue;
-      const open = stack.splice(at, 1)[0]!;
-      spans.push({ from: open.from, to: match.index + match[0].length });
-      break;
-    }
-  }
-  return spans;
-}
-
-/**
- * Per-character mask: true where a char is top-level — outside every
- * environment body and every `{…}` group. `&` and `\\` read at top level
- * are the row grammar; anything deeper belongs to a nested structure.
- */
-function topLevelMask(text: string): boolean[] {
-  const mask = new Array<boolean>(text.length).fill(true);
-  for (const span of envSpans(text)) {
-    for (let i = span.from; i < span.to; i += 1) mask[i] = false;
-  }
-  let depth = 0;
-  for (let i = 0; i < text.length; i += 1) {
-    if (text[i] === "\\") {
-      // Keep the escapee's mask bit equal to the backslash's own level.
-      if (depth > 0 && i + 1 < text.length) mask[i + 1] = false;
-      i += 1;
-      continue;
-    }
-    if (text[i] === "{") {
-      mask[i] = depth === 0 ? true : false;
-      depth += 1;
-      continue;
-    }
-    if (text[i] === "}") {
-      depth = Math.max(0, depth - 1);
-      mask[i] = false;
-      continue;
-    }
-    if (depth > 0) mask[i] = false;
-  }
-  return mask;
-}
-
-function matchBrace(text: string, openIndex: number): number | null {
-  let depth = 0;
-  for (let i = openIndex; i < text.length; i += 1) {
-    if (text[i] === "\\") {
-      i += 1;
-      continue;
-    }
-    if (text[i] === "{") depth += 1;
-    else if (text[i] === "}") {
-      depth -= 1;
-      if (depth === 0) return i;
-    }
-  }
-  return null;
-}
 
 /** The env body of the first splittable environment in `formula`, or null. */
 function splittableBody(formula: string): { name: string; from: number; to: number } | null {

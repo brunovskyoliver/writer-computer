@@ -1,11 +1,13 @@
-import type { EditorState } from "@codemirror/state";
-import { Decoration, WidgetType } from "@codemirror/view";
+import { Compartment, type EditorState } from "@codemirror/state";
+import { Decoration, ViewPlugin, WidgetType } from "@codemirror/view";
 import type { SyntaxNodeRef } from "@lezer/common";
 import {
   foldableSyntaxFacet,
   mathFormulaSpan,
   selectAllDecorationsOnSelectExtension,
 } from "@/lib/prosemark-core/main";
+import { mathAnnotation, type MathAnnotation } from "@/lib/math/annotate";
+import { useSettingsStore } from "@/stores/settings-store";
 import { renderMath } from "./math-renderer";
 import "katex/dist/katex.min.css";
 import "./math-widget.css";
@@ -15,6 +17,7 @@ class MathWidget extends WidgetType {
     public formula: string,
     public display: boolean,
     public preview = false,
+    public annotation: MathAnnotation | null = null,
   ) {
     super();
   }
@@ -23,7 +26,8 @@ class MathWidget extends WidgetType {
     return (
       this.formula === other.formula &&
       this.display === other.display &&
-      this.preview === other.preview
+      this.preview === other.preview &&
+      this.annotation?.text === other.annotation?.text
     );
   }
 
@@ -52,6 +56,13 @@ class MathWidget extends WidgetType {
     // KaTeX markup rendered with `trust: false` from renderMath — the formula
     // text cannot inject markup of its own.
     span.innerHTML = result.html;
+    if (this.annotation) {
+      const badge = document.createElement("span");
+      badge.className = "cm-math-annotation";
+      badge.textContent = ` ${this.annotation.text}`;
+      if (this.annotation.title) badge.title = this.annotation.title;
+      span.appendChild(badge);
+    }
     return span;
   }
 
@@ -65,30 +76,54 @@ function mathFormulaRange(node: SyntaxNodeRef): { from: number; to: number } | n
   return mathFormulaSpan(node.node);
 }
 
+function annotationsOn(): boolean {
+  return useSettingsStore.getState().settings["latex.eval-annotations"] !== false;
+}
+
+/** The math fold facet, parameterized so the eval-annotations toggle can
+ *  rebuild it through the compartment. */
+function mathFacet(withAnnotations: boolean) {
+  return foldableSyntaxFacet.of({
+    nodePath: "Math",
+    keepDecorationOnUnfold: true,
+    buildDecorations: (state: EditorState, node: SyntaxNodeRef, editing: boolean) => {
+      const range = mathFormulaRange(node);
+      if (!range) return;
+
+      const formula = state.doc.sliceString(range.from, range.to);
+      if (formula.trim() === "") return; // nothing to render — keep the source visible
+
+      const annotation = withAnnotations ? mathAnnotation(formula) : null;
+      const display = state.doc.sliceString(node.from, node.from + 2) === "$$";
+      if (editing) {
+        return Decoration.widget({
+          widget: new MathWidget(formula, true, true, annotation),
+          block: true,
+          side: -1,
+        }).range(state.doc.lineAt(node.from).from);
+      }
+      return Decoration.replace({
+        widget: new MathWidget(formula, display, false, annotation),
+      }).range(node.from, node.to);
+    },
+  });
+}
+
 export function mathDecorations() {
+  const compartment = new Compartment();
   return [
-    foldableSyntaxFacet.of({
-      nodePath: "Math",
-      keepDecorationOnUnfold: true,
-      buildDecorations: (state: EditorState, node: SyntaxNodeRef, editing: boolean) => {
-        const range = mathFormulaRange(node);
-        if (!range) return;
-
-        const formula = state.doc.sliceString(range.from, range.to);
-        if (formula.trim() === "") return; // nothing to render — keep the source visible
-
-        const display = state.doc.sliceString(node.from, node.from + 2) === "$$";
-        if (editing) {
-          return Decoration.widget({
-            widget: new MathWidget(formula, true, true),
-            block: true,
-            side: -1,
-          }).range(state.doc.lineAt(node.from).from);
-        }
-        return Decoration.replace({
-          widget: new MathWidget(formula, display),
-        }).range(node.from, node.to);
-      },
+    compartment.of(mathFacet(annotationsOn())),
+    // Toggling `latex.eval-annotations` rebuilds the facet — a reconfigure
+    // produces fresh widgets with (or without) the badge.
+    ViewPlugin.define((view) => {
+      let current = annotationsOn();
+      const unsubscribe = useSettingsStore.subscribe((state) => {
+        const next = state.settings["latex.eval-annotations"] !== false;
+        if (next === current) return;
+        current = next;
+        view.dispatch({ effects: compartment.reconfigure(mathFacet(next)) });
+      });
+      return { destroy: unsubscribe };
     }),
     // Clicking a rendered formula range-selects the math node, which unfolds
     // it into editable source (same interaction as images).

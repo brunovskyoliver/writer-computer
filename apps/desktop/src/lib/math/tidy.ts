@@ -14,6 +14,8 @@
  * Rules: SPECs/math-workflow/spec.md (FR-4).
  */
 
+import { ENV_RE, matchBrace } from "./scan";
+
 /** Environments whose bodies use `&` as the cell separator and where a `\;`
  *  family spacing command is almost surely a mis-typed separator. `cases`,
  *  `aligned` and friends are excluded: there `\;` is deliberate spacing and
@@ -23,24 +25,7 @@ const CELL_ENV = /^(?:[pbBvV]?matrix\*?|smallmatrix|array|subarray)$/;
 /** Environments with a `{…}` column spec between the name and the body. */
 const COLSPEC_ENV = new Set(["array", "subarray", "alignedat"]);
 
-const ENV_RE = /\\(begin|end)\{([^}]*)\}/g;
 const SEPARATOR_RE = /\\[;:,]/g;
-
-function matchBrace(text: string, openIndex: number): number | null {
-  let depth = 0;
-  for (let i = openIndex; i < text.length; i += 1) {
-    if (text[i] === "\\") {
-      i += 1;
-      continue;
-    }
-    if (text[i] === "{") depth += 1;
-    else if (text[i] === "}") {
-      depth -= 1;
-      if (depth === 0) return i;
-    }
-  }
-  return null;
-}
 
 /** Body spans of every cell-separator environment in `formula`. Bodies can
  *  nest — an outer matrix's body legitimately contains an inner one, and

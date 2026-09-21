@@ -27,3 +27,10 @@
   padding: 0.5rem 0;
   border-bottom: 1px solid var(--pm-code-background-color);
 }
+
+/* `≈ value` / ✓ / ✗ badge appended to closed formulas (latex.eval-annotations). */
+.cm-math-annotation {
+  color: var(--pm-muted-color);
+  font-size: 0.85em;
+  margin-left: 0.4em;
+}
