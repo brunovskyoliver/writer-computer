@@ -26,6 +26,50 @@ describe("emitBraceWrap", () => {
     expect(over.insert.slice(over.caret)).toBe("}}$");
   });
 
+  test("prose with math islands lifts them out of \\text{}", () => {
+    // `rows $*$ columns` must not emit `$` inside \text{} — the emitted
+    // source would reparse as two math spans and corrupt the line. The
+    // island's delimiters are stripped and the content emitted as math.
+    const { insert } = emitBraceWrap("rows $*$ columns", "under", false);
+    expect(insert).toBe("$\\underbrace{\\text{rows }*\\text{ columns}}_{\\text{}}$");
+    expect(validateMath(insert.slice(1, -1))).toBe(true);
+  });
+
+  test("prose islands: multiple, adjacent, and $$…$$ spans", () => {
+    expect(emitBraceWrap("$a$ and $b$", "under", false).insert).toBe(
+      "$\\underbrace{a\\text{ and }b}_{\\text{}}$",
+    );
+    expect(emitBraceWrap("see $$x+y$$ now", "over", false).insert).toBe(
+      "$\\overbrace{\\text{see }x+y\\text{ now}}^{\\text{}}$",
+    );
+    expect(emitBraceWrap("$x^2$", "under", false).insert).toBe("$\\underbrace{x^2}_{\\text{}}$");
+  });
+
+  test("prose: literal $ and TeX specials are escaped, not stranded", () => {
+    // Currency never opens an island (Pandoc guard: a closer can't precede a
+    // digit, and "$5 and $10" has no valid pair) — the `$`s escape instead.
+    const paid = emitBraceWrap("I paid $5 and $10 more", "under", false);
+    expect(paid.insert).toBe("$\\underbrace{\\text{I paid \\$5 and \\$10 more}}_{\\text{}}$");
+    expect(validateMath(paid.insert.slice(1, -1))).toBe(true);
+
+    // A lone unpaired `$` escapes the same way; braces escape to `\{`/`\}`.
+    for (const fragment of ["a $ b", "a { b", "a } b"]) {
+      const { insert } = emitBraceWrap(fragment, "under", false);
+      expect(validateMath(insert.slice(1, -1)), fragment).toBe(true);
+    }
+    expect(emitBraceWrap("a { b", "under", false).insert).toBe(
+      "$\\underbrace{\\text{a \\{ b}}_{\\text{}}$",
+    );
+  });
+
+  test("escaped \\$ never opens an island", () => {
+    // `costs \$5` is prose with a literal dollar — the backslash keeps it out
+    // of the island scan, and the pair survives \text{} unchanged.
+    const { insert } = emitBraceWrap("costs \\$5", "under", false);
+    expect(insert).toBe("$\\underbrace{\\text{costs \\$5}}_{\\text{}}$");
+    expect(validateMath(insert.slice(1, -1))).toBe(true);
+  });
+
   test("every emitted form parses", () => {
     for (const side of ["under", "over"] as const) {
       for (const math of [true, false]) {
@@ -35,12 +79,10 @@ describe("emitBraceWrap", () => {
     }
   });
 
-  test("validation catches the prose fragments that would break", () => {
-    // An unbalanced brace or a `$` inside \text{} must fail the command's
-    // validateMath gate — emit stays dumb, the gate says no.
-    for (const bad of ["a { b", "a } b", "a $ b"]) {
-      const { insert } = emitBraceWrap(bad, "under", false);
-      expect(validateMath(insert.slice(1, -1)), bad).toBe(false);
-    }
+  test("validation still catches the prose fragments that would break", () => {
+    // `^` is not allowed inside \text{} — the gate refuses rather than write
+    // a formula that won't render.
+    const { insert } = emitBraceWrap("a ^ b", "under", false);
+    expect(validateMath(insert.slice(1, -1))).toBe(false);
   });
 });

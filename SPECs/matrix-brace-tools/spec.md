@@ -29,8 +29,8 @@ With text selected, `Cmd+Alt+U` wraps it in `\underbrace{…}_{}` and `Cmd+Alt+O
 **Acceptance**:
 
 1. Selecting `x^2 + 2x` inside math and pressing `Cmd+Alt+U` yields `\underbrace{x^2 + 2x}_{}` with the caret between `_{` and `}`; `Cmd+Alt+O` yields the `^{}` form.
-2. Selecting prose yields `$\underbrace{\text{…}}_{\text{}}$` with the caret inside the annotation's `\text{}`.
-3. An empty selection, a selection spanning math and prose, code, or a selection whose wrap would not parse (a raw `{`, `$`, or newline inside `\text{}`) writes nothing and shows a notice — never a broken document.
+2. Selecting prose yields `$\underbrace{\text{…}}_{\text{}}$` with the caret inside the annotation's `\text{}`; complete `$…$`/`$$…$$` islands inside the prose are lifted out of `\text{}` and emitted as math, and TeX specials in the remaining text runs (`$ & # _ { } %`) are escaped, so `rows $*$ columns` wraps as `\underbrace{\text{rows }*\text{ columns}}` instead of corrupting the line.
+3. An empty selection, a selection that starts or ends _inside_ a formula (islands that close inside the selection are fine), code, or a selection whose wrap would not parse (e.g. `^` inside `\text{}`) writes nothing and shows a notice — never a broken document.
 4. One command press is one undo step.
 5. Both commands are in the command palette and the editor context menu (Format submenu).
 
@@ -43,6 +43,7 @@ With text selected, `Cmd+Alt+U` wraps it in `\underbrace{…}_{}` and `Cmd+Alt+O
 - **FR-5**: The write is validated with `validateMath` before dispatch (the same "never write what won't render" rule as highlights); failures show an `editor-notice` and leave the document unchanged.
 - **FR-6**: Commands are `insert.underbrace` / `insert.overbrace` in the `editorCommands` registry — one entry gives keymap, context-menu, and palette access per the registry contract.
 - **FR-7**: A successful wrap puts Vim into insert mode (via `Vim.handleKey(cm, "i")` on the view's adapter), so the annotation can be typed immediately. No-op when Vim is off or already inserting.
+- **FR-8**: The prose form splits the fragment into text runs and `$…$`/`$$…$$` math islands — the same spans the markdown math scanner recognises (unescaped delimiters, Pandoc opener/closer guards). Islands emit raw inside the brace; text runs emit inside `\text{}` with `$ & # _ { } %` escaped to `\x`. A selection ending exactly on a math node's closing `$` counts as prose-with-islands, not a mix; starting inside a formula or ending mid-formula still refuses. The emitted formula never contains a `$`, so it re-parses as one math node.
 
 ## Non-goals
 

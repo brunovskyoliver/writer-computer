@@ -27,6 +27,8 @@ describe("Matrix rows and brace annotations", function () {
     "",
     "Euler: $e^{i\\pi}+1=0$",
     "",
+    "It is rows $*$ columns wide.",
+    "",
     "Wrap vim word too.",
     "",
   ].join("\n");
@@ -252,6 +254,41 @@ describe("Matrix rows and brace annotations", function () {
         return lines.some((text) => text.includes("\\overbrace{\\text{Wrap}}^{\\text{note}}"));
       },
       { timeout: 5_000, timeoutMsg: "typed note did not land inside the prose annotation" },
+    );
+  });
+
+  it("wraps a prose selection containing inline math", async function () {
+    await caretToLine("It is rows");
+    await pressTimes("ArrowRight", 6); // past "It is "
+    await pressTimes("ArrowRight", 16, { shift: true }); // "rows $*$ columns"
+    ok((await selectedText()) === "rows $*$ columns", "mixed fragment not selected");
+
+    await press("u", { meta: true, alt: true });
+    await browser.waitUntil(
+      async () => {
+        const lines = await docLines();
+        const line = lines.find((text) => text.includes("It is"));
+        return (
+          line !== undefined &&
+          line.includes("\\underbrace{\\text{rows }*\\text{ columns}}_{\\text{") &&
+          line.endsWith("wide.")
+        );
+      },
+      {
+        timeout: 5_000,
+        timeoutMsg: "Cmd+Alt+U did not wrap the prose+math selection in one formula",
+      },
+    );
+
+    await typeText("span");
+    await browser.waitUntil(
+      async () => {
+        const lines = await docLines();
+        return lines.some((text) =>
+          text.includes("\\underbrace{\\text{rows }*\\text{ columns}}_{\\text{span}}$"),
+        );
+      },
+      { timeout: 5_000, timeoutMsg: "typed note did not land inside the annotation" },
     );
   });
 
