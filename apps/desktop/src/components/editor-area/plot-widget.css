@@ -1,0 +1,26 @@
+/* ```plot fences (see plot-decorations.ts). The SVG is generated inline with
+   the app's own vars; these rules only shape the widget frame. */
+
+.cm-plot-widget {
+  max-width: 560px;
+}
+
+.cm-plot-widget svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* Preview mode sits above the unfolded fence while the source is edited —
+   same visual contract as .cm-math-preview. */
+.cm-plot-preview {
+  border-bottom: 1px solid var(--pm-code-background-color);
+  padding: 0.5rem 0;
+}
+
+.cm-plot-error {
+  color: var(--pm-syntax-invalid, oklch(64.62% 0.203 29.2));
+  font-family: var(--pm-code-font, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.85em;
+  margin-top: 0.25rem;
+}

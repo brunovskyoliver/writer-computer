@@ -107,7 +107,7 @@ const INVERSES: Record<string, string> = {
 // AST + parser
 // ---------------------------------------------------------------------------
 
-type Expr =
+export type Expr =
   | { t: "num"; v: Complex }
   | { t: "var"; name: string }
   | { t: "neg"; a: Expr }

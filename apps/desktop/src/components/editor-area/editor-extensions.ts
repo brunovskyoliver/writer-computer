@@ -36,6 +36,7 @@ import { linkNavigationExtension } from "./link-navigation";
 import { markdownFormatting } from "./markdown-formatting";
 import { mathDecorations } from "./math-decorations";
 import { mermaidDecorations } from "./mermaid-decorations";
+import { plotDecorations } from "./plot-decorations";
 import { tableDecorations } from "./table-decorations";
 import { viewportParsePlugin } from "./viewport-parse";
 import { vimModeExtension } from "./vim-mode";
@@ -220,6 +221,7 @@ export function createEditorExtensions(
     tableDecorations(),
     htmlBlockDecorations(),
     mermaidDecorations(),
+    plotDecorations(),
     mathDecorations(),
     headingDecorations,
     highlightBarPlugin,
