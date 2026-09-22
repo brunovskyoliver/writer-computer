@@ -2,6 +2,8 @@
 
 ## 2026-09-22
 
+- AI note relations and a graph view, off by default. Enable it under Settings → AI by pointing Writer at an OpenAI-compatible chat endpoint and an embeddings endpoint — a background worker then indexes your notes' `[[wikilinks]]` and a text projection of each note (LaTeX stripped, frontmatter and code excluded), storing embeddings in an app-data sidecar rather than the vault. "Open Graph" in the command palette shows every note with solid link edges and dashed similarity edges; clicking a node opens it. "AI: Suggest Tags for Current Note" asks the chat model for up to eight tags and shows them as a card — a tag is written to the note's `tags:` frontmatter only when you click it or "Add all". The card also lists related notes by embedding similarity, Settings shows whether each endpoint is reachable plus the indexed/pending counts, and a fallback chat endpoint takes over when the primary is down. Note content leaves the machine only while the feature is enabled, and only to the endpoints you configured.
+
 - Pinch to zoom PDFs with the trackpad. The gesture zooms the document under the cursor and previews as it moves, so a pinch can no longer magnify the neighbouring editor pane or the whole window. `Cmd`-scroll zooms too, and the toolbar buttons keep the current page in place. Zoom stays between 0.4× and 4×.
 
 - Search results and file opens no longer replace the note you are reading. Clicking a file in the sidebar, picking a search result, dropping files onto a pane, or asking an agent to `open_file` now focuses the tab already showing that file or opens a new tab — the document in front of you stays put. Following a Markdown link inside a note still navigates that tab and keeps Back/Forward working.

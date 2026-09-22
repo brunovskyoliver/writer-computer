@@ -464,6 +464,90 @@
       "type": "boolean",
       "scope": "global",
       "default": false
+    },
+    {
+      "key": "ai.enabled",
+      "label": "AI Notes Index",
+      "description": "Send note contents to the configured endpoints to build the relation graph and suggest tags. Note text leaves the app toward whatever endpoints you set — including over the network if the endpoint is remote. Off until you turn it on.",
+      "category": "AI",
+      "type": "boolean",
+      "scope": "global",
+      "default": false
+    },
+    {
+      "key": "ai.chat-endpoint",
+      "label": "Chat Endpoint",
+      "description": "OpenAI-compatible base URL for the chat model that suggests tags (e.g. http://127.0.0.1:8000/v1). Placeholder shows the example.",
+      "category": "AI",
+      "type": "string",
+      "placeholder": "http://127.0.0.1:8000/v1",
+      "normalize": "trim",
+      "scope": "global",
+      "default": ""
+    },
+    {
+      "key": "ai.chat-model",
+      "label": "Chat Model",
+      "description": "Model id served by the chat endpoint (e.g. qwen3-8b).",
+      "category": "AI",
+      "type": "string",
+      "placeholder": "qwen3-8b",
+      "normalize": "trim",
+      "scope": "global",
+      "default": ""
+    },
+    {
+      "key": "ai.chat-api-key",
+      "label": "Chat API Key",
+      "description": "Bearer token for the chat endpoint; blank = unauthenticated local server.",
+      "category": "AI",
+      "type": "string",
+      "normalize": "trim",
+      "scope": "global",
+      "default": ""
+    },
+    {
+      "key": "ai.chat-fallback-endpoint",
+      "label": "Fallback Chat Endpoint",
+      "description": "Second OpenAI-compatible base used when the primary is unreachable or errors (e.g. a local server).",
+      "category": "AI",
+      "type": "string",
+      "placeholder": "http://127.0.0.1:8000/v1",
+      "normalize": "trim",
+      "scope": "global",
+      "default": ""
+    },
+    {
+      "key": "ai.chat-fallback-api-key",
+      "label": "Fallback API Key",
+      "description": "Bearer token for the fallback endpoint.",
+      "category": "AI",
+      "type": "string",
+      "normalize": "trim",
+      "scope": "global",
+      "default": ""
+    },
+    {
+      "key": "ai.embed-endpoint",
+      "label": "Embeddings Endpoint",
+      "description": "Base URL whose {base}/embeddings route serves OpenAI-shaped responses (TEI, vLLM, MTPLX, Ollama). Powers similarity edges.",
+      "category": "AI",
+      "type": "string",
+      "placeholder": "http://127.0.0.1:8080",
+      "normalize": "trim",
+      "scope": "global",
+      "default": ""
+    },
+    {
+      "key": "ai.embed-model",
+      "label": "Embeddings Model",
+      "description": "Model id served by the embeddings endpoint (e.g. Qwen/Qwen3-Embedding-0.6B).",
+      "category": "AI",
+      "type": "string",
+      "placeholder": "Qwen/Qwen3-Embedding-0.6B",
+      "normalize": "trim",
+      "scope": "global",
+      "default": ""
     }
   ]
 }

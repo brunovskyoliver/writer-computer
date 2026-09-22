@@ -613,6 +613,9 @@ pub fn start_watcher(
 
                         wlog!("emit fs:file-changed kind={kind_str} {}", path.display());
                         let _ = handle.emit_to(label.clone(), "fs:file-changed", &payload);
+                        // External markdown edits/creates/deletes feed the AI
+                        // index; self-writes never reach here (suppression).
+                        crate::ai::note_markdown_event(&handle, &state, path);
                     }
 
                     // Treat Create, Remove, and Rename (Modify(Name)) as

@@ -41,7 +41,7 @@ fn with_settings_mut<T>(
 /// write to any key instead of at the next launch.
 pub(crate) fn with_global_settings_mut<T>(
     app_state: &AppState,
-    state: &WorkspaceState,
+    state: &Arc<WorkspaceState>,
     f: impl FnOnce(&mut Settings) -> Result<T, AppError>,
 ) -> Result<T, AppError> {
     let _global_guard = app_state.global_settings_file_lock.lock();
@@ -55,6 +55,12 @@ pub(crate) fn with_global_settings_mut<T>(
     // MCP lifecycle follows the same rule: apply the new flag under the
     // global lock so two windows' writes can't interleave start/stop.
     crate::mcp::apply_settings(app_state, settings);
+    let ai_cfg = crate::ai::resolve(settings);
+    // AI applies outside the settings guard: enabling spawns a worker, which
+    // needs `workspace_root.read()` — a lock `transition_to_workspace` holds
+    // while it waits on this same settings guard.
+    drop(settings_guard);
+    crate::ai::apply_settings(app_state, state, &ai_cfg);
     Ok(result)
 }
 

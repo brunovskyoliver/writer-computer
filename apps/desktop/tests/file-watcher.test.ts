@@ -36,6 +36,9 @@ vi.mock("@/stores/settings-store", () => ({
   useSettingsStore: { getState: () => ({ loadSettings }) },
 }));
 vi.mock("@/stores/latex-snippet-store", () => ({ startLatexSnippetSubscriptions: () => () => {} }));
+vi.mock("@/stores/ai-store", () => ({
+  useAiStore: { getState: () => ({ bumpGraphVersion: vi.fn() }) },
+}));
 vi.mock("@/hooks/editor-api", () => ({}));
 vi.mock("@/lib/tauri", () => ({}));
 vi.mock("@/lib/save", () => ({}));
@@ -65,5 +68,5 @@ test("global settings events reload settings in a workspace window and clean up 
     if (cleanup) cleanup();
     await Promise.resolve();
   }
-  expect(unlisten).toHaveBeenCalledTimes(5);
+  expect(unlisten).toHaveBeenCalledTimes(6);
 });

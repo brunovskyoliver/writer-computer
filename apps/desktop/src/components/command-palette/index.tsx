@@ -24,6 +24,7 @@ import {
   useCloseActiveTab,
   useCloseTab,
   useOpenFile,
+  useOpenGraphTab,
   useOpenSettingsTab,
   useOpenTabs,
 } from "@/hooks/use-tabs";
@@ -33,7 +34,10 @@ import { useFuzzySearch } from "./use-fuzzy-search";
 import { useGlobalRecentFiles } from "@/hooks/use-global-recent-files";
 import { openStandaloneFile } from "@/hooks/use-open-drop";
 import { settingsKind } from "@/components/editor-area/page-kinds/settings";
-import { getFileName, getFileStem, getParentDir } from "@/lib/paths";
+import { getFileExtension, getFileName, getFileStem, getParentDir } from "@/lib/paths";
+import { aiRescan } from "@/lib/ai";
+import { useAiPanelActions } from "@/hooks/use-ai";
+import { graphKind } from "@/components/editor-area/page-kinds/graph";
 import { DRAWING_EXTENSION, extractDrawingTitle, sanitizeDrawingStem } from "@/lib/drawings";
 import { showEditorNotice } from "@/components/editor-area/editor-notice-store";
 import { useFocusedPaneId } from "@/hooks/use-editor-layout";
@@ -126,8 +130,11 @@ export function CommandPalette() {
   const tabs = useOpenTabs();
   const { toggleTheme } = useTheme();
   const openSettingsTab = useOpenSettingsTab();
+  const openGraphTab = useOpenGraphTab();
   const isCompactFileMode = useIsCompactFileMode();
   const isVimMode = useBooleanSetting("editor.vim-mode", false);
+  const aiEnabled = useBooleanSetting("ai.enabled", false);
+  const { openPanel } = useAiPanelActions();
   const setSetting = useSetSetting();
 
   const isCreateIntent = intent === "create-file";
@@ -319,6 +326,40 @@ export function CommandPalette() {
         close();
       },
     },
+    root &&
+      !isCompactFileMode &&
+      aiEnabled && {
+        id: "open-graph",
+        label: "Open Graph",
+        description: graphKind.description,
+        run: () => {
+          openGraphTab();
+          close();
+        },
+      },
+    root &&
+      activeFilePath &&
+      aiEnabled &&
+      ["md", "markdown"].includes(getFileExtension(activeFilePath).toLowerCase()) && {
+        id: "ai-suggest-tags",
+        label: "AI: Suggest Tags for Current Note",
+        description: "Command",
+        run: () => {
+          close();
+          void openPanel(activeFilePath);
+        },
+      },
+    root &&
+      !isCompactFileMode &&
+      aiEnabled && {
+        id: "ai-rescan",
+        label: "AI: Rescan Note Index",
+        description: "Command",
+        run: () => {
+          void aiRescan();
+          close();
+        },
+      },
     activeTabId && {
       id: "insert-symbol",
       label: "Insert Math Symbol",

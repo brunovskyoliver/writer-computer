@@ -2,6 +2,7 @@ import { useDrawingShutdown } from "./hooks/use-drawing-shutdown";
 import { AppLayout } from "./components/app-layout";
 import { CommandPalette } from "./components/command-palette";
 import { ContentSearchPalette } from "./components/content-search";
+import { SuggestCard } from "./components/ai/suggest-card";
 import { TelemetryConsentDialog } from "./components/telemetry-consent-dialog";
 import { WindowTitle } from "./components/window-title";
 import { useIsStartupResolved } from "./hooks/use-workspace";
@@ -34,6 +35,7 @@ function App() {
       <AppLayout />
       <CommandPalette />
       <ContentSearchPalette />
+      <SuggestCard />
       <TelemetryConsentDialog />
     </>
   );

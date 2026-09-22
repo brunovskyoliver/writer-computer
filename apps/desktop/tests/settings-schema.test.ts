@@ -145,6 +145,28 @@ describe("LaTeX Suite settings", () => {
   });
 });
 
+describe("AI settings", () => {
+  test("declare the eight global ai.* keys under the AI category", () => {
+    const defs = SETTINGS_SCHEMA.filter((def) => def.key.startsWith("ai."));
+
+    expect(defs.map((def) => [def.key, def.type, def.default])).toEqual([
+      ["ai.enabled", "boolean", false],
+      ["ai.chat-endpoint", "string", ""],
+      ["ai.chat-model", "string", ""],
+      ["ai.chat-api-key", "string", ""],
+      ["ai.chat-fallback-endpoint", "string", ""],
+      ["ai.chat-fallback-api-key", "string", ""],
+      ["ai.embed-endpoint", "string", ""],
+      ["ai.embed-model", "string", ""],
+    ]);
+
+    for (const def of defs) {
+      expect(def.category, def.key).toBe("AI");
+      expect(def.scope, def.key).toBe("global");
+    }
+  });
+});
+
 describe("theme presets", () => {
   test("at least one preset file is discovered", () => {
     expect(Object.keys(presetFiles).length).toBeGreaterThan(0);

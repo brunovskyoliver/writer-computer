@@ -113,6 +113,11 @@ pub fn index_workspace(
     };
     drop(displaced);
 
+    // A rebuilt file index is the AI worker's ground truth — rescan.
+    if let Some(sender) = crate::ai::kick(&app, &state) {
+        let _ = sender.send(crate::ai::AiJob::ScanAll);
+    }
+
     Ok(IndexStats {
         file_count,
         duration_ms,

@@ -5,6 +5,7 @@ import { SettingControl } from "./setting-control";
 import { ThemesSection } from "./themes-section";
 import { LatexSuiteExtras } from "./latex-suite-extras";
 import { McpSection } from "./mcp-section";
+import { AiSection } from "./ai-section";
 import { EditorScrollContainer } from "@/components/editor-area/editor-scroll-container";
 
 /** Section that renders above the Themes block. The schema-driven section
@@ -16,6 +17,7 @@ const SECTIONS_BEFORE_THEMES = ["Appearance", "Typography"] as const;
 const SECTION_EXTRAS: Record<string, ComponentType> = {
   "LaTeX Suite": LatexSuiteExtras,
   Privacy: McpSection,
+  AI: AiSection,
 };
 
 export function SettingsPanel({ isVisible }: { isVisible: boolean }) {

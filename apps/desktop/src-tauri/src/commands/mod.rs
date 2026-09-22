@@ -1,3 +1,4 @@
+pub mod ai;
 pub mod fonts;
 pub mod fs;
 pub mod images;

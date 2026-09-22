@@ -70,6 +70,17 @@ pub struct WorkspaceState {
     /// same file onto the existing window and as the target of the
     /// single-file watcher.
     pub standalone_file: RwLock<Option<PathBuf>>,
+    /// Opt-in AI note index: content hashes, resolved `[[…]]` edges,
+    /// embedding vectors and accepted-tag state per markdown file. Populated
+    /// by a background worker; only non-empty while `ai.enabled` is on (or
+    /// was on earlier in the session). See `ai.rs`.
+    pub ai_index: RwLock<crate::ai::AiIndex>,
+    /// Queue feeding the per-workspace AI worker. `None` while disabled or
+    /// before the first enqueue; dropping the sender ends the worker.
+    pub ai_queue: Mutex<Option<tokio::sync::mpsc::UnboundedSender<crate::ai::AiJob>>>,
+    /// Last applied `ai.*` settings snapshot — `apply_settings` compares
+    /// against it so unrelated global writes don't kick a rescan.
+    pub ai_applied: Mutex<Option<crate::ai::AiSettings>>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -109,6 +120,9 @@ impl Default for WorkspaceState {
             startup_open_taken: AtomicBool::new(false),
             pending_open: Mutex::new(VecDeque::new()),
             standalone_file: RwLock::new(None),
+            ai_index: RwLock::new(crate::ai::AiIndex::default()),
+            ai_queue: Mutex::new(None),
+            ai_applied: Mutex::new(None),
         }
     }
 }
@@ -125,6 +139,12 @@ impl WorkspaceState {
         self.index_ready.store(false, Ordering::SeqCst);
         let recent_writes = std::mem::take(&mut *self.recent_writes.write());
         let ignore = self.workspace_ignore.write().take();
+        // Dropping the sender closes the channel; the worker's next commit
+        // also fails the epoch check and it exits. The index itself is
+        // cleared so a reopened workspace doesn't inherit stale notes.
+        self.ai_queue.lock().take();
+        *self.ai_index.write() = crate::ai::AiIndex::default();
+        self.ai_applied.lock().take();
         if let Some(settings) = self.settings.write().as_mut() {
             settings.clear_workspace();
         }
@@ -328,6 +348,9 @@ impl WorkspaceState {
                 root.as_deref().unwrap_or(path),
             );
         }
+        // Self-saves never reach the watcher (self-write suppression) — the
+        // AI queue hears about them here instead. No-op while disabled.
+        crate::ai::note_changed(self, path);
     }
 
     pub fn has_pending_workspace(&self, path: &Path) -> bool {

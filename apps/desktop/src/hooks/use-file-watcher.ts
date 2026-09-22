@@ -6,6 +6,7 @@ import { startLatexSnippetSubscriptions } from "@/stores/latex-snippet-store";
 import * as editorApi from "./editor-api";
 import * as tauri from "@/lib/tauri";
 import { cancelSave, isSaveInFlight } from "@/lib/save";
+import { useAiStore } from "@/stores/ai-store";
 import { isWorkspaceEventCurrent, type WorkspaceIdentity } from "@/lib/workspace-events";
 import { isDrawingPath } from "@/lib/drawings";
 import { refreshDrawingEmbeds } from "@/lib/drawing-embed-sync";
@@ -102,6 +103,13 @@ export function useFileWatcher() {
       }
     });
 
+    // AI worker committed a batch → bump the graph version; mounted graph
+    // panes refetch `ai_graph`.
+    const unlistenGraphChanged = listen<WorkspaceIdentity>("ai:graph-changed", (event) => {
+      if (!isWorkspaceEventCurrent(event.payload, currentWorkspaceIdentity())) return;
+      useAiStore.getState().bumpGraphVersion();
+    });
+
     // The snippet store owns its own file and settings subscriptions; this
     // hook only decides how long they live.
     const stopSnippetSubscriptions = startLatexSnippetSubscriptions();
@@ -113,6 +121,7 @@ export function useFileWatcher() {
       void unlistenSidebarMetadata.then((fn) => fn());
       void unlistenSettings.then((fn) => fn());
       void unlistenDir.then((fn) => fn());
+      void unlistenGraphChanged.then((fn) => fn());
     };
   }, []);
 }

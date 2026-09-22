@@ -3,10 +3,12 @@ import { EditorPane } from "../editor-pane";
 import { DocumentFooter } from "../document-footer";
 import { NewTabPage } from "../new-tab-page";
 import { PdfPane } from "../pdf-pane";
+import { GraphPane } from "@/components/graph/graph-pane";
 import { SettingsPanel } from "@/components/settings-panel";
 import type { Location } from "./index";
 import type { DrawingLocation } from "./drawing";
 import type { FileLocation } from "./file";
+import type { GraphLocation } from "./graph";
 import type { LauncherLocation } from "./launcher";
 import type { PdfLocation } from "./pdf";
 import type { SettingsLocation } from "./settings";
@@ -48,6 +50,10 @@ const views = {
     Component: FileTabBody,
     renderFooter: (l) => <DocumentFooter filePath={l.path} />,
   } satisfies PageKindView<FileLocation>,
+  // No footer: the graph is workspace-wide, not a document.
+  graph: {
+    Component: GraphPane,
+  } satisfies PageKindView<GraphLocation>,
   launcher: {
     Component: NewTabPage,
   } satisfies PageKindView<LauncherLocation>,

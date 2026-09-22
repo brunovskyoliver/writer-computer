@@ -39,6 +39,7 @@ catalog:
   node-emoji: ^2.2.0
   pdfjs-dist: ^6.3.289
   posthog-js: ^1.429.2
+  react-force-graph-2d: 1.29.1
   react-resizable-panels: ^4.7.4
   tailwindcss: ^4.2.2
   typescript: ^5

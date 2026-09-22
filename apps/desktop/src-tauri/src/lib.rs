@@ -1,3 +1,4 @@
+mod ai;
 mod commands;
 mod config;
 #[cfg(target_os = "macos")]
@@ -644,6 +645,11 @@ pub fn run() {
             commands::settings::reset_setting,
             commands::mcp::mcp_respond,
             commands::mcp::mcp_status,
+            commands::ai::ai_status,
+            commands::ai::ai_graph,
+            commands::ai::ai_suggest_tags,
+            commands::ai::ai_related,
+            commands::ai::ai_rescan,
             telemetry::telemetry_should_prompt,
             telemetry::telemetry_mark_prompted,
             telemetry::telemetry_report_declined,

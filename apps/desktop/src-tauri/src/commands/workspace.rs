@@ -567,6 +567,10 @@ fn run_workspace_bootstrap(
             file_count,
         },
     );
+    // Fresh file index is the AI worker's ground truth — full scan.
+    if let Some(sender) = crate::ai::kick(&handle, &state) {
+        let _ = sender.send(crate::ai::AiJob::ScanAll);
+    }
 }
 
 fn epoch_is_current(state: &WorkspaceState, captured: u64) -> bool {

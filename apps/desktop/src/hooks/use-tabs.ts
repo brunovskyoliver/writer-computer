@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { createSettingsTab, useEditorStore } from "@/stores/editor-store";
+import { createGraphTab, createSettingsTab, useEditorStore } from "@/stores/editor-store";
 import { usePaneTabIds } from "@/hooks/use-editor-layout";
 import { findPane } from "@/lib/editor-layout";
 import type { DocumentStats } from "@/lib/document-stats";
@@ -139,4 +139,9 @@ function useOpenOrFocus() {
 export function useOpenSettingsTab() {
   const openOrFocus = useOpenOrFocus();
   return () => openOrFocus((tab) => tab.location.kind === "settings", createSettingsTab);
+}
+
+export function useOpenGraphTab() {
+  const openOrFocus = useOpenOrFocus();
+  return () => openOrFocus((tab) => tab.location.kind === "graph", createGraphTab);
 }
