@@ -244,6 +244,11 @@ describe("Math workflow", function () {
     });
     ok(wrote.ok, `failed to seed ${filePath}: ${wrote.error}`);
 
+    // The e2e data dir's snippet file predates this branch — regenerate it
+    // from the shipped defaults so `plt` exists. The watcher hot-reloads.
+    const reset = await invoke("reset_latex_snippets", {});
+    ok(reset.ok, `snippet reset failed: ${reset.error}`);
+
     await browser.execute(() => window.location.reload());
     await $('[data-sidebar-surface][data-workspace-open="true"]').waitForExist({
       timeout: 20_000,
@@ -392,6 +397,41 @@ describe("Math workflow", function () {
       timeout: 5_000,
       timeoutMsg: `check step produced no notice — ${await debugState()}`,
     });
+  });
+
+  it("plt expands a plot fence with domain and y tabstops", async function () {
+    await caretToLine("Plain prose line");
+    await browser.keys(["ArrowDown"]); // last line is empty
+    await typeText("pl");
+    await typeText("t"); // auto-fire keys on the typed character
+
+    await browser.waitUntil(async () => (await docLines()).some((l) => l.includes("domain=-6:6")), {
+      timeout: 5_000,
+      timeoutMsg: `plt did not expand — ${await debugState()}`,
+    });
+
+    // The first placeholder (-6) is selected — typing replaces it, Tab
+    // moves to the max, then into the y expression.
+    await typeText("-2");
+    await press("Tab");
+    await typeText("4");
+    await press("Tab");
+    await typeText("x");
+
+    await browser.waitUntil(
+      async () => {
+        const lines = await docLines();
+        return lines.some((l) => l.includes("domain=-2:4")) && lines.some((l) => l === "y = x");
+      },
+      { timeout: 5_000, timeoutMsg: `tabstops did not fill the fence — ${await debugState()}` },
+    );
+    // A second series renders once the caret leaves the fence.
+    await browser.keys(["ArrowDown"]);
+    await browser.waitUntil(
+      async () =>
+        (await browser.execute(() => document.querySelectorAll(".cm-plot-widget svg").length)) > 0,
+      { timeout: 8_000, timeoutMsg: "the expanded fence never rendered" },
+    );
   });
 
   it("Cmd+Shift+M opens the symbol palette and inserts into prose", async function () {

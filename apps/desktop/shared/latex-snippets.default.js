@@ -21,6 +21,22 @@ export default [
     {trigger: "dm", replacement: "$$\n$0\n$$", options: "tAw"},
 	{trigger: /(\S\s*)dm/, replacement: "[[0]]\n$$\n$0\n$$", options: "tAw", priority: 1},
 
+	// ```plot fence — `plt` auto-fires in text like `mk`/`dm`; `plot` + Tab
+	// expands too, but does not steal the English word while typing.
+	// Tabstops walk domain min → max → the y expression.
+	{
+		trigger: "plt",
+		replacement: "```plot\ndomain=${0:-6}:${1:6}\ny = $2\n```",
+		options: "tAw",
+		description: "Function plot fence",
+	},
+	{
+		trigger: "plot",
+		replacement: "```plot\ndomain=${0:-6}:${1:6}\ny = $2\n```",
+		options: "tw",
+		description: "Function plot fence (fires on Tab)",
+	},
+
 	{trigger: /([^\\])beg/, replacement: "[[0]]\\begin{$0}\n$1\n\\end{$0}", options: "MA"},
 	{trigger: /([^\\])beg/, replacement: "[[0]]\\begin{$0} $1 \\end{$0}", options: "nA"},
 
