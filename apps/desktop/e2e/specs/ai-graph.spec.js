@@ -40,6 +40,27 @@ const PROBE_CONTENT = [
   "",
 ].join("\n");
 
+// A second probe sharing the probe note's formulas, typeset differently —
+// whitespace/braces variants of the same normalized math. The relation must
+// match on content, not text. Lines 6 and 11 carry the formulas.
+const TARGET_PATH = join(VAULT, "ai-e2e-target.md");
+const TARGET_CONTENT = [
+  "# Reused identities",
+  "",
+  "Some prose explaining why the eigen relation is reused here.",
+  "",
+  "$$",
+  "A v = \\lambda v",
+  "$$",
+  "",
+  "More prose.",
+  "",
+  "$$ A = V \\Lambda V^{-1} $$",
+  "",
+].join("\n");
+const PROBE_FORMULA_LINE = 8; // line of $Av = \lambda v$ in PROBE_CONTENT
+const TARGET_FORMULA_LINE = 6; // line of A v = \lambda v in TARGET_CONTENT
+
 const SHOTS = resolve(dirname(fileURLToPath(import.meta.url)), "screenshots");
 
 /** Invoke a Tauri command inside the WKWebView and throw on AppError. */
@@ -144,7 +165,7 @@ describe("AI note relations", function () {
     ok(linkEdges.length > 0, "expected at least one resolved wikilink edge");
     ok(similarEdges.length > 0, "expected at least one similarity edge");
     for (const edge of similarEdges) {
-      ok(edge.score >= 0.55, `similarity edge below floor: ${edge.score}`);
+      ok(edge.score >= 0.6, `similarity edge below floor: ${edge.score}`);
     }
   });
 
@@ -244,7 +265,55 @@ describe("AI note relations", function () {
     const related = await ipc("ai_related", { path: candidate.path });
     ok(related.length > 0, `no related notes for ${candidate.path}`);
     ok(related.length <= 8);
-    for (const note of related) ok(note.score >= 0.3, `related below floor: ${note.score}`);
+    for (const note of related) {
+      if (note.kind === "similar") {
+        ok(note.score >= 0.5, `related below floor: ${note.score}`);
+      }
+    }
+  });
+
+  it("ai_related anchors shared formulas to the other note's line", async function () {
+    writeFileSync(PROBE_PATH, PROBE_CONTENT);
+    writeFileSync(TARGET_PATH, TARGET_CONTENT);
+    try {
+      // Wait on the real condition — node presence/pending can pass while
+      // the worker is still extracting math blocks.
+      await browser.waitUntil(
+        async () => {
+          const related = await ipc("ai_related", { path: PROBE_PATH });
+          return related.some((r) => r.kind === "formula" && r.path === TARGET_PATH);
+        },
+        { timeout: 60_000, interval: 1_000, timeoutMsg: "formula relation never appeared" },
+      );
+
+      // Probe → target: the relation carries the formula's line in the
+      // target plus that note's own source line as the snippet/needle.
+      const related = await ipc("ai_related", { path: PROBE_PATH });
+      const formula = related.find((r) => r.kind === "formula" && r.path === TARGET_PATH);
+      ok(formula, `no formula relation to target: ${JSON.stringify(related)}`);
+      strictEqual(formula.line, TARGET_FORMULA_LINE);
+      strictEqual(formula.snippet, "A v = \\lambda v");
+
+      // And back: the target sees the probe's copy at the probe's line.
+      const back = await ipc("ai_related", { path: TARGET_PATH });
+      const backFormula = back.find((r) => r.kind === "formula" && r.path === PROBE_PATH);
+      ok(backFormula, `no reverse formula relation: ${JSON.stringify(back)}`);
+      strictEqual(backFormula.line, PROBE_FORMULA_LINE);
+      strictEqual(backFormula.snippet, "Av = \\lambda v");
+
+      // The pair also shows as a graph edge of kind "formula".
+      const graph = await ipc("ai_graph");
+      const edge = graph.edges.find(
+        (e) =>
+          e.kind === "formula" &&
+          ((e.source === PROBE_PATH && e.target === TARGET_PATH) ||
+            (e.source === TARGET_PATH && e.target === PROBE_PATH)),
+      );
+      ok(edge, "no formula edge between probe and target");
+    } finally {
+      if (existsSync(PROBE_PATH)) unlinkSync(PROBE_PATH);
+      if (existsSync(TARGET_PATH)) unlinkSync(TARGET_PATH);
+    }
   });
 
   it("ai_rescan completes and pending drains to zero", async function () {

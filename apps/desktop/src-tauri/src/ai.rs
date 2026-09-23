@@ -19,20 +19,25 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc;
 
-const SIDECAR_VERSION: u32 = 1;
+const SIDECAR_VERSION: u32 = 2;
 const DEBOUNCE: Duration = Duration::from_millis(800);
 const EMBED_BATCH: usize = 32;
 const PROJECTION_CAP: usize = 4000;
 const SUGGEST_INPUT_CAP: usize = 6000;
-const SUGGEST_TAG_CAP: usize = 8;
+const SUGGEST_TAG_CAP: usize = 3;
 /// Minimum cosine for a similarity edge (data-model.md).
-pub const SIMILARITY_FLOOR: f32 = 0.55;
+pub const SIMILARITY_FLOOR: f32 = 0.6;
 /// Per-node similarity neighbours kept for the graph payload.
-pub const SIMILARITY_TOP_K: usize = 3;
+pub const SIMILARITY_TOP_K: usize = 2;
 /// Floor for the `ai_related` list (looser than graph edges — the card shows
 /// the score so weak-but-real neighbours are still useful).
-pub const RELATED_FLOOR: f32 = 0.3;
-pub const RELATED_TOP_K: usize = 8;
+pub const RELATED_FLOOR: f32 = 0.5;
+pub const RELATED_TOP_K: usize = 3;
+/// Shared-formula rows shown above the similar notes in `ai_related`.
+pub const FORMULA_RELATED_CAP: usize = 5;
+/// Inline `$…$` only counts when the normalized token stream is at least
+/// this long — keeps `$x$`, prices and stray delimiters out of relations.
+const INLINE_MATH_MIN: usize = 8;
 
 // ---------- settings ----------
 
@@ -96,8 +101,23 @@ pub struct NoteEntry {
     pub embedding: Option<Vec<f32>>,
     /// Resolved absolute paths of this note's `[[…]]` targets.
     pub links: Vec<String>,
+    /// Math blocks found in the note — the formula-relation source.
+    pub math_blocks: Vec<MathBlock>,
     /// Last chat-model suggestion set; survives re-embeds.
     pub suggested_tags: Vec<String>,
+}
+
+/// One math block (`$$…$$`, `\[…\]`, or a substantial inline `$…$`) with
+/// its canonical identity and its location in the file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MathBlock {
+    /// Normalized TeX token stream — two notes relate when this matches.
+    pub normalized: String,
+    /// 1-based line of the block's first content line (frontmatter included).
+    pub line: u32,
+    /// Raw inner source, trimmed — the card's preview and the line-target
+    /// needle (its first line appears literally on `line`).
+    pub source: String,
 }
 
 #[derive(Debug, Default)]
@@ -438,6 +458,357 @@ fn strip_tex_commands(text: &str) -> String {
     out
 }
 
+// ---------- math blocks + formula relations ----------
+
+/// The closing frontmatter fence's line index (0-based), so math scanning
+/// can skip `---…---` entirely while keeping absolute line numbers.
+fn frontmatter_end_line(content: &str) -> Option<usize> {
+    let first_end = content.find('\n')?;
+    if content[..first_end].trim_end() != "---" {
+        return None;
+    }
+    let mut idx = 1usize;
+    for line in content[first_end + 1..].split('\n') {
+        if line.trim_end() == "---" {
+            return Some(idx);
+        }
+        idx += 1;
+    }
+    None
+}
+
+/// Display-math state carried across lines inside `scan_line_math`.
+struct DisplayBlock {
+    /// Closing delimiter: `"$$"` or `"\\]"`.
+    closer: &'static str,
+    /// Line of the first non-whitespace content char (1-based); 0 = none yet.
+    content_line: u32,
+    buf: String,
+}
+
+/// Every math block in `content` with its normalized identity and absolute
+/// line. Frontmatter, fenced code and inline code spans are skipped — a
+/// `$$` inside backticks is text, not math.
+pub fn extract_math_blocks(content: &str) -> Vec<MathBlock> {
+    let fm_end = frontmatter_end_line(content);
+    let mut blocks = Vec::new();
+    let mut fence: Option<(u8, usize)> = None;
+    let mut display: Option<DisplayBlock> = None;
+
+    for (idx, line) in content.split('\n').enumerate() {
+        if fm_end.is_some_and(|end| idx <= end) {
+            continue;
+        }
+        let lineno = (idx + 1) as u32;
+        if display.is_none() {
+            let trimmed = line.trim_start();
+            match fence {
+                Some((ch, len)) => {
+                    if trimmed.bytes().take_while(|&b| b == ch).count() >= len
+                        && trimmed[len..].trim().is_empty()
+                    {
+                        fence = None;
+                    }
+                    continue;
+                }
+                None => {
+                    if let Some(marker) = fence_marker(trimmed) {
+                        fence = Some(marker);
+                        continue;
+                    }
+                }
+            }
+        }
+        scan_line_math(line, lineno, &mut display, &mut blocks);
+    }
+    blocks
+}
+
+fn emit_math_block(source: String, line: u32, blocks: &mut Vec<MathBlock>) {
+    let source = source.trim().to_string();
+    let normalized = normalize_math(&source);
+    if normalized.is_empty() {
+        return;
+    }
+    blocks.push(MathBlock {
+        normalized,
+        line,
+        source,
+    });
+}
+
+fn scan_line_math(
+    line: &str,
+    lineno: u32,
+    display: &mut Option<DisplayBlock>,
+    blocks: &mut Vec<MathBlock>,
+) {
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if display.is_some() {
+            let (closer_len, closes) = {
+                let block = display.as_ref().unwrap();
+                (
+                    block.closer.len(),
+                    bytes[i..].starts_with(block.closer.as_bytes()),
+                )
+            };
+            if closes {
+                let finished = display.take().unwrap();
+                let line = if finished.content_line == 0 {
+                    lineno
+                } else {
+                    finished.content_line
+                };
+                emit_math_block(finished.buf, line, blocks);
+                i += closer_len;
+                continue;
+            }
+            let ch = line[i..].chars().next().unwrap();
+            let block = display.as_mut().unwrap();
+            if block.content_line == 0 && !ch.is_whitespace() {
+                block.content_line = lineno;
+            }
+            block.buf.push(ch);
+            i += ch.len_utf8();
+            continue;
+        }
+
+        match bytes[i] {
+            // Inline code: a run of n backticks closes at the next run of n.
+            b'`' => {
+                let run = bytes[i..].iter().take_while(|&&b| b == b'`').count();
+                let mut j = i + run;
+                while j < bytes.len() {
+                    if bytes[j] == b'`'
+                        && bytes[j..].iter().take_while(|&&b| b == b'`').count() == run
+                    {
+                        break;
+                    }
+                    j += 1;
+                }
+                i = if j < bytes.len() {
+                    j + run
+                } else {
+                    bytes.len()
+                };
+            }
+            b'$' if bytes.get(i + 1) == Some(&b'$') => {
+                *display = Some(DisplayBlock {
+                    closer: "$$",
+                    content_line: 0,
+                    buf: String::new(),
+                });
+                i += 2;
+            }
+            b'\\' if bytes.get(i + 1) == Some(&b'[') => {
+                *display = Some(DisplayBlock {
+                    closer: "\\]",
+                    content_line: 0,
+                    buf: String::new(),
+                });
+                i += 2;
+            }
+            b'$' => {
+                // unwrap_math's heuristic: opener not followed by space,
+                // closer not preceded by space, same line only.
+                let inner_start = i + 1;
+                if bytes
+                    .get(inner_start)
+                    .is_some_and(|b| !b.is_ascii_whitespace())
+                {
+                    let rest = &line[inner_start..];
+                    if let Some(end) = rest.find('$') {
+                        let inner = &rest[..end];
+                        if end > 0 && !inner.as_bytes()[end - 1].is_ascii_whitespace() {
+                            let normalized = normalize_math(inner.trim());
+                            let formulaish = inner
+                                .bytes()
+                                .any(|b| matches!(b, b'\\' | b'^' | b'_' | b'='));
+                            if formulaish && normalized.len() >= INLINE_MATH_MIN {
+                                emit_math_block(inner.trim().to_string(), lineno, blocks);
+                            }
+                            i = inner_start + end + 1;
+                            continue;
+                        }
+                    }
+                }
+                i += 1;
+            }
+            _ => i += 1,
+        }
+    }
+    if let Some(block) = display.as_mut() {
+        block.buf.push('\n');
+    }
+}
+
+/// TeX commands that never change a formula's meaning — sizing, spacing
+/// and style only. Compared as whole tokens (the leading `\` included).
+const MATH_NOOPS: &[&str] = &[
+    "\\left",
+    "\\right",
+    "\\middle",
+    "\\displaystyle",
+    "\\limits",
+    "\\nolimits",
+    "\\quad",
+    "\\qquad",
+    "\\bigl",
+    "\\bigr",
+    "\\Bigl",
+    "\\Bigr",
+    "\\biggl",
+    "\\biggr",
+    "\\Biggl",
+    "\\Biggr",
+    "\\,",
+    "\\;",
+    "\\:",
+    "\\!",
+    "\\ ",
+    "\\>",
+];
+
+/// Split TeX source into comparison tokens: `\command` (backslash + letters,
+/// or backslash + one char), then one char per token. Whitespace separates
+/// only — `\alpha x` and `\alphax` stay different commands.
+fn math_tokens(tex: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut chars = tex.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch.is_whitespace() {
+            continue;
+        }
+        if ch == '\\' {
+            let mut cmd = String::from('\\');
+            match chars.peek() {
+                Some(&next) if next.is_ascii_alphabetic() => {
+                    while let Some(&c) = chars.peek() {
+                        if !c.is_ascii_alphabetic() {
+                            break;
+                        }
+                        cmd.push(c);
+                        chars.next();
+                    }
+                }
+                Some(&next) => {
+                    cmd.push(next);
+                    chars.next();
+                }
+                None => {}
+            }
+            tokens.push(cmd);
+            continue;
+        }
+        tokens.push(ch.to_string());
+    }
+    tokens
+}
+
+/// `{x}` → `x` when the group wraps exactly one token — braces around a
+/// single atom are optional in TeX, so `x_{i}` ≡ `x_i`. Repeated to a
+/// fixpoint for `{{x}}`. A group of ≥2 tokens keeps its braces, which is
+/// correct: `\sqrt{xy}` ≠ `\sqrt xy` (the unbraced form takes only `x`).
+fn collapse_single_atom_braces(tokens: &mut Vec<String>) {
+    loop {
+        let mut changed = false;
+        let mut i = 0;
+        while i + 2 < tokens.len() {
+            if tokens[i] == "{" && tokens[i + 2] == "}" {
+                let inner = tokens.remove(i + 1);
+                tokens.remove(i + 1); // the closing brace, now at i+1
+                tokens[i] = inner;
+                changed = true;
+            } else {
+                i += 1;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+}
+
+/// A formula's canonical identity: tokenized, no-op commands dropped,
+/// single-atom braces collapsed, whitespace-free modulo the one-space
+/// token separator. `E = mc^{2}` ≡ `E=mc^2` ≡ `E\,=\,mc^2`.
+pub fn normalize_math(tex: &str) -> String {
+    let mut tokens = math_tokens(tex);
+    tokens.retain(|tok| !MATH_NOOPS.contains(&tok.as_str()));
+    collapse_single_atom_braces(&mut tokens);
+    tokens.join(" ")
+}
+
+/// The first source line of a block, trimmed — the card preview and the
+/// needle the line-target lookup re-finds in the file.
+pub fn first_source_line(source: &str) -> &str {
+    source.split('\n').next().unwrap_or("").trim()
+}
+
+/// A cross-note formula match: both sides share the same normalized math.
+/// `a`/`b` order is canonical (path, then line) for deterministic output;
+/// each side carries its own first source line — display text and the
+/// line-target needle for the jump into that note.
+#[derive(Debug, Clone)]
+pub struct FormulaRelation {
+    pub a_path: PathBuf,
+    pub a_line: u32,
+    pub a_snippet: String,
+    pub b_path: PathBuf,
+    pub b_line: u32,
+    pub b_snippet: String,
+}
+
+/// Every pair of notes sharing at least one normalized formula. Same-note
+/// duplicates are skipped — a relation is between two different notes.
+pub fn formula_relations(index: &AiIndex) -> Vec<FormulaRelation> {
+    let mut by_norm: HashMap<&str, Vec<(&PathBuf, &MathBlock)>> = HashMap::new();
+    for (path, entry) in &index.notes {
+        for block in &entry.math_blocks {
+            by_norm
+                .entry(block.normalized.as_str())
+                .or_default()
+                .push((path, block));
+        }
+    }
+
+    let mut relations = Vec::new();
+    for blocks in by_norm.values() {
+        for i in 0..blocks.len() {
+            for j in i + 1..blocks.len() {
+                let (a_path, a) = blocks[i];
+                let (b_path, b) = blocks[j];
+                if a_path == b_path {
+                    continue;
+                }
+                let ((a_path, a), (b_path, b)) = if (a_path, a.line) <= (b_path, b.line) {
+                    ((a_path, a), (b_path, b))
+                } else {
+                    ((b_path, b), (a_path, a))
+                };
+                relations.push(FormulaRelation {
+                    a_path: a_path.clone(),
+                    a_line: a.line,
+                    a_snippet: first_source_line(&a.source).to_string(),
+                    b_path: b_path.clone(),
+                    b_line: b.line,
+                    b_snippet: first_source_line(&b.source).to_string(),
+                });
+            }
+        }
+    }
+    relations.sort_by(|x, y| {
+        x.a_path
+            .cmp(&y.a_path)
+            .then(x.a_line.cmp(&y.a_line))
+            .then(x.b_path.cmp(&y.b_path))
+            .then(x.b_line.cmp(&y.b_line))
+    });
+    relations
+}
+
 // ---------- similarity ----------
 
 pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
@@ -544,6 +915,8 @@ struct SidecarNote {
     #[serde(default)]
     links: Vec<String>,
     #[serde(default)]
+    math_blocks: Vec<MathBlock>,
+    #[serde(default)]
     suggested_tags: Vec<String>,
 }
 
@@ -594,6 +967,7 @@ fn load_sidecar(path: &Path, root: &Path, cfg: &AiSettings) -> HashMap<PathBuf, 
                     None
                 },
                 links: note.links,
+                math_blocks: note.math_blocks,
                 suggested_tags: note.suggested_tags,
             },
         );
@@ -614,6 +988,7 @@ fn save_sidecar(path: &Path, root: &Path, cfg: &AiSettings, index: &AiIndex) {
                 hash: entry.hash,
                 embedding: entry.embedding.clone(),
                 links: entry.links.clone(),
+                math_blocks: entry.math_blocks.clone(),
                 suggested_tags: entry.suggested_tags.clone(),
             })
         })
@@ -648,6 +1023,9 @@ fn save_sidecar(path: &Path, root: &Path, cfg: &AiSettings, index: &AiIndex) {
 pub(crate) fn http_client() -> Result<reqwest::Client, String> {
     let _ = rustls::crypto::ring::default_provider().install_default();
     reqwest::Client::builder()
+        // Blackholed endpoints otherwise hang for the OS TCP timeout
+        // (~75 s+) — a dead host should fail fast and fallback-worthy.
+        .connect_timeout(Duration::from_secs(10))
         .build()
         .map_err(|e| e.to_string())
 }
@@ -847,10 +1225,11 @@ pub async fn chat_complete(
 
 const SUGGEST_SYSTEM_PROMPT: &str =
     "You suggest tags for a markdown note. Reply with a JSON object {\"tags\": [...]} only — \
-     up to 8 short lowercase tags drawn from the note's topic, hyphenated, no '#', no commentary.";
+     at most 3 short lowercase tags, the most specific ones describing the note's topic, \
+     hyphenated, no '#', no commentary.";
 
 /// Chat-model tag suggestions for one note's content (already capped by the
-/// caller). Returns a normalized, deduped, ≤8 list.
+/// caller). Returns a normalized, deduped, ≤3 list.
 pub async fn suggest_tags(
     client: &reqwest::Client,
     cfg: &AiSettings,
@@ -864,7 +1243,7 @@ pub async fn suggest_tags(
 
 /// Lenient tag extraction: find the first JSON object or array in the model
 /// output, read `{"tags": [...]}` or a bare `[...]`, then normalize
-/// (lowercase, spaces → `-`), dedupe, cap at 8. Returns an empty list on
+/// (lowercase, spaces → `-`), dedupe, cap at 3. Returns an empty list on
 /// garbage — the caller surfaces "no suggestions", not an error.
 pub fn parse_tags_response(text: &str) -> Vec<String> {
     let candidates = [
@@ -1218,6 +1597,9 @@ async fn process_batch(
         let mut links = resolve_links(&raw_targets, root, &file_set);
         let own = path.to_string_lossy();
         links.retain(|target| target != &*own);
+        // Formula-relation source — local and cheap, so it always refreshes
+        // with the file, even when embeddings are off or the endpoint is down.
+        let math_blocks = extract_math_blocks(&content);
 
         let previous = state.ai_index.read().notes.get(path).cloned();
         let needs_embed = !cfg.embed_endpoint.is_empty()
@@ -1261,6 +1643,7 @@ async fn process_batch(
                     hash,
                     embedding,
                     links,
+                    math_blocks,
                     suggested_tags: kept_tags,
                 },
             );
@@ -1426,6 +1809,7 @@ mod tests {
             hash: 0,
             embedding: Some(embedding),
             links: Vec::new(),
+            math_blocks: Vec::new(),
             suggested_tags: Vec::new(),
         };
         index.notes.insert(a.clone(), entry(vec![1.0, 0.0]));
@@ -1460,6 +1844,11 @@ mod tests {
                 hash: 42,
                 embedding: Some(vec![0.1, 0.2]),
                 links: vec!["/other.md".into()],
+                math_blocks: vec![MathBlock {
+                    normalized: "E = m c ^ 2".into(),
+                    line: 7,
+                    source: "E = mc^2".into(),
+                }],
                 suggested_tags: vec!["math".into()],
             },
         );
@@ -1477,6 +1866,8 @@ mod tests {
         assert_eq!(entry.hash, 42);
         assert_eq!(entry.embedding, Some(vec![0.1, 0.2]));
         assert_eq!(entry.links, vec!["/other.md"]);
+        assert_eq!(entry.math_blocks.len(), 1);
+        assert_eq!(entry.math_blocks[0].line, 7);
         assert_eq!(entry.suggested_tags, vec!["math"]);
 
         // Endpoint changed → vectors dropped, the rest kept.
@@ -1504,7 +1895,7 @@ mod tests {
         let many = parse_tags_response(
             "{\"tags\":[\"1\",\"2\",\"3\",\"4\",\"5\",\"6\",\"7\",\"8\",\"9\"]}",
         );
-        assert_eq!(many.len(), 8);
+        assert_eq!(many.len(), 3);
         assert!(parse_tags_response("no json at all").is_empty());
         assert!(parse_tags_response("{\"tags\": []}").is_empty());
     }
@@ -1517,5 +1908,102 @@ mod tests {
         assert!(!ChatError::Http(400).is_fallback_worthy());
         assert!(!ChatError::Http(401).is_fallback_worthy());
         assert!(!ChatError::Parse("bad json".into()).is_fallback_worthy());
+    }
+
+    #[test]
+    fn normalize_math_collapses_cosmetic_differences() {
+        assert_eq!(normalize_math("E = mc^2"), normalize_math("E = mc^{2}"));
+        assert_eq!(normalize_math("E = mc^2"), normalize_math("E\\,=\\,mc^2"));
+        assert_eq!(
+            normalize_math("\\int_0^1 x"),
+            normalize_math("\\int_{0}^{1} x")
+        );
+        assert_eq!(
+            normalize_math("\\left( a+b \\right)"),
+            normalize_math("(a+b)")
+        );
+        assert_eq!(normalize_math("x_{i}"), normalize_math("x_i"));
+        // Whitespace is a separator only — the command boundary is real.
+        assert_ne!(normalize_math("\\alpha x"), normalize_math("\\alphax"));
+        // `\sqrt xy` takes only `x`; `\sqrt{xy}` takes the group — different.
+        assert_ne!(normalize_math("\\sqrt{xy}"), normalize_math("\\sqrt xy"));
+    }
+
+    #[test]
+    fn extract_math_blocks_finds_lines_and_skips_noise() {
+        let content = "---\ntitle: x\n---\n\
+             # Note\n\n\
+             $$\nE = mc^{2}\n$$\n\n\
+             Inline $v = \\frac{d}{t}$ here.\n\n\
+             ```\n$$ inside fence $$\n```\n\n\
+             `$$ in code$$`\n\n\
+             \\[ a^2 + b^2 = c^2 \\]\n\n\
+             Cost $5 and $10, var $x$.\n";
+        let blocks = extract_math_blocks(content);
+        assert_eq!(blocks.len(), 3);
+        // `$$` opens on line 6 but the formula's first content line is 7.
+        assert_eq!(
+            (blocks[0].line, blocks[0].source.as_str()),
+            (7, "E = mc^{2}")
+        );
+        assert_eq!(blocks[0].normalized, normalize_math("E=mc^2"));
+        assert_eq!(
+            (blocks[1].line, blocks[1].source.as_str()),
+            (10, "v = \\frac{d}{t}")
+        );
+        assert_eq!(blocks[2].line, 18);
+    }
+
+    #[test]
+    fn formula_relations_pairs_across_notes_only() {
+        let note_a = PathBuf::from("/v/a.md");
+        let note_b = PathBuf::from("/v/b.md");
+        let note_c = PathBuf::from("/v/c.md");
+        let block = |normalized: &str, line: u32, source: &str| MathBlock {
+            normalized: normalized.into(),
+            line,
+            source: source.into(),
+        };
+        let shared = normalize_math("E=mc^2");
+
+        let mut index = AiIndex::default();
+        index.notes.insert(
+            note_a.clone(),
+            NoteEntry {
+                math_blocks: vec![block(&shared, 7, "E = mc^{2}")],
+                ..Default::default()
+            },
+        );
+        index.notes.insert(
+            note_b.clone(),
+            NoteEntry {
+                math_blocks: vec![block(&shared, 12, "E=mc^2")],
+                ..Default::default()
+            },
+        );
+        index.notes.insert(
+            note_c.clone(),
+            NoteEntry {
+                math_blocks: vec![
+                    block("x ^ 2", 3, "x^2"),
+                    // Two occurrences in one note — a same-note pair is not
+                    // a relation, but both match a's and b's copies.
+                    block(&shared, 30, "E = mc^2"),
+                    block(&shared, 40, "E = mc^2"),
+                ],
+                ..Default::default()
+            },
+        );
+
+        let relations = formula_relations(&index);
+        // a–b once; a–c and b–c twice each (c's two occurrences).
+        assert_eq!(relations.len(), 5);
+        let ab = &relations[0];
+        assert_eq!((ab.a_path.as_path(), ab.a_line), (note_a.as_path(), 7));
+        assert_eq!((ab.b_path.as_path(), ab.b_line), (note_b.as_path(), 12));
+        // Each side keeps its own source line — the needle for that file.
+        assert_eq!(ab.a_snippet, "E = mc^{2}");
+        assert_eq!(ab.b_snippet, "E=mc^2");
+        assert!(relations.iter().all(|r| r.a_path != r.b_path));
     }
 }

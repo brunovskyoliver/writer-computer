@@ -41,6 +41,8 @@ pub struct AiGraphNode {
 pub enum AiEdgeKind {
     Link,
     Similar,
+    /// Both notes contain the same normalized formula (line-relations-spec).
+    Formula,
 }
 
 #[derive(Debug, Serialize)]
@@ -59,9 +61,25 @@ pub struct AiGraph {
 }
 
 #[derive(Debug, Serialize)]
-pub struct RelatedNote {
+#[serde(rename_all = "lowercase")]
+pub enum RelatedKind {
+    /// Shares a normalized formula — carries `line` + `snippet`.
+    Formula,
+    /// Cosine neighbour — carries `score`.
+    Similar,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RelatedItem {
+    pub kind: RelatedKind,
     pub path: String,
-    pub score: f32,
+    /// Line of the shared formula in `path` (formula kind only).
+    pub line: Option<u32>,
+    /// Cosine score (similar kind only).
+    pub score: Option<f32>,
+    /// First source line of the shared formula (formula kind only) — the
+    /// card preview and the needle the line-target lookup re-finds.
+    pub snippet: Option<String>,
 }
 
 #[tauri::command]
@@ -166,6 +184,30 @@ pub fn ai_graph(webview: tauri::Webview, app: tauri::AppHandle) -> Result<AiGrap
         });
     }
 
+    // Formula edges: one per note pair sharing ≥1 normalized formula,
+    // skipping pairs a wikilink already connects (same rule as similar).
+    let mut formula_pairs: HashSet<(String, String)> = HashSet::new();
+    for relation in ai::formula_relations(&index) {
+        let a = relation.a_path.to_string_lossy().into_owned();
+        let b = relation.b_path.to_string_lossy().into_owned();
+        if !node_paths.contains(a.as_str()) || !node_paths.contains(b.as_str()) {
+            continue;
+        }
+        if link_pairs.contains(&(a.clone(), b.clone()))
+            || link_pairs.contains(&(b.clone(), a.clone()))
+        {
+            continue;
+        }
+        if formula_pairs.insert((a.clone(), b.clone())) {
+            edges.push(AiGraphEdge {
+                source: a,
+                target: b,
+                kind: AiEdgeKind::Formula,
+                score: None,
+            });
+        }
+    }
+
     Ok(AiGraph { nodes, edges })
 }
 
@@ -217,25 +259,50 @@ pub fn ai_related(
     path: String,
     webview: tauri::Webview,
     app: tauri::AppHandle,
-) -> Result<Vec<RelatedNote>, AppError> {
+) -> Result<Vec<RelatedItem>, AppError> {
     let state = app.state::<AppState>().get_or_create(webview.label());
     if ai::settings(&state).is_none() {
         return Ok(Vec::new());
     }
     let index = state.ai_index.read();
-    let related = ai::related(
-        &index,
-        Path::new(&path),
-        ai::RELATED_FLOOR,
-        ai::RELATED_TOP_K,
-    );
-    Ok(related
-        .into_iter()
-        .map(|(path, score)| RelatedNote {
+    let note_path = Path::new(&path);
+
+    // Shared-formula relations first — the strongest evidence. Each item
+    // points at the formula's line in the *other* note, and its snippet is
+    // that note's own first source line so the jump can re-find it exactly.
+    let mut items: Vec<RelatedItem> = Vec::new();
+    for relation in ai::formula_relations(&index) {
+        let other = if relation.a_path == note_path {
+            Some((&relation.b_path, relation.b_line, &relation.b_snippet))
+        } else if relation.b_path == note_path {
+            Some((&relation.a_path, relation.a_line, &relation.a_snippet))
+        } else {
+            None
+        };
+        if let Some((path, line, snippet)) = other {
+            items.push(RelatedItem {
+                kind: RelatedKind::Formula,
+                path: path.to_string_lossy().into_owned(),
+                line: Some(line),
+                score: None,
+                snippet: Some(snippet.clone()),
+            });
+            if items.len() >= ai::FORMULA_RELATED_CAP {
+                break;
+            }
+        }
+    }
+
+    for (path, score) in ai::related(&index, note_path, ai::RELATED_FLOOR, ai::RELATED_TOP_K) {
+        items.push(RelatedItem {
+            kind: RelatedKind::Similar,
             path: path.to_string_lossy().into_owned(),
-            score,
-        })
-        .collect())
+            line: None,
+            score: Some(score),
+            snippet: None,
+        });
+    }
+    Ok(items)
 }
 
 #[tauri::command]

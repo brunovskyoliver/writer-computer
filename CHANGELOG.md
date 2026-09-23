@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-09-23
+
+- Sharper AI suggestions, and relations that know where they point. Suggest Tags now asks the model for at most three of the most specific tags, and the related-notes list leads with shared formulas: when another note contains the same formula — matched by meaning, so `E = mc^{2}` and `E=mc^2` count as identical — the card shows that note with its line number and a preview, and clicking it opens the note landed on exactly that line. The graph gains a third edge kind (solid accent) for note pairs sharing a formula, while similarity edges got sparser (top-2 per note above a higher bar) so the map shows the strongest relations only. Formula matching is deterministic and local — it works even while the AI endpoints are unreachable.
+
 ## 2026-09-22
 
 - AI note relations and a graph view, off by default. Enable it under Settings → AI by pointing Writer at an OpenAI-compatible chat endpoint and an embeddings endpoint — a background worker then indexes your notes' `[[wikilinks]]` and a text projection of each note (LaTeX stripped, frontmatter and code excluded), storing embeddings in an app-data sidecar rather than the vault. "Open Graph" in the command palette shows every note with solid link edges and dashed similarity edges; clicking a node opens it. "AI: Suggest Tags for Current Note" asks the chat model for up to eight tags and shows them as a card — a tag is written to the note's `tags:` frontmatter only when you click it or "Add all". The card also lists related notes by embedding similarity, Settings shows whether each endpoint is reachable plus the indexed/pending counts, and a fallback chat endpoint takes over when the primary is down. Note content leaves the machine only while the feature is enabled, and only to the endpoints you configured.

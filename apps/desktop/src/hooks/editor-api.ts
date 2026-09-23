@@ -1,6 +1,6 @@
 import type { EditorView } from "@codemirror/view";
 import * as editorViews from "@/lib/editor-views";
-import { applyLineTarget } from "@/components/editor-area/line-target";
+import { applyLineTarget, type LineTarget } from "@/components/editor-area/line-target";
 import { findOuterScroller } from "@/components/editor-area/editor-scroll";
 import { setPendingLineTarget } from "@/lib/pending-anchor";
 import { encodeAnchorFragment } from "@/lib/pdf-anchor";
@@ -102,8 +102,18 @@ export function openSearchMatch(match: SearchMatch, needle: string) {
         }
       : null;
 
+  openFileAtLineTarget(match.path, lineTarget);
+}
+
+/**
+ * Open `path` and land on `lineTarget` — the shared open-then-locate path
+ * for content-search matches and AI formula relations (line-relations-spec).
+ * A live view is landed directly; a still-loading tab gets the target
+ * queued via `setPendingLineTarget`.
+ */
+export function openFileAtLineTarget(path: string, lineTarget: LineTarget | null) {
   void openFile(
-    match.path,
+    path,
     lineTarget ? { pendingTarget: { kind: "line", ...lineTarget } } : undefined,
   ).then((tab) => {
     if (!tab || !lineTarget) return;
@@ -112,7 +122,7 @@ export function openSearchMatch(match: SearchMatch, needle: string) {
       // A live view is landed directly: a queued target on an already
       // mounted editor sits unread and replays on a later visit. A wrong
       // path means the tab moved on — the target is stale, so drop it.
-      if (registration.path !== match.path) return;
+      if (registration.path !== path) return;
       const scrollContainer = findOuterScroller(registration.view.dom);
       if (scrollContainer) applyLineTarget(registration.view, scrollContainer, lineTarget);
       return;
@@ -120,7 +130,7 @@ export function openSearchMatch(match: SearchMatch, needle: string) {
     // No live view yet — the tab is still loading. The pending write
     // happened inside the publish for a tab this open created; for a
     // dedupe-found tab it lands now, before its mount can run.
-    setPendingLineTarget(tab.id, match.path, lineTarget);
+    setPendingLineTarget(tab.id, path, lineTarget);
   });
 }
 

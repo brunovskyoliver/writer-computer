@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import * as editorApi from "@/hooks/editor-api";
-import { aiRelated, aiSuggestTags, applyTags, type RelatedNote } from "@/lib/ai";
+import { aiRelated, aiSuggestTags, applyTags, type RelatedItem } from "@/lib/ai";
 import { serializeFile } from "@/lib/frontmatter";
 import { readFile } from "@/lib/tauri";
 
@@ -8,7 +8,7 @@ interface AiState {
   /** Path the suggestion panel is open for; `null` = hidden. */
   panelFor: string | null;
   suggestions: string[];
-  related: RelatedNote[];
+  related: RelatedItem[];
   loading: boolean;
   error: string | null;
   /** Bumped by the `ai:graph-changed` listener; graph panes refetch on it. */
@@ -46,7 +46,7 @@ export const useAiStore = create<AiState>((set, get) => ({
         : (await readFile(path)).content;
       const [suggestions, related] = await Promise.all([
         aiSuggestTags(path, content),
-        aiRelated(path).catch(() => [] as RelatedNote[]),
+        aiRelated(path).catch(() => [] as RelatedItem[]),
       ]);
       // The panel may have moved to another file while the request flew.
       if (get().panelFor !== path) return;

@@ -14,8 +14,9 @@ function cssVar(name: string, fallback: string): string {
 
 /**
  * The note-relation graph (SPECs/ai-note-graph): every indexed markdown note
- * is a node; solid edges are `[[wikilinks]]`, dashed accent edges are
- * embedding similarity. Clicking a node opens the note in the editor.
+ * is a node; solid subtle edges are `[[wikilinks]]`, dashed accent edges are
+ * embedding similarity, and solid accent edges are shared formulas
+ * (line-relations-spec). Clicking a node opens the note in the editor.
  *
  * The pane renders while `ai.enabled` is off too — a hint instead of an
  * error, since the tab can outlive the toggle (open graph → disable AI).
@@ -74,10 +75,13 @@ export function GraphPane() {
           ctx.fillText(datum.name, node.x ?? 0, (node.y ?? 0) + radius + fontSize * 0.4);
         }}
         linkColor={(link) =>
-          (link as GraphLinkDatum).kind === "similar" ? colors.similar : colors.link
+          (link as GraphLinkDatum).kind === "link" ? colors.link : colors.similar
         }
         linkLineDash={(link) => ((link as GraphLinkDatum).kind === "similar" ? [4, 3] : null)}
-        linkWidth={(link) => ((link as GraphLinkDatum).kind === "similar" ? 1 : 1.5)}
+        linkWidth={(link) => {
+          const kind = (link as GraphLinkDatum).kind;
+          return kind === "formula" ? 2 : kind === "link" ? 1.5 : 1;
+        }}
         onNodeClick={(node) => {
           void editorApi.openFile((node as GraphNodeDatum).path);
         }}

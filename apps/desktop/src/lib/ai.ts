@@ -23,7 +23,7 @@ export interface AiGraphNode {
 export interface AiGraphEdge {
   source: string;
   target: string;
-  kind: "link" | "similar";
+  kind: "link" | "similar" | "formula";
   score: number | null;
 }
 
@@ -32,9 +32,16 @@ export interface AiGraph {
   edges: AiGraphEdge[];
 }
 
-export interface RelatedNote {
+export interface RelatedItem {
+  kind: "formula" | "similar";
   path: string;
-  score: number;
+  /** Line of the shared formula in `path` (formula kind only). */
+  line: number | null;
+  /** Cosine score (similar kind only). */
+  score: number | null;
+  /** First source line of the shared formula (formula kind only) —
+   *  the card preview and the needle the line-target lookup re-finds. */
+  snippet: string | null;
 }
 
 export function aiStatus(): Promise<AiStatus> {
@@ -51,7 +58,7 @@ export function aiSuggestTags(path: string, content: string): Promise<string[]> 
   return invoke("ai_suggest_tags", { path, content });
 }
 
-export function aiRelated(path: string): Promise<RelatedNote[]> {
+export function aiRelated(path: string): Promise<RelatedItem[]> {
   return invoke("ai_related", { path });
 }
 

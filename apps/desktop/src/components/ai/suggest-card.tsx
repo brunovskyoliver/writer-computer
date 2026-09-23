@@ -104,19 +104,40 @@ export function SuggestCard() {
               </h3>
               <ul className="mt-1.5 grid gap-0.5">
                 {related.map((note) => (
-                  <li key={note.path}>
+                  <li key={`${note.path}:${note.line ?? "sim"}`}>
                     <button
                       type="button"
+                      title={
+                        note.kind === "formula"
+                          ? `Shared formula — open at line ${note.line}`
+                          : "Similar note"
+                      }
                       onClick={() => {
-                        void editorApi.openFile(note.path);
+                        if (note.kind === "formula" && note.line !== null) {
+                          editorApi.openFileAtLineTarget(note.path, {
+                            line: note.line,
+                            offset: 0,
+                            length: 0,
+                            needle: note.snippet ?? "",
+                          });
+                        } else {
+                          void editorApi.openFile(note.path);
+                        }
                         closePanel();
                       }}
-                      className="flex w-full items-baseline justify-between gap-2 rounded px-1 py-0.5 text-left text-[12px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--item-hover-bg)]"
+                      className="w-full rounded px-1 py-0.5 text-left text-[12px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--item-hover-bg)]"
                     >
-                      <span className="truncate">{getFileName(note.path)}</span>
-                      <span className="shrink-0 text-[11px] tabular-nums text-[var(--text-icon-muted)]">
-                        {note.score.toFixed(2)}
+                      <span className="flex items-baseline justify-between gap-2">
+                        <span className="truncate">{getFileName(note.path)}</span>
+                        <span className="shrink-0 text-[11px] tabular-nums text-[var(--text-icon-muted)]">
+                          {note.kind === "formula" ? `L${note.line}` : (note.score ?? 0).toFixed(2)}
+                        </span>
                       </span>
+                      {note.kind === "formula" && note.snippet && (
+                        <span className="block truncate font-mono text-[11px] text-[var(--text-icon-muted)]">
+                          {note.snippet}
+                        </span>
+                      )}
                     </button>
                   </li>
                 ))}

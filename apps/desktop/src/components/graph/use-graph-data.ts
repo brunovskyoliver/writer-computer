@@ -12,7 +12,7 @@ export interface GraphNodeDatum {
 export interface GraphLinkDatum {
   source: string;
   target: string;
-  kind: "link" | "similar";
+  kind: "link" | "similar" | "formula";
   score: number | null;
 }
 
