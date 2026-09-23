@@ -15,7 +15,7 @@ import {
   setTabPending,
   setTabRecording,
   toVimMode,
-  useVimStore,
+  vimDialogHost,
 } from "./vim-store";
 
 /**
@@ -214,7 +214,7 @@ class VimModePlugin implements PluginValue {
       return;
     }
     if (isRecordingDialog(dialog)) return;
-    const host = useVimStore.getState().dialogHost;
+    const host = vimDialogHost(this.getTabId());
     if (!host) {
       console.warn("[vim-mode] no dialog host mounted; the Vim prompt has nowhere to render");
       return;

@@ -4,10 +4,13 @@ import { SEPARATOR_SIZE, minimumSize, type LayoutNode, type Split } from "@/lib/
 import {
   useIsPaneFocused,
   useLayoutRoot,
+  usePaneActiveTabId,
   useSetFocusedPane,
   useSetSplitRatio,
 } from "@/hooks/use-editor-layout";
 import { useSidebar } from "@/hooks/use-sidebar";
+import { useEditorStore } from "@/stores/editor-store";
+import { pageKindView } from "./page-kinds/views";
 import { EditorTabs } from "./editor-tabs";
 import { registerPaneBody, usePaneRect } from "./pane-bounds";
 
@@ -41,6 +44,10 @@ function PaneSlot({ paneId }: { paneId: string }) {
   const setFocusedPane = useSetFocusedPane();
   const { isSidebarCollapsed } = useSidebar();
   const rect = usePaneRect(paneId);
+  const activeTabId = usePaneActiveTabId(paneId);
+  const activeTab = useEditorStore((s) =>
+    activeTabId === null ? null : (s.tabs.find((tab) => tab.id === activeTabId) ?? null),
+  );
   const bodyRef = useCallback(
     (element: HTMLDivElement | null) => registerPaneBody(paneId, element),
     [paneId],
@@ -65,6 +72,12 @@ function PaneSlot({ paneId }: { paneId: string }) {
       <div data-pane-strip className="absolute inset-x-0 top-0 z-40">
         <EditorTabs paneId={paneId} clearTrafficLights={clearTrafficLights} />
       </div>
+      {/* Footer chrome is per pane, like the strip: it describes this pane's
+          active document and floats over the body's bottom edge. Kinds with
+          no footer (PDF, drawing, graph) leave the edge clear. */}
+      {activeTab
+        ? pageKindView(activeTab.location).renderFooter?.(activeTab.location, activeTab.id)
+        : null}
     </div>
   );
 }

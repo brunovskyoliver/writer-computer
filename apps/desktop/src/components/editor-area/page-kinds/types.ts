@@ -98,8 +98,10 @@ export interface PageKindView<L extends { kind: string } = { kind: string }> {
     isVisible: boolean;
     isFocused: boolean;
   }>;
-  /** Optional chrome rendered below the active tab body. */
-  renderFooter?: (location: L) => ReactNode;
+  /** Optional chrome rendered below the pane's active tab body. `tabId` keys
+   *  per-tab chrome state — the Vim mode mirror and dialog host are per tab,
+   *  not per document, so the same file in two panes keeps two footers. */
+  renderFooter?: (location: L, tabId: string) => ReactNode;
 }
 
 /**

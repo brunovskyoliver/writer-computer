@@ -4,7 +4,7 @@ import { useShallow } from "zustand/react/shallow";
 /**
  * Per-tab Vim state mirrored out of `@replit/codemirror-vim` so the footer can
  * render the mode indicator in its own typography. Written only by
- * `vim-mode.ts` (`byTab`) and `document-footer.tsx` (`dialogHost`); everything
+ * `vim-mode.ts` (`byTab`) and `document-footer.tsx` (`dialogHosts`); everything
  * else reads.
  */
 
@@ -20,8 +20,11 @@ export interface VimTabState {
 
 export interface VimStoreState {
   byTab: Map<string, VimTabState>;
-  /** The footer element library prompts and messages are mounted into. */
-  dialogHost: HTMLElement | null;
+  /** The footer element each tab's library prompts and messages are mounted
+   *  into, keyed by tab id so split panes each get their own. Mutated in
+   *  place — it is an imperative registry read via `vimDialogHost`, never a
+   *  selector, so replacing it would buy nothing. */
+  dialogHosts: Map<string, HTMLElement>;
 }
 
 export interface VimFooterModel {
@@ -54,7 +57,7 @@ const INITIAL_TAB_STATE: VimTabState = { mode: "normal", pending: "", recording:
 
 export const useVimStore = create<VimStoreState>(() => ({
   byTab: new Map(),
-  dialogHost: null,
+  dialogHosts: new Map(),
 }));
 
 // Each write replaces the Map so selectors on `byTab` see a new reference.
@@ -97,8 +100,16 @@ export function deleteTab(tabId: string) {
   });
 }
 
-export function registerVimDialogHost(el: HTMLElement | null) {
-  useVimStore.setState({ dialogHost: el });
+export function registerVimDialogHost(tabId: string, el: HTMLElement | null) {
+  const hosts = useVimStore.getState().dialogHosts;
+  if (el) hosts.set(tabId, el);
+  else hosts.delete(tabId);
+}
+
+/** The dialog host `tabId`'s footer registered, or null when its footer is
+ *  unmounted (Vim off there, or the tab renders no footer). */
+export function vimDialogHost(tabId: string): HTMLElement | null {
+  return useVimStore.getState().dialogHosts.get(tabId) ?? null;
 }
 
 export function selectVimFooterModel(

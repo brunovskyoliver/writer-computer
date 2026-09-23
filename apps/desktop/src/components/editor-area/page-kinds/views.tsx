@@ -48,7 +48,7 @@ const views = {
   } satisfies PageKindView<DrawingLocation>,
   file: {
     Component: FileTabBody,
-    renderFooter: (l) => <DocumentFooter filePath={l.path} />,
+    renderFooter: (l, tabId) => <DocumentFooter filePath={l.path} tabId={tabId} />,
   } satisfies PageKindView<FileLocation>,
   // No footer: the graph is workspace-wide, not a document.
   graph: {

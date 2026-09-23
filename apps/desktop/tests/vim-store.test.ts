@@ -9,6 +9,7 @@ import {
   setTabRecording,
   toVimMode,
   useVimStore,
+  vimDialogHost,
 } from "../src/components/editor-area/vim-store";
 
 describe("toVimMode", () => {
@@ -24,7 +25,7 @@ describe("toVimMode", () => {
 
 describe("vim store", () => {
   beforeEach(() => {
-    useVimStore.setState({ byTab: new Map(), dialogHost: null });
+    useVimStore.setState({ byTab: new Map(), dialogHosts: new Map() });
   });
 
   test("createTab starts in Normal with nothing pending or recording", () => {
@@ -63,12 +64,16 @@ describe("vim store", () => {
     expect(useVimStore.getState().byTab.has("t1")).toBe(false);
   });
 
-  test("registerVimDialogHost stores the element", () => {
+  test("registerVimDialogHost stores the element under its tab", () => {
     const el = {} as HTMLElement;
-    registerVimDialogHost(el);
-    expect(useVimStore.getState().dialogHost).toBe(el);
-    registerVimDialogHost(null);
-    expect(useVimStore.getState().dialogHost).toBeNull();
+    const other = {} as HTMLElement;
+    registerVimDialogHost("t1", el);
+    registerVimDialogHost("t2", other);
+    expect(vimDialogHost("t1")).toBe(el);
+    expect(vimDialogHost("t2")).toBe(other);
+    registerVimDialogHost("t1", null);
+    expect(vimDialogHost("t1")).toBeNull();
+    expect(vimDialogHost("t2")).toBe(other);
   });
 
   test("footer model is null without an entry and labelled otherwise", () => {

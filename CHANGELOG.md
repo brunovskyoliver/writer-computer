@@ -2,6 +2,8 @@
 
 ## 2026-09-23
 
+- Fix word, character, and paragraph counts painting over the wrong pane. The statistics used to render once for whichever pane had focus, stretched across the full width of a split view — so a note's counts landed on top of the neighbouring PDF and vanished entirely when the PDF pane took focus. Each pane now carries the counts of the document it is actually showing: the note keeps its statistics beside the PDF, the PDF pane shows none, and Vim's `:`/`/` prompt lands in the pane it was opened from.
+
 - Sharper AI suggestions, and relations that know where they point. Suggest Tags now asks the model for at most three of the most specific tags, and the related-notes list leads with shared formulas: when another note contains the same formula — matched by meaning, so `E = mc^{2}` and `E=mc^2` count as identical — the card shows that note with its line number and a preview, and clicking it opens the note landed on exactly that line. The graph gains a third edge kind (solid accent) for note pairs sharing a formula, while similarity edges got sparser (top-2 per note above a higher bar) so the map shows the strongest relations only. Formula matching is deterministic and local — it works even while the AI endpoints are unreachable.
 
 ## 2026-09-22

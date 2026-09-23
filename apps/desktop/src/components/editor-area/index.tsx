@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { useActiveTab, useOpenTabs } from "@/hooks/use-tabs";
+import { useOpenTabs } from "@/hooks/use-tabs";
 import {
   usePane,
   useIsTabFocused,
@@ -79,7 +79,6 @@ function TabHost({ tab }: { tab: Tab }) {
 }
 
 function EditorArea() {
-  const activeTab = useActiveTab();
   const tabs = useOpenTabs();
   const minimum = useLayoutMinimumSize();
 
@@ -107,7 +106,6 @@ function EditorArea() {
           <DropPreview />
         </div>
       </div>
-      {activeTab ? pageKindView(activeTab.location).renderFooter?.(activeTab.location) : null}
       <EditorSearchOverlay />
       <EditorNoticeBanner />
     </div>

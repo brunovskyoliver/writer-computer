@@ -1,5 +1,5 @@
 import { useCallback, type MouseEvent } from "react";
-import { useActiveTabId, useFileStats } from "@/hooks/use-tabs";
+import { useFileStats } from "@/hooks/use-tabs";
 import { useBooleanSetting, useSetSetting } from "@/hooks/use-settings";
 import { useIsCompactFileMode } from "@/hooks/use-workspace";
 import {
@@ -20,9 +20,14 @@ function FooterMetric({ label, value }: { label: string; value: number }) {
 
 /** Mode label plus the host the Vim library's `:` / `/` prompts and messages
  *  are moved into (see `vim-mode.ts`). The host stays mounted whenever Vim is
- *  on for the active tab, so a prompt always has somewhere to land. */
-function VimStatus({ model }: { model: VimFooterModel }) {
-  const hostRef = useCallback((el: HTMLDivElement | null) => registerVimDialogHost(el), []);
+ *  on for the tab, and it is registered under that tab's id — with split
+ *  panes each visible footer has its own host, so a prompt always lands in
+ *  the pane it was opened from. */
+function VimStatus({ model, tabId }: { model: VimFooterModel; tabId: string }) {
+  const hostRef = useCallback(
+    (el: HTMLDivElement | null) => registerVimDialogHost(tabId, el),
+    [tabId],
+  );
   return (
     <>
       <span data-vim-mode={model.label} className="shrink-0 whitespace-pre">
@@ -35,11 +40,11 @@ function VimStatus({ model }: { model: VimFooterModel }) {
   );
 }
 
-export function DocumentFooter({ filePath }: { filePath: string }) {
+export function DocumentFooter({ filePath, tabId }: { filePath: string; tabId: string }) {
   const stats = useFileStats(filePath);
   const setSetting = useSetSetting();
   const isCompact = useIsCompactFileMode();
-  const vim = useVimFooterModel(useActiveTabId());
+  const vim = useVimFooterModel(tabId);
   const visibility: Record<FooterMetricSettingKey, boolean> = {
     "statusbar.show-words": useBooleanSetting("statusbar.show-words"),
     "statusbar.show-characters": useBooleanSetting("statusbar.show-characters"),
@@ -70,7 +75,7 @@ export function DocumentFooter({ filePath }: { filePath: string }) {
       onContextMenu={handleContextMenu}
       className="flex absolute bottom-0 w-full z-10 h-11 shrink-0 items-center justify-end gap-5 px-6 text-[13px] leading-[1.15] text-[var(--text-muted)] md:px-8"
     >
-      {vim ? <VimStatus model={vim} /> : null}
+      {vim ? <VimStatus model={vim} tabId={tabId} /> : null}
       {visibleMetrics.map((metric) => (
         <FooterMetric
           key={metric.settingKey}
