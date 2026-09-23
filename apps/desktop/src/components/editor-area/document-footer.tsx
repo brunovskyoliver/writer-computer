@@ -76,7 +76,9 @@ export function DocumentFooter({ filePath, tabId }: { filePath: string; tabId: s
       // z-40 like the pane strip: the scroll container's bottom ProgressiveBlur
       // is z-10 inside the later-painted body subtree, and a backdrop filter
       // samples whatever composited below it — a lower footer renders blurred.
-      className="flex absolute bottom-0 w-full z-40 h-11 shrink-0 items-center justify-end gap-5 px-6 text-[13px] leading-[1.15] text-[var(--text-muted)] md:px-8"
+      // The opaque base background hides the body's scrollbar strip, which
+      // otherwise ghosts through the floating chrome.
+      className="flex absolute bottom-0 w-full z-40 h-11 shrink-0 items-center justify-end gap-5 bg-[var(--surface-primary)] px-6 text-[13px] leading-[1.15] text-[var(--text-muted)] md:px-8"
     >
       {vim ? <VimStatus model={vim} tabId={tabId} /> : null}
       {visibleMetrics.map((metric) => (

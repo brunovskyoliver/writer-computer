@@ -103,6 +103,18 @@ describe("per-pane document footer", function () {
                 return top instanceof Element && top.closest("[data-document-footer]") !== null;
               })()
             : null,
+          // The strip must be opaque: it floats over the body's bottom edge,
+          // and a translucent background lets the scroll container's
+          // scrollbar zone ghost through.
+          footerOpaque: footer
+            ? (() => {
+                const channels = getComputedStyle(footer)
+                  .backgroundColor.match(/rgba?\(([^)]+)\)/)?.[1]
+                  .split(",")
+                  .map((v) => parseFloat(v.trim()));
+                return channels ? channels.length === 3 || channels[3] === 1 : null;
+              })()
+            : null,
         };
       });
     });
@@ -202,6 +214,7 @@ describe("per-pane document footer", function () {
     ok(solo.footerText, "setup: the single markdown pane should have a footer");
     ok(solo.footerInside, "setup: the footer should sit inside its own pane");
     ok(solo.footerUncovered, "setup: the scroll fade should not paint over the footer");
+    ok(solo.footerOpaque, "setup: the footer strip should mask what floats beneath it");
 
     await clickWikiLink();
     await browser.waitUntil(async () => (await readPanes()).length === 2, {
@@ -262,6 +275,7 @@ describe("per-pane document footer", function () {
     );
     ok(left.footerInside, "the footer overflows its pane into the PDF side");
     ok(left.footerUncovered, "the scroll fade paints over the markdown pane's footer");
+    ok(left.footerOpaque, "the footer strip lets the body's scrollbar ghost through");
     strictEqual(right.footerText, null, "the PDF pane shows document statistics it does not own");
 
     // The PDF pane takes focus when the split is created. Clicking it again
@@ -286,6 +300,7 @@ describe("per-pane document footer", function () {
     const [left, right] = leftFirst(await readPanes());
     ok(left.footerInside && right.footerInside, "a footer escaped its pane bounds");
     ok(left.footerUncovered && right.footerUncovered, "the scroll fade covers a footer");
+    ok(left.footerOpaque && right.footerOpaque, "a footer strip ghosts what's beneath it");
     strictEqual(left.footerText, leftText, "the first pane's counts changed under it");
     ok(
       right.footerText && right.footerText !== leftText,
