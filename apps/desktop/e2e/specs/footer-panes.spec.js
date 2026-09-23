@@ -89,6 +89,20 @@ describe("per-pane document footer", function () {
           footerInside: fr
             ? fr.x >= rect.x - 1 && fr.right <= rect.right + 1 && fr.bottom <= rect.bottom + 1
             : null,
+          // Paint order at the footer's own coordinates: the topmost
+          // element must belong to the footer itself. Editor content (and
+          // the scroll container's bottom ProgressiveBlur, a
+          // pointer-events-none backdrop-filter that hit-testing skips)
+          // painting over it is what renders the counts blurred.
+          footerUncovered: fr
+            ? (() => {
+                const top = document.elementsFromPoint(
+                  Math.round(fr.x + fr.width / 2),
+                  Math.round(fr.y + fr.height / 2),
+                )[0];
+                return top instanceof Element && top.closest("[data-document-footer]") !== null;
+              })()
+            : null,
         };
       });
     });
@@ -187,6 +201,7 @@ describe("per-pane document footer", function () {
     const solo = (await readPanes())[0];
     ok(solo.footerText, "setup: the single markdown pane should have a footer");
     ok(solo.footerInside, "setup: the footer should sit inside its own pane");
+    ok(solo.footerUncovered, "setup: the scroll fade should not paint over the footer");
 
     await clickWikiLink();
     await browser.waitUntil(async () => (await readPanes()).length === 2, {
@@ -246,6 +261,7 @@ describe("per-pane document footer", function () {
       "the left pane's counts should still describe its own document",
     );
     ok(left.footerInside, "the footer overflows its pane into the PDF side");
+    ok(left.footerUncovered, "the scroll fade paints over the markdown pane's footer");
     strictEqual(right.footerText, null, "the PDF pane shows document statistics it does not own");
 
     // The PDF pane takes focus when the split is created. Clicking it again
@@ -269,6 +285,7 @@ describe("per-pane document footer", function () {
 
     const [left, right] = leftFirst(await readPanes());
     ok(left.footerInside && right.footerInside, "a footer escaped its pane bounds");
+    ok(left.footerUncovered && right.footerUncovered, "the scroll fade covers a footer");
     strictEqual(left.footerText, leftText, "the first pane's counts changed under it");
     ok(
       right.footerText && right.footerText !== leftText,
