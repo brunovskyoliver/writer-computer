@@ -204,6 +204,12 @@ const textCache = new Map<string, PdfTextEntry>();
  *  turn comes. */
 const extractionChains = new Map<string, Promise<void>>();
 
+/** Drop every cached extraction — workspace reset/close, where the keyed
+ *  absolute paths stop meaning anything. */
+export function clearPdfTextCache(): void {
+  textCache.clear();
+}
+
 function cachedTextEntry(path: string, modifiedAt: number): PdfTextEntry {
   const existing = textCache.get(path);
   if (existing && existing.modifiedAt === modifiedAt) {

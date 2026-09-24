@@ -18,7 +18,7 @@ import {
 } from "@/lib/frontmatter";
 import { getDocumentStats, type DocumentStats } from "@/lib/document-stats";
 import { isDrawingPath } from "@/lib/drawings";
-import { isPdfPath } from "@/lib/pdf";
+import { clearPdfTextCache, isPdfPath } from "@/lib/pdf";
 import { cancelSave, scheduleSave, registerSaveStore } from "@/lib/save";
 import {
   activateTab as activateTabInLayout,
@@ -39,6 +39,13 @@ import {
   type Layout,
 } from "@/lib/editor-layout";
 import { locationBehavior, type Location } from "@/components/editor-area/page-kinds";
+import {
+  forgetKeepAliveTab,
+  lastVisibleRank,
+  MAX_HIDDEN_VIEWS,
+  noteVisibleTab,
+  resetKeepAlive,
+} from "@/lib/keep-alive";
 import { setPendingTarget, type PendingTarget } from "@/lib/pending-anchor";
 import { requestPdfAnchor } from "./pdf-anchor-store";
 
@@ -346,10 +353,10 @@ function cloneTab(tab: Tab): Tab {
 // an unbounded preload list.
 const NAV_HISTORY_LIMIT = 50;
 
-/** How many entries per history direction `restoreSession` preloads per
- *  tab — the last two hops back and the first two forward stay instant;
- *  anything deeper lazy-loads on navigation. */
-const RESTORE_HISTORY_WARM = 2;
+/** The hot history window: restore preloads this many entries per tab and
+ *  pruning keeps files referenced by this window loaded. Deeper history is
+ *  cold — `ensureFileLoaded` re-reads it when navigation reaches it. */
+const WARM_HISTORY_DEPTH = 2;
 
 function pushHistory(stack: Location[], entry: Location): Location[] {
   const next = [...stack, entry];
@@ -416,12 +423,63 @@ function publish(
     return tab ? [tab] : [];
   });
   const activeTabId = focusedTabId(normalized);
+  // Every publish restamps the panes' visible tabs — the stamp order is the
+  // recency order the hidden-view budget evicts by.
+  for (const pane of panes(normalized)) {
+    if (pane.activeTabId) noteVisibleTab(pane.activeTabId);
+  }
   return {
     tabs: ordered,
     layout: normalized,
     activeTabId,
     activeFilePath: deriveActiveFilePath(ordered, activeTabId),
   };
+}
+
+// --- suspended views -------------------------------------------------------
+
+let suspensionKey: readonly [Tab[], Layout, Map<string, OpenFile>] | null = null;
+let suspensionSet: ReadonlySet<string> = new Set();
+
+/** Hidden keepAlive tabs whose live view is dropped to stay inside
+ *  `MAX_HIDDEN_VIEWS`. A suspended tab keeps its place in the tab strip and
+ *  remounts on activation — cursor/scroll live in `viewStateByTab`, content
+ *  in `openFiles`/`pendingDocs`, drawing scenes in their session — so the
+ *  only thing truly lost is the CodeMirror undo stack. Dirty file tabs are
+ *  exempt: their undo trail is the only way back to the saved text. */
+function suspendedTabs(state: Pick<EditorState, "tabs" | "layout" | "openFiles">) {
+  if (
+    suspensionKey?.[0] === state.tabs &&
+    suspensionKey[1] === state.layout &&
+    suspensionKey[2] === state.openFiles
+  ) {
+    return suspensionSet;
+  }
+  const visible = new Set(
+    panes(state.layout).flatMap((pane) => (pane.activeTabId ? [pane.activeTabId] : [])),
+  );
+  const hidden: { id: string; rank: number }[] = [];
+  for (const tab of state.tabs) {
+    if (visible.has(tab.id) || !locationBehavior(tab.location).keepAlive) continue;
+    if (tab.location.kind === "file" && state.openFiles.get(tab.location.path)?.isDirty) {
+      continue;
+    }
+    hidden.push({ id: tab.id, rank: lastVisibleRank(tab.id) });
+  }
+  // Newest first — everyone past the budget gives up its view.
+  hidden.sort((a, b) => b.rank - a.rank);
+  suspensionSet = new Set(hidden.slice(MAX_HIDDEN_VIEWS).map((entry) => entry.id));
+  suspensionKey = [state.tabs, state.layout, state.openFiles];
+  return suspensionSet;
+}
+
+/** TabHost selector: should this tab's body unmount to honour the hidden
+ *  view budget? */
+export function isTabSuspended(
+  state: Pick<EditorState, "tabs" | "layout" | "openFiles">,
+  tabId: string,
+): boolean {
+  return suspendedTabs(state).has(tabId);
 }
 
 /** Remove from the layout every tab that `nextTabs` no longer contains,
@@ -473,28 +531,30 @@ function resolveOpenTarget(
   return { paneId, tab: state.tabs.find((candidate) => candidate.id === activeTabId) ?? null };
 }
 
-function collectReferencedPaths(tabs: Tab[]) {
+/// Paths a tab holds hot: its current location plus the nearest history in
+/// each direction. Deeper history only names a path — `ensureFileLoaded`
+/// re-reads it when navigation reaches it, so it needn't stay resident.
+function collectWarmReferencedPaths(tabs: Tab[]) {
   const paths = new Set<string>();
   for (const tab of tabs) {
     for (const p of locationPaths(tab.location)) paths.add(p);
-    for (const loc of tab.back) for (const p of locationPaths(loc)) paths.add(p);
-    for (const loc of tab.forward) for (const p of locationPaths(loc)) paths.add(p);
+    for (const loc of tab.back.slice(-WARM_HISTORY_DEPTH))
+      for (const p of locationPaths(loc)) paths.add(p);
+    for (const loc of tab.forward.slice(0, WARM_HISTORY_DEPTH))
+      for (const p of locationPaths(loc)) paths.add(p);
   }
   return paths;
 }
 
-function maybePruneFiles(
-  state: Pick<EditorState, "openFiles" | "tabs">,
-  nextTabs: Tab[],
-  candidatePaths: string[],
-) {
-  const referenced = collectReferencedPaths(nextTabs);
+/// Sweep `openFiles` down to what the next tab set still holds hot, plus
+/// dirty files (never dropped — their edits are the only copy). Cold
+/// history entries stop pinning file content; navigation re-reads them.
+function maybePruneFiles(state: Pick<EditorState, "openFiles" | "tabs">, nextTabs: Tab[]) {
+  const referenced = collectWarmReferencedPaths(nextTabs);
   let files: Map<string, OpenFile> | null = null;
 
-  for (const path of candidatePaths) {
-    if (referenced.has(path)) continue;
-    const file = (files ?? state.openFiles).get(path);
-    if (!file || file.isDirty) continue;
+  for (const [path, file] of state.openFiles) {
+    if (referenced.has(path) || file.isDirty) continue;
     cancelSave(path);
     dropPendingEdit(path);
     if (!files) files = new Map(state.openFiles);
@@ -502,14 +562,6 @@ function maybePruneFiles(
   }
 
   return files;
-}
-
-function tabPaths(tab: Tab): string[] {
-  const paths = new Set<string>();
-  for (const p of locationPaths(tab.location)) paths.add(p);
-  for (const loc of tab.back) for (const p of locationPaths(loc)) paths.add(p);
-  for (const loc of tab.forward) for (const p of locationPaths(loc)) paths.add(p);
-  return [...paths];
 }
 
 function startNavigation(tabId: string) {
@@ -695,7 +747,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         if (target?.pendingTarget) setPendingTarget(nextTab.id, path, target.pendingTarget);
         return appendTab(state, nextTab, targetPaneId);
       }
-      const files = maybePruneFiles(state, state.tabs, [path]);
+      const files = maybePruneFiles(state, state.tabs);
       return files ? { openFiles: files } : state;
     });
     if (!get().tabs.some((tab) => tab.id === nextTab.id)) return null;
@@ -739,15 +791,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
     const nextTab = createFileTab(path);
     set((state) => {
-      const candidatePaths = [
-        ...new Set(state.tabs.flatMap((tab) => tabPaths(tab).filter((p) => p !== path))),
-      ];
       const filesWithTarget = state.openFiles.has(path)
         ? null
         : new Map(state.openFiles).set(path, createLoadingFile(path));
       const baseState = filesWithTarget ? { ...state, openFiles: filesWithTarget } : state;
       const tabs = [nextTab];
-      const prunedFiles = maybePruneFiles(baseState, tabs, candidatePaths);
+      const prunedFiles = maybePruneFiles(baseState, tabs);
       // A compact window is single-view by definition: drop the whole tree.
       return {
         ...publish(tabs, createLayout([nextTab.id], nextTab.id, state.layout.revision + 1)),
@@ -761,6 +810,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
     for (const tabId of previousTabIds) {
       pendingNavigationVersionByTabId.delete(tabId);
+      clearTabViewState(tabId);
+      forgetKeepAliveTab(tabId);
     }
 
     try {
@@ -860,20 +911,20 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       set((state) => {
         const index = getTabIndex(state.tabs, tabId);
         if (index === -1) {
-          const files = maybePruneFiles(state, state.tabs, [path]);
+          const files = maybePruneFiles(state, state.tabs);
           return files ? { openFiles: files } : state;
         }
 
         const currentTab = state.tabs[index];
         const currentLocation = currentTab?.location;
         if (!currentLocation || currentLocation.kind !== "file" || currentLocation.path !== path) {
-          const files = maybePruneFiles(state, state.tabs, [path]);
+          const files = maybePruneFiles(state, state.tabs);
           return files ? { openFiles: files } : state;
         }
 
         const tabs = [...state.tabs];
         tabs[index] = targetTab;
-        const files = maybePruneFiles(state, tabs, [path]);
+        const files = maybePruneFiles(state, tabs);
 
         return { ...publish(tabs, state.layout), ...(files ? { openFiles: files } : {}) };
       });
@@ -900,7 +951,6 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         const index = getTabIndex(state.tabs, tabId);
         if (index === -1) return state;
 
-        const closedTab = state.tabs[index]!;
         let tabs = state.tabs.filter((tab) => tab.id !== tabId);
         // The layout picks the surviving neighbour inside the closed tab's own
         // pane and collapses that pane if it just emptied.
@@ -912,7 +962,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           layout = insertTab(layout, layout.focusedPaneId, launcherTab.id);
         }
 
-        const files = maybePruneFiles(state, tabs, tabPaths(closedTab));
+        const files = maybePruneFiles(state, tabs);
 
         return { ...publish(tabs, layout), ...(files ? { openFiles: files } : {}) };
       });
@@ -920,6 +970,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       pendingNavigationVersionByTabId.delete(tabId);
       // A close ends the view; a move does not, and never reaches here.
       clearTabViewState(tabId);
+      forgetKeepAliveTab(tabId);
     };
     const tab = get().tabs.find((candidate) => candidate.id === tabId);
     const path = tab?.location.kind === "drawing" ? tab.location.path : null;
@@ -1090,7 +1141,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     // tab already references them (then they were open before the drop).
     const prune = () => {
       set((state) => {
-        const files = maybePruneFiles(state, state.tabs, paths);
+        const files = maybePruneFiles(state, state.tabs);
         return files ? { openFiles: files } : state;
       });
     };
@@ -1136,6 +1187,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     for (const tab of removed) {
       pendingNavigationVersionByTabId.delete(tab.id);
       clearTabViewState(tab.id);
+      forgetKeepAliveTab(tab.id);
     }
     return true;
   },
@@ -1198,9 +1250,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       if (index === -1) return currentState;
       const tabs = [...currentState.tabs];
       tabs[index] = nextTab;
-      const openFiles = currentState.openFiles.has(path)
-        ? undefined
-        : new Map(currentState.openFiles).set(path, createLoadingFile(path));
+      // The previous location just slid one hop deeper into history — files
+      // that fell out of the warm window drop here rather than on close.
+      const pruned = maybePruneFiles(currentState, tabs);
+      const files = pruned ?? currentState.openFiles;
+      const openFiles = files.has(path)
+        ? pruned
+        : new Map(files).set(path, createLoadingFile(path));
       return { ...publish(tabs, currentState.layout), ...(openFiles ? { openFiles } : {}) };
     });
 
@@ -1214,7 +1270,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         if (index === -1) return currentState;
         const tabs = [...currentState.tabs];
         tabs[index] = previousTab;
-        const files = maybePruneFiles(currentState, tabs, [path]);
+        const files = maybePruneFiles(currentState, tabs);
         return { ...publish(tabs, currentState.layout), ...(files ? { openFiles: files } : {}) };
       });
     }
@@ -1256,7 +1312,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         if (index === -1) return currentState;
         const tabs = [...currentState.tabs];
         tabs[index] = previousTab;
-        const files = maybePruneFiles(currentState, tabs, [targetPath]);
+        const files = maybePruneFiles(currentState, tabs);
         return { ...publish(tabs, currentState.layout), ...(files ? { openFiles: files } : {}) };
       });
     }
@@ -1298,7 +1354,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         if (index === -1) return currentState;
         const tabs = [...currentState.tabs];
         tabs[index] = previousTab;
-        const files = maybePruneFiles(currentState, tabs, [targetPath]);
+        const files = maybePruneFiles(currentState, tabs);
         return { ...publish(tabs, currentState.layout), ...(files ? { openFiles: files } : {}) };
       });
     }
@@ -1504,8 +1560,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       ...new Set(
         cappedTabs.flatMap((tab) => [
           ...locationPaths(tab.location),
-          ...tab.back.slice(-RESTORE_HISTORY_WARM).flatMap((l) => locationPaths(l)),
-          ...tab.forward.slice(0, RESTORE_HISTORY_WARM).flatMap((l) => locationPaths(l)),
+          ...tab.back.slice(-WARM_HISTORY_DEPTH).flatMap((l) => locationPaths(l)),
+          ...tab.forward.slice(0, WARM_HISTORY_DEPTH).flatMap((l) => locationPaths(l)),
         ]),
       ),
     ];
@@ -1595,10 +1651,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     pendingDocs.clear();
     for (const timer of pendingFlushTimers.values()) clearTimeout(timer);
     pendingFlushTimers.clear();
-    // Drawing embed cache-busting revisions are keyed by absolute path —
-    // they mean nothing under a different workspace root, and would
-    // otherwise accumulate for the lifetime of the window.
+    // Drawing embed cache-busting revisions and PDF search text are keyed
+    // by absolute path — they mean nothing under a different workspace
+    // root, and would otherwise accumulate for the lifetime of the window.
     resetDrawingRevisions();
+    clearPdfTextCache();
+    resetKeepAlive();
     set((state) => ({
       openFiles: new Map(),
       ...publish([], createLayout([], null, state.layout.revision + 1)),

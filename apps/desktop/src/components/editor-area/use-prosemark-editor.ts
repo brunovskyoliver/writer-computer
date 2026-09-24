@@ -50,6 +50,31 @@ function restoreScrollPosition(
 
     // Always apply the initial scroll so a new file can reset a reused container back to the top.
     scrollContainer.scrollTo(0, Math.max(0, scrollPos));
+    if (scrollPos <= 0) return;
+
+    // A fresh mount hasn't measured the whole document yet: the scroller's
+    // scrollHeight keeps growing as CodeMirror lays out blocks, and a
+    // scrollTo issued early gets clamped to whatever fits at that moment.
+    // Re-apply the target on height changes and clamped shortfalls for a
+    // bounded window — layout can grow in bursts separated by several idle
+    // frames, so a short "stable" streak isn't proof of completion.
+    let lastHeight = scrollContainer.scrollHeight;
+    let frames = 0;
+    const retry = () => {
+      if (isDisposed() || ++frames > 90) return;
+      const height = scrollContainer.scrollHeight;
+      const max = Math.max(0, height - scrollContainer.clientHeight);
+      const current = scrollContainer.scrollTop;
+      if (Math.abs(current - scrollPos) <= 4) return; // landed
+      if (current > scrollPos + 4) return; // user scrolled past — stop
+      const grew = height !== lastHeight;
+      lastHeight = height;
+      if (grew || current >= max - 4) {
+        scrollContainer.scrollTo(0, Math.min(scrollPos, max));
+      }
+      requestAnimationFrame(retry);
+    };
+    requestAnimationFrame(retry);
   });
 }
 

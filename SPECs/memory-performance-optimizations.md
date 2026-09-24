@@ -116,23 +116,100 @@ on unmount.
   matches were silently dropped (racy, thread-count dependent). The
   cap-skip path now sets `truncated`.
 
+## Pass 2 — WebContent retention
+
+The pass-1 measurement left ~790 MB in WebContent after closing every
+tab. Two structural causes were addressed here.
+
+### 7. Hidden keepAlive view budget (`lib/keep-alive.ts`)
+
+Every `keepAlive` page kind (file, drawing, pdf, graph, settings) kept
+its mounted view for the tab's whole life — ~6–20 MB per background tab
+in a live CodeMirror/Excalidraw/pdf.js tree, unbounded in tab count.
+
+Fix: `publish` stamps every pane's active tab into a module-level
+recency map. `isTabSuspended` (an `editor-store` selector, memoized on
+`(tabs, layout, openFiles)`) evicts the least-recently-visible hidden
+tabs once hidden keepAlive tabs exceed `MAX_HIDDEN_VIEWS = 8`; `TabHost`
+returns `null` for a suspended tab exactly as it does for non-keepAlive
+kinds. Activation remounts the body.
+
+What a suspended tab loses is only what cannot outlive the view: the
+CodeMirror undo stack. Cursor/scroll persist in `viewStateByTab`,
+document text in `openFiles`/`pendingDocs`, drawing scenes in their
+`drawing-sessions` session, PDF page in the location — the existing
+mount path already restores all of it. Dirty file tabs are exempt:
+their undo trail is the only way back to the saved text. Drawing
+sessions need no exemption — `detach` never saves, and a dirty session
+keeps its scene in the module map for the save boundaries.
+
+### 8. Cold-history pruning (`maybePruneFiles`)
+
+`openFiles` retained every file any tab's back/forward stack named —
+the stacks outlive their usefulness by tens of entries.
+
+Fix: `maybePruneFiles` became a full sweep: `collectWarmReferencedPaths`
+keeps only each tab's current location plus the last
+`WARM_HISTORY_DEPTH = 2` back entries and first 2 forward entries; every
+non-dirty, non-pending entry outside that set is dropped (save
+cancelled, pending edit dropped). Deeper history still navigates —
+`ensureFileLoaded` re-reads on demand, and `navigateBack` already
+reverts on failure. `navigateToFile` now runs the sweep on its success
+commit too, so a file drops the moment it slides out of the warm window
+rather than lingering until the tab closes.
+
+### 9. Lifecycle cache clears
+
+`pdf.ts` gained `clearPdfTextCache()`, wired into `resetEditorState`
+beside `resetDrawingRevisions` — search-extracted page text is keyed by
+absolute path and meant nothing under a new workspace root. In-flight
+extractions stay correct: they complete into entries the map no longer
+references, and the `(path, modified_at)` key guards any reuse.
+
+### 10. Cached similarity edges (Rust)
+
+`similarity_edges` scored every embedded pair on every `ai_graph` call.
+`AiIndex` now carries a `generation` bumped by `touch()` at every
+`notes` mutation (insert, remove, retain, extend, embedding writes,
+suggested-tag writes, config-change clears) plus a
+`similarity_cache` keyed by `(generation, floor, k)`.
+`ai_graph` takes the write guard and calls
+`similarity_edges_cached` — repeat renders serve the cached edge list.
+
+### 11. Scroll restore survives deferred layout (`use-prosemark-editor.ts`)
+
+Suspension made remounts common on large documents, which exposed a
+latent bug shared with session restore: `restoreScrollPosition` issued
+one `scrollTo` inside a single `requestAnimationFrame`. A fresh
+`EditorView` hasn't measured the document yet — the scroller's
+`scrollHeight` is a fraction of its final value, so the scroll clamps
+to a small offset and never recovers as CodeMirror's heightmap grows
+(~550 kpx on the 1.1 MB fixture, laid out over several frames after the
+first rAF).
+
+Fix: after the first scroll, a bounded rAF loop (~90 frames) re-applies
+the target on every `scrollHeight` change and whenever `scrollTop` sits
+clamped at the bottom short of the target. It exits as soon as the
+position lands, when `scrollTop` passes the target (a user scroll wins
+over restore), or when the frame budget runs out. Same code path serves
+fresh mounts, tab switches, and session restore.
+
 ## Non-goals
 
 - AI `AiJob` unbounded channel: elements are `PathBuf`s (~50 B) and the
   worker's 800 ms debounce drain already coalesces; a bounded drop would
   silently lose index updates. Documented as accepted design.
-- `similarity_edges` recompute per `ai_graph` call: trivial at real
-  corpus sizes; revisit with an index-generation counter if profiling
-  shows it.
 - `extract_title` per-directory-read I/O: invisible at measured corpus
   sizes; revisit for multi-thousand-file vaults.
-- keepAlive tab cost (6–17 MB/tab) and post-close WebKit retention:
-  deliberate design trade / platform behavior; no change.
+- WKWebView high-water-mark RSS after heavy sessions: WebKit holds
+  freed pages at the process level; the JS-heap-vs-RSS split needs a
+  heap-snapshot diff, not more source changes.
+- Embedding vectors retained per note (~6 KB each): bounded by index
+  size; quantization is a separate design.
 
 ## Validation
 
-- `vp check` — 0 errors (10 pre-existing warnings in untouched files);
-  `vp test` — 1287 tests pass.
+- `vp check` — 0 errors; `vp test` — 1291 tests pass.
 - `cargo test` — all pass; `cargo clippy` — only pre-existing warnings;
   `cargo fmt --check` — clean.
 - Re-run of `e2e/perf/perf-audit.spec.js` + `perf-restore.spec.js`
@@ -147,6 +224,28 @@ on unmount.
 | + content search            | 602 → 125 MB       | 875 → 785 MB       | 1617 → 1042 MB       |
 | all tabs closed +10 s       | 592 → 123 MB       | 695 → 790 MB       | 1356 → 974 MB        |
 
+Pass-2 re-run (same fixture, hidden-view budget + cold-history pruning
+live):
+
+| Scenario                    | app | WebContent |
+| --------------------------- | --- | ---------- |
+| Boot                        | 113 | 123        |
+| 20 md tabs                  | 110 | 223        |
+| +1.1 MB doc, 200 keystrokes | 134 | 528        |
+| + graph tab                 | 133 | 550        |
+| + content search            | 136 | 768        |
+| all tabs closed +10 s       | 136 | 787        |
+
+- 20 markdown tabs now cost ~100 MB WebContent instead of ~170 MB —
+  hidden views suspend past the `MAX_HIDDEN_VIEWS = 8` budget instead of
+  every keepAlive tab holding a live editor.
+- Post-close WebContent RSS is unchanged (~787 MB) but
+  `phys_footprint` reads ~264 MB with ~544 MB marked reclaimable in
+  WebKit malloc pools — RSS overstates live memory; a heap-snapshot
+  diff would split this further.
+- `e2e/perf/perf-suspend.spec.js` (not CI-gated): a scrolled 1.1 MB tab
+  suspends past the budget, remounts in ~100 ms on activation, and
+  restores content, scroll position (exact px), and editability.
 - Graph open no longer allocates any `Malloc Large` regions in the app
   process (was 7 regions / ~195 MB per call, retained forever).
   Per-keystroke latency in the 1.1 MB doc: ~5.6 ms/key (was ~7–9 ms).

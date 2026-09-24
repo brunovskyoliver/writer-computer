@@ -6,7 +6,7 @@ import {
   useLayoutMinimumSize,
   useSetFocusedPane,
 } from "@/hooks/use-editor-layout";
-import { useEditorStore } from "@/stores/editor-store";
+import { isTabSuspended, useEditorStore } from "@/stores/editor-store";
 import { paneOfTab } from "@/lib/editor-layout";
 import type { Tab } from "@/stores/editor-store";
 import { pageKind } from "./page-kinds";
@@ -36,9 +36,15 @@ function TabHost({ tab }: { tab: Tab }) {
   const isVisible = pane?.activeTabId === tab.id;
   const isFocused = useIsTabFocused(tab.id);
   const setFocusedPane = useSetFocusedPane();
+  // Hidden-view budget: a keepAlive tab past the recency cap unmounts here
+  // rather than holding a live editor tree forever. It remounts on
+  // activation; cursor/scroll/content/scene all live outside the view. A
+  // dirty file tab is never suspended — its undo stack is the only trail
+  // back to the saved text.
+  const suspended = useEditorStore((s) => isTabSuspended(s, tab.id));
 
   const kind = pageKind(tab.location);
-  if (!kind.keepAlive && !isVisible) return null;
+  if ((!kind.keepAlive || suspended) && !isVisible) return null;
 
   const Component = pageKindView(tab.location).Component as React.ComponentType<{
     location: typeof tab.location;

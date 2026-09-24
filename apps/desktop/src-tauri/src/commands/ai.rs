@@ -125,7 +125,9 @@ pub fn ai_graph(webview: tauri::Webview, app: tauri::AppHandle) -> Result<AiGrap
     // Nodes come from the file index — every indexed markdown note is a
     // node, including ones with no links or embedding yet.
     let files = state.file_index.read();
-    let index = state.ai_index.read();
+    // Write guard: the similarity edge list is cached inside the index and
+    // refreshed on demand — see `AiIndex::similarity_edges_cached`.
+    let mut index = state.ai_index.write();
     let nodes: Vec<AiGraphNode> = files
         .iter()
         .filter(|file| crate::commands::fs::is_markdown_file(&file.path))
@@ -166,7 +168,7 @@ pub fn ai_graph(webview: tauri::Webview, app: tauri::AppHandle) -> Result<AiGrap
     }
 
     for (source, target, score) in
-        ai::similarity_edges(&index, ai::SIMILARITY_FLOOR, ai::SIMILARITY_TOP_K)
+        index.similarity_edges_cached(ai::SIMILARITY_FLOOR, ai::SIMILARITY_TOP_K)
     {
         let source = source.to_string_lossy().into_owned();
         let target = target.to_string_lossy().into_owned();
@@ -180,7 +182,7 @@ pub fn ai_graph(webview: tauri::Webview, app: tauri::AppHandle) -> Result<AiGrap
             source,
             target,
             kind: AiEdgeKind::Similar,
-            score: Some(score),
+            score: Some(*score),
         });
     }
 
@@ -235,13 +237,9 @@ pub async fn ai_suggest_tags(
         let note_path = PathBuf::from(&path);
         let stored = tags.clone();
         state.with_workspace_snapshot(&root, epoch, || {
-            state
-                .ai_index
-                .write()
-                .notes
-                .entry(note_path)
-                .or_default()
-                .suggested_tags = stored;
+            let mut index = state.ai_index.write();
+            index.notes.entry(note_path).or_default().suggested_tags = stored;
+            index.touch();
         });
         let _ = app.emit(
             "ai:graph-changed",

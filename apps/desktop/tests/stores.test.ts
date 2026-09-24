@@ -11,7 +11,8 @@ vi.mock("@/lib/theme", () => ({
 }));
 
 import { invoke } from "@tauri-apps/api/core";
-import { createFileTab, useEditorStore } from "../src/stores/editor-store";
+import { createFileTab, isTabSuspended, useEditorStore } from "../src/stores/editor-store";
+import { MAX_HIDDEN_VIEWS } from "../src/lib/keep-alive";
 import { useSettingsStore } from "../src/stores/settings-store";
 import { useUIStore } from "../src/stores/ui-store";
 import { useWorkspaceStore } from "../src/stores/workspace-store";
@@ -331,6 +332,101 @@ describe("editor-store", () => {
     ]);
     expect(state.activeFilePath).toBeNull();
     expect(state.openFiles.size).toBe(0);
+  });
+
+  test("files cold in history stop pinning openFiles — the next navigation sweeps them", async () => {
+    for (const path of ["/a.md", "/b.md", "/c.md", "/d.md"]) {
+      mockedInvoke.mockResolvedValueOnce({ path, content: path, modified_at: 1 });
+    }
+    await useEditorStore.getState().openFile("/a.md");
+    await useEditorStore.getState().navigateToFile("/b.md");
+    await useEditorStore.getState().navigateToFile("/c.md");
+    await useEditorStore.getState().navigateToFile("/d.md");
+
+    const state = useEditorStore.getState();
+    const [tab] = state.tabs;
+    const backPaths = tab!.back.map((loc) => (loc.kind === "file" ? loc.path : ""));
+    expect(backPaths).toEqual(["/a.md", "/b.md", "/c.md"]);
+    // The warm window is the last two back entries — /a.md fell out.
+    expect(state.openFiles.has("/a.md")).toBe(false);
+    expect(state.openFiles.has("/b.md")).toBe(true);
+    expect(state.openFiles.has("/c.md")).toBe(true);
+    expect(state.openFiles.has("/d.md")).toBe(true);
+  });
+
+  test("a dirty file is never pruned, however deep it sits in history", async () => {
+    for (const path of ["/a.md", "/b.md", "/c.md", "/d.md"]) {
+      mockedInvoke.mockResolvedValueOnce({ path, content: path, modified_at: 1 });
+    }
+    await useEditorStore.getState().openFile("/a.md");
+    // Mark dirty without going through `updateContent` — its scheduleSave
+    // lands immediately under the mocked IPC and cleans the flag again.
+    useEditorStore.setState((state) => {
+      const files = new Map(state.openFiles);
+      const file = files.get("/a.md")!;
+      files.set("/a.md", { ...file, isDirty: true, content: "unsaved edits" });
+      return { openFiles: files };
+    });
+    await useEditorStore.getState().navigateToFile("/b.md");
+    await useEditorStore.getState().navigateToFile("/c.md");
+    await useEditorStore.getState().navigateToFile("/d.md");
+
+    const state = useEditorStore.getState();
+    expect(state.openFiles.get("/a.md")?.content).toBe("unsaved edits");
+  });
+
+  test("navigating back to a cold file reloads it on demand", async () => {
+    for (const path of ["/a.md", "/b.md", "/c.md", "/d.md"]) {
+      mockedInvoke.mockResolvedValueOnce({ path, content: path, modified_at: 1 });
+    }
+    await useEditorStore.getState().openFile("/a.md");
+    await useEditorStore.getState().navigateToFile("/b.md");
+    await useEditorStore.getState().navigateToFile("/c.md");
+    await useEditorStore.getState().navigateToFile("/d.md");
+    expect(useEditorStore.getState().openFiles.has("/a.md")).toBe(false);
+
+    // back → c, back → b, back → a: the last hop re-reads /a.md from disk.
+    mockedInvoke.mockResolvedValueOnce({ path: "/a.md", content: "a", modified_at: 1 });
+    await useEditorStore.getState().navigateBack();
+    await useEditorStore.getState().navigateBack();
+    await useEditorStore.getState().navigateBack();
+
+    const state = useEditorStore.getState();
+    expect(state.activeFilePath).toBe("/a.md");
+    expect(state.openFiles.get("/a.md")?.content).toBe("a");
+  });
+
+  test("hidden keepAlive tabs beyond the budget suspend; dirty file tabs are exempt", async () => {
+    const total = MAX_HIDDEN_VIEWS + 3;
+    for (let i = 0; i < total; i++) {
+      mockedInvoke.mockResolvedValueOnce({
+        path: `/f${i}.md`,
+        content: `${i}`,
+        modified_at: i,
+      });
+      await useEditorStore.getState().openFileInNewTab(`/f${i}.md`);
+    }
+
+    let state = useEditorStore.getState();
+    const [oldest, next, ...rest] = state.tabs;
+    // One visible + (total-1) hidden over an 8-view budget → the two
+    // least-recently-visible tabs suspend.
+    expect(isTabSuspended(state, oldest!.id)).toBe(true);
+    expect(isTabSuspended(state, next!.id)).toBe(true);
+    for (const tab of rest) {
+      expect(isTabSuspended(state, tab.id)).toBe(false);
+    }
+
+    // Dirtying the oldest tab's file takes it out of the eviction pool.
+    useEditorStore.setState((state) => {
+      const files = new Map(state.openFiles);
+      const file = files.get("/f0.md")!;
+      files.set("/f0.md", { ...file, isDirty: true, content: "unsaved edits" });
+      return { openFiles: files };
+    });
+    state = useEditorStore.getState();
+    expect(isTabSuspended(state, oldest!.id)).toBe(false);
+    expect(isTabSuspended(state, next!.id)).toBe(true);
   });
 
   test("navigateToFile updates active tab history", async () => {

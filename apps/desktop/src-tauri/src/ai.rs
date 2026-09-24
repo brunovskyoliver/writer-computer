@@ -125,6 +125,49 @@ pub struct AiIndex {
     pub notes: HashMap<PathBuf, NoteEntry>,
     /// Queued + in-flight path count — drives `ai_status.pending`.
     pub pending: usize,
+    /// Bumped by `touch` on every `notes` mutation — the similarity cache
+    /// keys off it, so a stale edge set can never outlive the vectors it
+    /// was scored from.
+    generation: u64,
+    similarity_cache: Option<SimilarityCache>,
+}
+
+#[derive(Debug)]
+struct SimilarityCache {
+    generation: u64,
+    floor: f32,
+    k: usize,
+    edges: Vec<(PathBuf, PathBuf, f32)>,
+}
+
+impl AiIndex {
+    /// Call after mutating `notes` — bumps the generation every derived
+    /// cache keys off.
+    pub fn touch(&mut self) {
+        self.generation += 1;
+    }
+
+    /// `similarity_edges` scores every embedded pair per call; `ai_graph`
+    /// asks for the same result on every graph render. Recompute only when
+    /// the inputs — the note set or the floor/k parameters — changed.
+    pub fn similarity_edges_cached(&mut self, floor: f32, k: usize) -> &[(PathBuf, PathBuf, f32)] {
+        let fresh = self.similarity_cache.as_ref().is_some_and(|cache| {
+            cache.generation == self.generation && cache.floor == floor && cache.k == k
+        });
+        if !fresh {
+            self.similarity_cache = Some(SimilarityCache {
+                generation: self.generation,
+                floor,
+                k,
+                edges: similarity_edges(self, floor, k),
+            });
+        }
+        &self
+            .similarity_cache
+            .as_ref()
+            .expect("just populated")
+            .edges
+    }
 }
 
 #[derive(Debug)]
@@ -1442,9 +1485,11 @@ pub fn apply_settings(app_state: &AppState, state: &Arc<WorkspaceState>, cfg: &A
                 && (previous.embed_endpoint != cfg.embed_endpoint
                     || previous.embed_model != cfg.embed_model)
             {
-                for entry in state.ai_index.write().notes.values_mut() {
+                let mut index = state.ai_index.write();
+                for entry in index.notes.values_mut() {
                     entry.embedding = None;
                 }
+                index.touch();
             }
         }
         *applied = Some(cfg.clone());
@@ -1491,7 +1536,9 @@ async fn run_worker(
         let notes = load_sidecar(&path, &root, &cfg);
         if !notes.is_empty() {
             state.with_workspace_snapshot(&root, epoch, || {
-                state.ai_index.write().notes.extend(notes);
+                let mut index = state.ai_index.write();
+                index.notes.extend(notes);
+                index.touch();
             });
         }
     }
@@ -1572,6 +1619,7 @@ async fn process_batch(
             let committed = state.with_workspace_snapshot(root, epoch, || {
                 let mut index = state.ai_index.write();
                 index.notes.retain(|path, _| file_set.contains(path));
+                index.touch();
                 index.pending = indexed_markdown.len();
             });
             if committed.is_none() {
@@ -1598,6 +1646,7 @@ async fn process_batch(
             state.with_workspace_snapshot(root, epoch, || {
                 let mut index = state.ai_index.write();
                 index.notes.remove(path);
+                index.touch();
                 index.pending = index.pending.saturating_sub(1);
             });
             continue;
@@ -1658,6 +1707,7 @@ async fn process_batch(
                     suggested_tags: kept_tags,
                 },
             );
+            index.touch();
             index.pending = index.pending.saturating_sub(1);
         });
         if committed.is_none() {
@@ -1677,6 +1727,7 @@ async fn process_batch(
                                 entry.embedding = Some(vector);
                             }
                         }
+                        index.touch();
                     });
                     if applied.is_none() {
                         return;
@@ -1839,6 +1890,42 @@ mod tests {
         assert_eq!(edges[0].0, a);
         assert_eq!(edges[0].1, b);
         assert!(edges[0].2 > 0.99);
+    }
+
+    #[test]
+    fn similarity_edges_cached_recomputes_on_generation_or_param_change() {
+        let mut index = AiIndex::default();
+        let a = PathBuf::from("/v/a.md");
+        let b = PathBuf::from("/v/b.md");
+        let c = PathBuf::from("/v/c.md");
+        let entry = |embedding: Vec<f32>| NoteEntry {
+            hash: 0,
+            embedding: Some(embedding),
+            links: Vec::new(),
+            math_blocks: Vec::new(),
+            suggested_tags: Vec::new(),
+        };
+        index.notes.insert(a.clone(), entry(vec![1.0, 0.0]));
+        index.notes.insert(b.clone(), entry(vec![0.9, 0.1]));
+        index.touch();
+
+        let first: Vec<_> = index.similarity_edges_cached(0.5, 5).to_vec();
+        assert_eq!(first.len(), 1);
+
+        // Same generation + params → the cached list comes straight back.
+        let again: Vec<_> = index.similarity_edges_cached(0.5, 5).to_vec();
+        assert_eq!(again, first);
+
+        // A mutation without `touch` is a caller bug — the cache contract is
+        // "mutate, then touch". Touching re-scores and picks the new note up.
+        index.notes.insert(c.clone(), entry(vec![0.95, 0.05]));
+        index.touch();
+        let second: Vec<_> = index.similarity_edges_cached(0.5, 5).to_vec();
+        assert!(second.len() > first.len());
+
+        // Different parameters are a different query, not a stale hit.
+        let stricter: Vec<_> = index.similarity_edges_cached(0.999, 5).to_vec();
+        assert_eq!(stricter.len(), 0);
     }
 
     #[test]
