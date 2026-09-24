@@ -178,3 +178,8 @@ export function resetEditorViews() {
   registrations.clear();
   viewStateByTab.clear();
 }
+
+/** Test/e2e seam: live view registrations and stored per-tab view states. */
+export function editorViewDebugCounts() {
+  return { registrations: registrations.size, viewStates: viewStateByTab.size };
+}

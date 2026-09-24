@@ -25,7 +25,50 @@ Split the ~790 MB into three buckets and fix whatever is live:
 3. **WebCore/compositor resources** (canvas backing stores, image decodes,
    graphics layers) — partially actionable via explicit disposal calls.
 
-## Suggested method
+## Result — answered (2026-09-24 run)
+
+Rig: `e2e/perf/perf-retention.spec.js` — stage-isolated open → close →
+GC-churn → settle cycles (markdown ×20, 1.1 MB doc + typing, PDFs,
+Excalidraw, graph), per-category `footprint` + `vmmap`/`heap`/`leaks` on
+the pinned app-owned WebContent pid, plus `window.__writerDebug()` counters
+for every retention-sensitive store. Report: `/tmp/writer-perf-retention.jsonl`.
+
+**Bucket 2 (live app JS): empty.** After every stage's close the probe reads
+zero across the board — `openFiles=0`, `pendingDocs=0`, `viewStates=0`,
+`registrations=0`, `pdf.docs=0`, `drawingSessions=0`, DOM `canvases`/`images`/
+`cmEditors=0`. `leaks` (SIP-limited to readonly regions) found 391 leaks /
+19.5 KB, all `NSMutableDictionary`/`CFError`/`NSURL` CoreFoundation
+internals — nothing reachable from app code.
+
+**Bucket 3 (graphics): fully returned.** `Owned physical footprint
+(unmapped) (graphics)` dirty spikes per stage (20 md tabs 363 MB, PDFs 354,
+Excalidraw 286, graph 203) and lands back at the 51 MB boot value after
+close + GC churn — net delta **0**. The large `reclaimable` numbers seen in
+the earlier audit are the pool holding freed surfaces for the OS.
+
+**Bucket 1 (allocator pools): the residual.** Final settle footprint is
+238 MB vs 120 MB at boot (+117 MB dirty), decomposing as `WebKit Malloc`
++94 MB dirty with a further 166 MB marked reclaimable, `JS JIT Generated
+Code` +11 MB (lazy chunks — pdf.js, Excalidraw, cytoscape — stay compiled
+once imported; ESM cannot unload), and ~+11 MB of Malloc Small/Untagged/
+WASM. The dirty WKM share is JSC/bmalloc holding freed-but-unscavenged
+pages plus live lazy-module state; both shrink under memory pressure.
+Post-close RSS (~365 MB) additionally counts clean + reclaimable pages,
+which is why it overstated the picture at ~790 MB in the earlier audit.
+
+**One live fix found and landed:** the pdf.js worker
+(`GlobalWorkerOptions.workerPort`) was created once and held for the window
+lifetime — the last `releasePdf` destroyed the document but never the
+worker. It now terminates after a 30 s idle grace (cancelled on re-acquire;
+the grace avoids respawn churn during sequential `content_search`
+extractions). Verified in-run: `workerAlive` flips false at the post-PDF
+idle snapshot while footprint falls 457→349 MB.
+
+**Verdict:** no application-owned retention remains. What stays allocated
+post-close is WebKit pool memory the OS can reclaim plus the one-time code
+cost of features already used — expected, not actionable at source level.
+
+## Method (what was run)
 
 - **JS heap diff**: attach Safari Web Inspector to the e2e app's WKWebView
   (the `--features e2e` build has devtools; `Cmd+Opt+I` or
@@ -78,8 +121,13 @@ PATH="$PWD/../node_modules/.bin:$PATH" node_modules/.bin/tauri build
 --features e2e --bundles app --ignore-version-mismatches
 --config '{"identifier":"com.writer-computer.e2e","bundle":{"createUpdaterArtifacts":false}}'`
 - Run: `cd apps/desktop/e2e && pnpm exec wdio run ./wdio.conf.js --spec
-./perf/perf-audit.spec.js` (also `perf-suspend.spec.js`,
-  `perf-restore.spec.js`).
+./perf/perf-retention.spec.js` (also `perf-audit.spec.js`,
+  `perf-suspend.spec.js`, `perf-restore.spec.js`). The retention spec pins
+  the app-owned WebContent pid at boot (`app_web_pid`) — `perf-audit` still
+  footprints the first WebContent child, which can be a small idle process
+  or a foreign one spawned mid-run; trust `app_web_pid` records.
+- `window.__writerDebug()` (installed by `src/e2e-debug.ts`) returns counts
+  and char totals only — no document content.
 - **Regenerate `/tmp/writer-perf-baseline.txt` before every run** —
   `ps -axo pid=,comm= | grep -i webkit | awk '{print $1}' > ...`. A stale
   baseline attributes other apps' WebContent processes to the app (web_mb

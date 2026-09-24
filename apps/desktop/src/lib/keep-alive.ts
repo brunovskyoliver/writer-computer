@@ -42,3 +42,8 @@ export function forgetKeepAliveTab(tabId: string): void {
 export function resetKeepAlive(): void {
   lastVisibleAt.clear();
 }
+
+/** Test/e2e seam: how many tabs still carry a recency stamp. */
+export function keepAliveTrackedCount(): number {
+  return lastVisibleAt.size;
+}

@@ -216,6 +216,23 @@ export function hasDrawingSession(path?: string): boolean {
     : sessions.size > 0;
 }
 
+/** Test/e2e seam: live sessions, attached views, dirty count, and the base64
+ *  image bytes the retained `files` maps hold. `isDirty` serializes the
+ *  scene — fine for a debug probe, wrong for a hot path. */
+export function drawingSessionDebugCounts() {
+  let views = 0;
+  let dirty = 0;
+  let fileChars = 0;
+  for (const session of sessions.values()) {
+    views += session.views.size;
+    if (session.isDirty()) dirty += 1;
+    for (const file of Object.values(session.scene().files)) {
+      fileChars += file.dataURL?.length ?? 0;
+    }
+  }
+  return { sessions: sessions.size, views, dirty, fileChars };
+}
+
 function matching(path?: string) {
   return [...sessions.values()].filter(
     (session) => !path || session.path === path || session.path.startsWith(`${path}/`),

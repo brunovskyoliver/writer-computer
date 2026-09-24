@@ -1,4 +1,5 @@
 import "./wdyr";
+import "./e2e-debug";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";

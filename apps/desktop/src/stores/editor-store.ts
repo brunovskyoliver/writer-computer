@@ -1828,3 +1828,27 @@ registerSaveStore({
   flushPendingEdit: (path) => useEditorStore.getState().flushPendingEdit(path),
   hasPendingEdit: (path) => useEditorStore.getState().hasPendingEdit(path),
 });
+
+/**
+ * Test/e2e seam: sizes of the retention-sensitive tables, for the
+ * `__writerDebug` probe. Counts and character totals only — never content —
+ * so the probe cannot be a read channel for document text. `openFileChars`
+ * counts `content` and `diskContent` separately because a dirty file
+ * retains both.
+ */
+export function editorRetentionSnapshot() {
+  const state = useEditorStore.getState();
+  let openFileChars = 0;
+  let dirtyFiles = 0;
+  for (const file of state.openFiles.values()) {
+    openFileChars += file.content.length + file.diskContent.length;
+    if (file.isDirty) dirtyFiles += 1;
+  }
+  return {
+    tabs: state.tabs.length,
+    openFiles: state.openFiles.size,
+    openFileChars,
+    dirtyFiles,
+    pendingDocs: pendingDocs.size,
+  };
+}

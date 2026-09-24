@@ -65,15 +65,25 @@ export type PdfLoadResult = { ok: true; doc: PdfDocument } | { ok: false; error:
 
 let lib: typeof import("pdfjs-dist") | null = null;
 
+/** Grace before tearing down the worker once the last document lets go —
+ *  a content search pumps files through acquire/release at concurrency with
+ *  idle gaps between them, and a respawn per file would pay worker init
+ *  (~100 ms of parse + handshake) for every candidate. */
+const WORKER_IDLE_MS = 30_000;
+let workerIdleTimer: ReturnType<typeof setTimeout> | null = null;
+
 async function pdfjs(): Promise<typeof import("pdfjs-dist")> {
-  if (lib) return lib;
-  const loaded = await import("pdfjs-dist");
+  const loaded = (lib ??= await import("pdfjs-dist"));
   // `workerPort` over `workerSrc`: the `?worker` import gives Vite an emitted
   // entry it can bundle — including the stream polyfill — instead of pointing
-  // at a packaged URL that the wrapper cannot patch.
-  loaded.GlobalWorkerOptions.workerPort = new PdfWorker();
-  lib = loaded;
-  return lib;
+  // at a packaged URL that the wrapper cannot patch. Rebuilt lazily because
+  // `releasePdf` terminates it once nothing references a document — the
+  // worker's parsed code and font caches are the tens of MB a closed PDF
+  // session would otherwise hold for the life of the window.
+  if (!loaded.GlobalWorkerOptions.workerPort) {
+    loaded.GlobalWorkerOptions.workerPort = new PdfWorker();
+  }
+  return loaded;
 }
 
 /**
@@ -155,6 +165,11 @@ export function acquirePdf(path: string): Promise<PdfLoadResult> {
   if (!entry) {
     entry = { refs: 0, loaded: loadPdf(path) };
     documents.set(path, entry);
+    // Any acquire keeps the worker alive — cancel a pending idle teardown.
+    if (workerIdleTimer) {
+      clearTimeout(workerIdleTimer);
+      workerIdleTimer = null;
+    }
   }
   entry.refs += 1;
   return entry.loaded.then((l) => l.result);
@@ -173,6 +188,19 @@ export async function releasePdf(path: string): Promise<void> {
   if (entry.refs > 0) return;
   documents.delete(path);
   await (await entry.loaded).destroy();
+  // The map entry is already gone, so a re-open during this await starts a
+  // fresh load — and any acquire that has landed is visible in `size`, which
+  // keeps its in-flight document off the worker we're about to kill.
+  if (documents.size === 0) {
+    if (workerIdleTimer) clearTimeout(workerIdleTimer);
+    workerIdleTimer = setTimeout(() => {
+      workerIdleTimer = null;
+      if (documents.size > 0 || !lib) return;
+      const worker = lib.GlobalWorkerOptions.workerPort;
+      lib.GlobalWorkerOptions.workerPort = null;
+      worker?.terminate?.();
+    }, WORKER_IDLE_MS);
+  }
 }
 
 /** Test seam: how many paths are currently held. */
@@ -208,6 +236,23 @@ const extractionChains = new Map<string, Promise<void>>();
  *  absolute paths stop meaning anything. */
 export function clearPdfTextCache(): void {
   textCache.clear();
+}
+
+/** Test/e2e seam: held documents plus the size of the extraction cache. */
+export function pdfRetentionSnapshot() {
+  let textPages = 0;
+  let textChars = 0;
+  for (const entry of textCache.values()) {
+    textPages += entry.pages.length;
+    for (const page of entry.pages) for (const line of page) textChars += line.length;
+  }
+  return {
+    docs: documents.size,
+    textEntries: textCache.size,
+    textPages,
+    textChars,
+    workerAlive: Boolean(lib?.GlobalWorkerOptions.workerPort),
+  };
 }
 
 function cachedTextEntry(path: string, modifiedAt: number): PdfTextEntry {
