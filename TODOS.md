@@ -108,6 +108,8 @@
 
 ## Up Next
 
+- WebContent retention caveat: [`SPECs/Agent/worksheet-webcontent-retention.md`](SPECs/Agent/worksheet-webcontent-retention.md) — post-close WebContent RSS is ~790 MB while `footprint` shows ~264 MB live + ~544 MB reclaimable. Split live-JS vs allocator pools via a heap-snapshot diff and fix anything still reachable.
+
 ## Backlog
 
 Previously-triaged work organized by phase. Pull into `Up Next` as capacity opens.
