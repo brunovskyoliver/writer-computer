@@ -4,7 +4,9 @@ import {
   discardDrawingSessions,
   reportDrawingSaveError,
 } from "@/lib/drawing-sessions";
+import { resetDrawingRevisions } from "@/lib/drawing-embed-sync";
 import { clearTabViewState, rewriteEditorPaths } from "@/lib/editor-views";
+import type { Text } from "@codemirror/state";
 import { create } from "zustand";
 import type { FileContent } from "@/types/fs";
 import * as tauri from "@/lib/tauri";
@@ -43,6 +45,13 @@ import { requestPdfAnchor } from "./pdf-anchor-store";
 export interface OpenFile {
   path: string;
   frontmatter: string | null;
+  /**
+   * Debounced mirror of the editor document. Keystrokes land in
+   * `pendingDocs` first and flush into this string on a ~300 ms trailing
+   * edge (or immediately via `flushPendingEdit`), so during an active burst
+   * it can run slightly behind the live view. Readers that need the current
+   * text — save, mount, frontmatter merge, duplicate — must flush first.
+   */
   content: string;
   title: string;
   titleSource: TitleSource;
@@ -53,6 +62,13 @@ export interface OpenFile {
   reloadVersion: number;
   displayDate: string | null;
   stats: DocumentStats;
+  /**
+   * Bumped by every mutation that changes the serialized bytes — content
+   * and frontmatter edits, disk reloads. The save engine compares it after a
+   * write to detect edits that landed mid-flight, instead of re-serializing
+   * the whole document for a string compare.
+   */
+  editSeq: number;
 }
 
 export interface Tab {
@@ -158,6 +174,19 @@ interface EditorState {
    *  reset can never be found again, so in-flight opens land nowhere. */
   resetEditorState: () => void;
   updateContent: (path: string, content: string) => void;
+  /**
+   * The editor's per-keystroke entry point: records the live `Text` document
+   * without materializing it, flips `isDirty` on the first change, and
+   * schedules the debounced flush that runs `updateContent` once per burst.
+   */
+  noteContentChanged: (path: string, doc: Text) => void;
+  /** Materialize any pending document for `path` into `content` now. Every
+   *  consumer that reads `OpenFile.content` as the current text calls this
+   *  first. */
+  flushPendingEdit: (path: string) => void;
+  /** True while a doc newer than `content` sits in `pendingDocs` — the save
+   *  engine's post-write supersession check. */
+  hasPendingEdit: (path: string) => boolean;
   updateFrontmatter: (path: string, frontmatter: string | null) => void;
   markSaved: (path: string, diskContent: string, hasNewerChanges?: boolean) => void;
   setSaveError: (path: string, error: string | null) => void;
@@ -174,6 +203,30 @@ type EditorStateSetter = (
 
 const pendingLoads = new Map<string, Promise<void>>();
 const pendingNavigationVersionByTabId = new Map<string, number>();
+
+/**
+ * Deferred content mirror. A keystroke stores the editor's persistent
+ * `Text` here — a `Map.set`, not a `doc.toString()` + `inferTitle` +
+ * `openFiles` clone per key, which measured ~7–9 ms/key and ~1 MB of garbage
+ * per keystroke on a 1.1 MB document. The string materializes on a ~300 ms
+ * trailing flush into `updateContent`, or immediately when a consumer calls
+ * `flushPendingEdit`. An entry exists only while the pending doc is newer
+ * than `OpenFile.content`.
+ */
+const pendingDocs = new Map<string, Text>();
+const pendingFlushTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const PENDING_FLUSH_MS = 300;
+
+/** Forget `path`'s pending document and cancel its flush timer — the drop
+ *  side of every `openFiles` removal and of disk winning a reload race. */
+function dropPendingEdit(path: string) {
+  pendingDocs.delete(path);
+  const timer = pendingFlushTimers.get(path);
+  if (timer) {
+    clearTimeout(timer);
+    pendingFlushTimers.delete(path);
+  }
+}
 
 // How long openFile waits for a fresh file to finish loading before falling
 // back to creating the tab with a "Loading..." placeholder. Below ~100 ms is
@@ -241,6 +294,7 @@ function createLoadingFile(path: string): OpenFile {
     reloadVersion: 0,
     displayDate: null,
     stats: EMPTY_STATS,
+    editSeq: 0,
   };
 }
 
@@ -288,9 +342,14 @@ function cloneTab(tab: Tab): Tab {
 
 // Browsers cap session history around 50; beyond that the stack stops being
 // something a user navigates and becomes a memory leak — `restoreSession`
-// loads every file referenced by history into `openFiles`, so an unbounded
-// stack is an unbounded preload list.
+// still keeps a per-tab warm set of loaded history, so an unbounded stack is
+// an unbounded preload list.
 const NAV_HISTORY_LIMIT = 50;
+
+/** How many entries per history direction `restoreSession` preloads per
+ *  tab — the last two hops back and the first two forward stay instant;
+ *  anything deeper lazy-loads on navigation. */
+const RESTORE_HISTORY_WARM = 2;
 
 function pushHistory(stack: Location[], entry: Location): Location[] {
   const next = [...stack, entry];
@@ -437,6 +496,7 @@ function maybePruneFiles(
     const file = (files ?? state.openFiles).get(path);
     if (!file || file.isDirty) continue;
     cancelSave(path);
+    dropPendingEdit(path);
     if (!files) files = new Map(state.openFiles);
     files.delete(path);
   }
@@ -486,6 +546,7 @@ async function ensureFileLoaded(path: string, set: EditorStateSetter, get: () =>
   // session restore, and drops the optimistic placeholder the callers insert
   // before they await.
   if (isStandaloneSurface(locationForPath(path))) {
+    dropPendingEdit(path);
     set((state) => {
       if (!state.openFiles.has(path)) return state;
       const files = new Map(state.openFiles);
@@ -543,6 +604,7 @@ async function ensureFileLoaded(path: string, set: EditorStateSetter, get: () =>
       });
     })
     .catch((error) => {
+      dropPendingEdit(path);
       set((state) => {
         const file = state.openFiles.get(path);
         if (!file) return state;
@@ -1255,6 +1317,17 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       files.delete(oldPath);
       files.set(newPath, { ...file, path: newPath });
 
+      const pendingDoc = pendingDocs.get(oldPath);
+      if (pendingDoc) {
+        pendingDocs.delete(oldPath);
+        pendingDocs.set(newPath, pendingDoc);
+      }
+      const pendingTimer = pendingFlushTimers.get(oldPath);
+      if (pendingTimer) {
+        pendingFlushTimers.delete(oldPath);
+        pendingFlushTimers.set(newPath, pendingTimer);
+      }
+
       const rewrite = (loc: Location) => rewriteLocation(loc, oldPath, newPath);
       const tabs = state.tabs.map((tab) => applyRewriteToTab(tab, rewrite) ?? tab);
 
@@ -1288,6 +1361,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     });
 
     cancelSave(path);
+    dropPendingEdit(path);
 
     if (get().tabs.length === 0) {
       get().ensureLauncherTab();
@@ -1329,6 +1403,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
     for (const path of cancelledPaths) {
       cancelSave(path);
+      dropPendingEdit(path);
     }
 
     if (get().tabs.length === 0) {
@@ -1381,6 +1456,18 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     });
 
     rewriteEditorPaths(rewritePath);
+    for (const [path, doc] of pendingDocs) {
+      const rewritten = rewritePath(path);
+      if (rewritten !== path) {
+        pendingDocs.delete(path);
+        pendingDocs.set(rewritten, doc);
+        const timer = pendingFlushTimers.get(path);
+        if (timer) {
+          pendingFlushTimers.delete(path);
+          pendingFlushTimers.set(rewritten, timer);
+        }
+      }
+    }
     for (const path of reschedulePaths) {
       scheduleSave(path);
     }
@@ -1396,17 +1483,34 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       return;
     }
 
+    // Restore applies the same bound runtime navigation enforces — an old or
+    // crafted session cannot exceed it.
+    const cappedTabs = restoredTabs.map((tab) =>
+      tab.back.length > NAV_HISTORY_LIMIT || tab.forward.length > NAV_HISTORY_LIMIT
+        ? {
+            ...tab,
+            back: tab.back.slice(-NAV_HISTORY_LIMIT),
+            forward: tab.forward.slice(0, NAV_HISTORY_LIMIT),
+          }
+        : tab,
+    );
+
+    // Warm set only: every tab's current location plus its nearest few
+    // history entries. Older back/forward entries stay in the stacks — they
+    // lazy-load through `navigateBack`/`navigateForward`'s
+    // `ensureFileLoaded` — instead of preemptively reading every file a
+    // session ever touched into `openFiles` (~200 MB on a 10-tab session).
     const uniquePaths = [
       ...new Set(
-        restoredTabs.flatMap((tab) => [
+        cappedTabs.flatMap((tab) => [
           ...locationPaths(tab.location),
-          ...tab.back.flatMap((l) => locationPaths(l)),
-          ...tab.forward.flatMap((l) => locationPaths(l)),
+          ...tab.back.slice(-RESTORE_HISTORY_WARM).flatMap((l) => locationPaths(l)),
+          ...tab.forward.slice(0, RESTORE_HISTORY_WARM).flatMap((l) => locationPaths(l)),
         ]),
       ),
     ];
     const activeTabId = focusedTabId(restoredLayout);
-    const activeTab = restoredTabs.find((tab) => tab.id === activeTabId) ?? null;
+    const activeTab = cappedTabs.find((tab) => tab.id === activeTabId) ?? null;
     const activePath = activeTab ? locationPrimaryPath(activeTab.location) : null;
 
     // If the bundled `restore_workspace` IPC pre-fetched the focused file, seed
@@ -1442,7 +1546,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       // change; only the revision is this window's.
       return {
         openFiles: files,
-        ...publish(restoredTabs, { ...restoredLayout, revision: state.layout.revision + 1 }),
+        ...publish(cappedTabs, { ...restoredLayout, revision: state.layout.revision + 1 }),
       };
     });
 
@@ -1473,7 +1577,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         .map((tab) => applyRewriteToTab(tab, transform))
         .filter((tab): tab is Tab => tab !== null);
       const files = new Map(state.openFiles);
-      for (const path of failedPaths) files.delete(path);
+      for (const path of failedPaths) {
+        files.delete(path);
+        dropPendingEdit(path);
+      }
 
       shouldEnsureLauncher = nextTabs.length === 0;
 
@@ -1485,6 +1592,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   resetEditorState: () => {
     for (const tabId of get().tabs) pendingNavigationVersionByTabId.delete(tabId.id);
+    pendingDocs.clear();
+    for (const timer of pendingFlushTimers.values()) clearTimeout(timer);
+    pendingFlushTimers.clear();
+    // Drawing embed cache-busting revisions are keyed by absolute path —
+    // they mean nothing under a different workspace root, and would
+    // otherwise accumulate for the lifetime of the window.
+    resetDrawingRevisions();
     set((state) => ({
       openFiles: new Map(),
       ...publish([], createLayout([], null, state.layout.revision + 1)),
@@ -1494,6 +1608,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   updateContent: (path: string, content: string) => {
     const file = get().openFiles.get(path);
     if (!file) return;
+    // An explicit content write is authoritative — any buffered doc is
+    // older than this string by definition.
+    dropPendingEdit(path);
 
     set((state) => {
       const existing = state.openFiles.get(path);
@@ -1508,6 +1625,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         title,
         titleSource,
         isDirty: true,
+        editSeq: existing.editSeq + 1,
       });
       return { openFiles: files };
     });
@@ -1516,7 +1634,50 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     scheduleSave(path);
   },
 
+  noteContentChanged: (path: string, doc: Text) => {
+    const file = get().openFiles.get(path);
+    if (!file) return;
+    pendingDocs.set(path, doc);
+
+    // One store write per burst: the dirty flag flips on the first
+    // keystroke, then stays out of Zustand entirely until the flush.
+    if (!file.isDirty) {
+      set((state) => {
+        const existing = state.openFiles.get(path);
+        if (!existing || existing.isDirty) return state;
+        const files = new Map(state.openFiles);
+        files.set(path, { ...existing, isDirty: true });
+        return { openFiles: files };
+      });
+    }
+
+    const pending = pendingFlushTimers.get(path);
+    if (pending) clearTimeout(pending);
+    pendingFlushTimers.set(
+      path,
+      setTimeout(() => get().flushPendingEdit(path), PENDING_FLUSH_MS),
+    );
+    scheduleSave(path);
+  },
+
+  flushPendingEdit: (path: string) => {
+    const timer = pendingFlushTimers.get(path);
+    if (timer) {
+      clearTimeout(timer);
+      pendingFlushTimers.delete(path);
+    }
+    const doc = pendingDocs.get(path);
+    if (!doc) return;
+    pendingDocs.delete(path);
+    get().updateContent(path, doc.toString());
+  },
+
+  hasPendingEdit: (path: string) => pendingDocs.has(path),
+
   updateFrontmatter: (path: string, frontmatter: string | null) => {
+    // Title inference reads the body — materialize a pending doc first so a
+    // frontmatter change in the same burst titles the current text.
+    get().flushPendingEdit(path);
     set((state) => {
       const file = state.openFiles.get(path);
       if (!file || file.frontmatter === frontmatter) return state;
@@ -1531,6 +1692,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           title,
           titleSource,
           isDirty: true,
+          editSeq: file.editSeq + 1,
         }),
       );
       return { openFiles: files };
@@ -1568,6 +1730,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   reloadFromDisk: (path: string, rawContent: string) => {
     cancelSave(path);
+    // Disk wins a reload: the incoming content replaces the document and the
+    // view is swapped to it, so a stale pending doc must not re-materialize
+    // over the reload.
+    dropPendingEdit(path);
     const parsed = parseDocument(rawContent);
     set((state) => {
       const file = state.openFiles.get(path);
@@ -1585,6 +1751,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           diskContent: rawContent,
           isDirty: false,
           reloadVersion: file.reloadVersion + 1,
+          editSeq: file.editSeq + 1,
         }),
       );
       return { openFiles: files };
@@ -1600,4 +1767,6 @@ registerSaveStore({
   markSaved: (path, diskContent, hasNewerChanges) =>
     useEditorStore.getState().markSaved(path, diskContent, hasNewerChanges),
   setSaveError: (path, error) => useEditorStore.getState().setSaveError(path, error),
+  flushPendingEdit: (path) => useEditorStore.getState().flushPendingEdit(path),
+  hasPendingEdit: (path) => useEditorStore.getState().hasPendingEdit(path),
 });

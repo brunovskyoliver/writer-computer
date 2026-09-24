@@ -94,6 +94,11 @@ const headingWeightHighlight = Prec.highest(
 //   originating view is the single writer for one keystroke: one store update,
 //   one save schedule, however many panes show the file.
 //
+// The document is handed over as its persistent `Text`, not `toString()`ed —
+// the store materializes it on a debounced flush, so a keystroke costs a map
+// write instead of a full-document string copy (see SPECs/
+// memory-performance-optimizations.md §2).
+//
 // The caret *is* recorded for a synchronization, because CodeMirror has mapped
 // this view's selection through the incoming changes and that new position is
 // genuinely where this view's caret now sits.
@@ -114,7 +119,7 @@ export function publishEditorUpdate(update: PublishableUpdate, path: string, tab
     (tr) => tr.annotation(editorApi.syncTransaction) === true,
   );
   if (update.docChanged && !isSwap && !isSync) {
-    editorApi.updateContent(path, update.state.doc.toString());
+    editorApi.noteContentChanged(path, update.state.doc);
     editorApi.syncSiblingViews(path, update.view, update.changes);
   }
   if (update.selectionSet && !isSwap) {

@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-09-24
+
+- A memory and performance pass over the whole app, driven by a runtime audit against a 60-file fixture workspace (full numbers in [`SPECs/memory-performance-optimizations.md`](SPECs/memory-performance-optimizations.md)). Opening the AI graph no longer spikes the app process by ~450 MB — workspaces whose notes repeat a formula used to build hundreds of thousands of throwaway relation objects per call; they're deduplicated before allocation now. Typing in very large notes is faster (~5.6 ms per keystroke in a 1.1 MB document, was ~7–9) because each keystroke no longer serializes the whole document. Content search in PDFs streams pages and stops at the per-file cap instead of extracting entire documents per keystroke, and repeated searches reuse a cached extraction. Restoring a session only preloads each tab's current file plus its two nearest back/forward entries — deeper history loads on demand — so a 10-tab session with deep history starts in ~300 ms at ~250 MB instead of ~320 MB. Bursts of filesystem events (saves, checkouts, builds) now collapse into one sidebar refresh per 150 ms window instead of one per event. Also fixed: global content search could report a complete result while silently dropping matches once the 200-match cap was hit — it now marks the result truncated.
+
 ## 2026-09-23
 
 - Fix word, character, and paragraph counts painting over the wrong pane. The statistics used to render once for whichever pane had focus, stretched across the full width of a split view — so a note's counts landed on top of the neighbouring PDF and vanished entirely when the PDF pane took focus. Each pane now carries the counts of the document it is actually showing, drawn sharp above the editor's bottom scroll fade: the note keeps its statistics beside the PDF, the PDF pane shows none, and Vim's `:`/`/` prompt lands in the pane it was opened from.

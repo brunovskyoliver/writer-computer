@@ -3,7 +3,13 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 import PdfWorker from "./pdf-worker?worker";
 import "./readable-stream-polyfill";
 import { getFileName } from "./paths";
-import { pdfTextItemsToLines, type PdfTextItemLike } from "./pdf-search";
+import {
+  isCaseSensitiveQuery,
+  matchPdfPageLines,
+  pdfTextItemsToLines,
+  type PdfTextItemLike,
+} from "./pdf-search";
+import type { SearchMatch } from "@/types/fs";
 
 /**
  * The renderer boundary for pdf.js. See SPECs/pdf-quote-links/.
@@ -175,28 +181,121 @@ export function cachedPdfCount(): number {
 }
 
 /**
- * Each page's text as an array of reconstructed lines — `getTextContent`
- * items joined, split on `hasEOL` (SPECs/global-content-search). The document
- * goes through `acquirePdf`/`releasePdf`, so a search extraction shares the
- * parse with any tab already showing the file instead of paying for a second
- * one. `null` when the document won't load — a corrupt, encrypted or missing
- * file simply doesn't match (the spec's skip rule), so callers don't need a
- * failure channel.
+ * Extracted per-page line text for content search, keyed by path and tagged
+ * with the file index's `modified_at` — a file that changed on disk misses
+ * automatically, so no extra stat I/O is needed. Extraction is the expensive
+ * half of a PDF search (~1–3 MB of text and seconds of worker time on a
+ * large file), so entries outlive a single query; the bound keeps the whole
+ * cache smaller than one big document's extraction.
  */
-export async function pdfSearchLines(path: string): Promise<string[][] | null> {
-  const result = await acquirePdf(path);
-  if (!result.ok) return null;
-  try {
-    const pages: string[][] = [];
-    for (let pageNumber = 1; pageNumber <= result.doc.pageCount; pageNumber++) {
-      const page = await result.doc.proxy.getPage(pageNumber);
-      const content = await page.getTextContent();
-      // `TextMarkedContent` items carry no `str`; the splitter skips them.
-      // The cast bridges pdf.js's union to the structural item shape.
-      pages.push(pdfTextItemsToLines(content.items as readonly PdfTextItemLike[]));
-    }
-    return pages;
-  } finally {
-    await releasePdf(path);
+const TEXT_CACHE_LIMIT = 8;
+
+interface PdfTextEntry {
+  modifiedAt: number;
+  /** Pages extracted so far — grows while `complete` is false. */
+  pages: string[][];
+  complete: boolean;
+}
+
+const textCache = new Map<string, PdfTextEntry>();
+/** Per-path serialization for extraction: a second search on the same file
+ *  waits on the chain rather than double-extracting pages into the shared
+ *  entry. Values resolve; a waiting search re-checks `entry.pages` when its
+ *  turn comes. */
+const extractionChains = new Map<string, Promise<void>>();
+
+function cachedTextEntry(path: string, modifiedAt: number): PdfTextEntry {
+  const existing = textCache.get(path);
+  if (existing && existing.modifiedAt === modifiedAt) {
+    // LRU touch — reinsert at the end.
+    textCache.delete(path);
+    textCache.set(path, existing);
+    return existing;
   }
+  const fresh: PdfTextEntry = { modifiedAt, pages: [], complete: false };
+  textCache.set(path, fresh);
+  while (textCache.size > TEXT_CACHE_LIMIT) {
+    const oldest = textCache.keys().next().value;
+    if (oldest === undefined) break;
+    textCache.delete(oldest);
+  }
+  return fresh;
+}
+
+/**
+ * Match `query` inside `path`'s text, extracting pages lazily and stopping
+ * once `MAX_MATCHES_PER_FILE` is reached — a superseded or satisfied search
+ * leaves the partial extraction cached for the next query to resume.
+ * `isCancelled` should report the caller's staleness guard so a dropped
+ * query stops pulling pages instead of finishing an extraction nobody reads.
+ *
+ * The document goes through `acquirePdf`/`releasePdf`, so extraction shares
+ * the parse with any tab already showing the file. `null` when the document
+ * won't load — a corrupt, encrypted or missing file simply doesn't match
+ * (the spec's skip rule), so callers don't need a failure channel.
+ */
+export async function searchPdfText(
+  path: string,
+  query: string,
+  base: { path: string; relativePath: string; modifiedAt: number },
+  isCancelled: () => boolean = () => false,
+): Promise<{ matches: SearchMatch[]; truncated: boolean } | null> {
+  const entry = cachedTextEntry(path, base.modifiedAt);
+  const caseSensitive = isCaseSensitiveQuery(query);
+  const matches: SearchMatch[] = [];
+  let truncated = false;
+  // How far into `entry.pages` this search has matched — pages a concurrent
+  // extractor appended after this count are matched, not re-extracted.
+  let matched = 0;
+
+  const matchThroughCache = () => {
+    while (matched < entry.pages.length) {
+      if (matchPdfPageLines(entry.pages[matched]!, matched, query, caseSensitive, base, matches)) {
+        truncated = true;
+        return;
+      }
+      matched++;
+    }
+  };
+
+  matchThroughCache();
+  if (!truncated && !entry.complete && !isCancelled()) {
+    const result = await acquirePdf(path);
+    if (!result.ok) return null;
+    try {
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const predecessor = extractionChains.get(path) ?? Promise.resolve();
+      const tail = predecessor.then(() => gate);
+      extractionChains.set(path, tail);
+      try {
+        // A predecessor's failure must not starve this turn — the cache
+        // state is re-checked on entry either way.
+        await predecessor.catch(() => {});
+        while (!truncated && !isCancelled()) {
+          matchThroughCache();
+          if (truncated) break;
+          const nextPage = entry.pages.length + 1;
+          if (nextPage > result.doc.pageCount) {
+            entry.complete = true;
+            break;
+          }
+          const page = await result.doc.proxy.getPage(nextPage);
+          const content = await page.getTextContent();
+          // `TextMarkedContent` items carry no `str`; the splitter skips
+          // them. The cast bridges pdf.js's union to the structural shape.
+          entry.pages.push(pdfTextItemsToLines(content.items as readonly PdfTextItemLike[]));
+        }
+      } finally {
+        release();
+        if (extractionChains.get(path) === tail) extractionChains.delete(path);
+      }
+    } finally {
+      await releasePdf(path);
+    }
+  }
+
+  return { matches, truncated };
 }

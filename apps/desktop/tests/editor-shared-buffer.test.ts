@@ -94,6 +94,7 @@ function openDocument(path: string, content: string) {
           reloadVersion: 0,
           displayDate: null,
           stats: { words: 0, characters: 0, paragraphs: 0 },
+          editSeq: 0,
         },
       ],
     ]),
@@ -127,6 +128,9 @@ describe("shared markdown buffer across duplicate views", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     editorViews.resetEditorViews();
+    // Also drops pending-docs and flush timers — a deferred mirror from the
+    // previous test must not materialize over this test's fixture.
+    useEditorStore.getState().resetEditorState();
     useEditorStore.setState({
       openFiles: new Map(),
       tabs: [],
@@ -143,6 +147,8 @@ describe("shared markdown buffer across duplicate views", () => {
     drain(a, PATH, "tab-a");
 
     expect(b.state.doc.toString()).toBe("hello there world");
+    // `content` is a debounced mirror — flush lands the pending doc.
+    editorApi.flushPendingEdit(PATH);
     expect(useEditorStore.getState().openFiles.get(PATH)?.content).toBe("hello there world");
   });
 
@@ -248,6 +254,7 @@ describe("shared markdown buffer across duplicate views", () => {
 
     expect(a.state.doc.toString()).toBe("note more");
     expect(b.state.doc.toString()).toBe("note more");
+    editorApi.flushPendingEdit(PATH);
     expect(useEditorStore.getState().openFiles.get(PATH)?.content).toBe("note more");
   });
 
@@ -274,6 +281,7 @@ describe("shared markdown buffer across duplicate views", () => {
 
     a.dispatch({ changes: { from: 5, insert: "!" } });
     drain(a, PATH, "tab-a");
+    editorApi.flushPendingEdit(PATH);
     expect(useEditorStore.getState().openFiles.get(PATH)?.content).toBe("hello!");
   });
 

@@ -1,4 +1,5 @@
 import type { EditorView } from "@codemirror/view";
+import type { Text } from "@codemirror/state";
 import * as editorViews from "@/lib/editor-views";
 import { applyLineTarget, type LineTarget } from "@/components/editor-area/line-target";
 import { findOuterScroller } from "@/components/editor-area/editor-scroll";
@@ -49,6 +50,24 @@ export function markSaved(path: string, diskContent: string) {
 
 export function updateContent(path: string, content: string) {
   useEditorStore.getState().updateContent(path, content);
+}
+
+/**
+ * The per-keystroke write: hand the view's persistent `Text` document to the
+ * store without materializing it. `OpenFile.content` is a debounced mirror —
+ * it lands on the ~300 ms trailing flush, or immediately through
+ * `flushPendingEdit` from any consumer that needs the current string.
+ */
+export function noteContentChanged(path: string, doc: Text) {
+  useEditorStore.getState().noteContentChanged(path, doc);
+}
+
+export function flushPendingEdit(path: string) {
+  useEditorStore.getState().flushPendingEdit(path);
+}
+
+export function hasPendingEdit(path: string) {
+  return useEditorStore.getState().hasPendingEdit(path);
 }
 
 export function updateFrontmatter(path: string, frontmatter: string | null) {

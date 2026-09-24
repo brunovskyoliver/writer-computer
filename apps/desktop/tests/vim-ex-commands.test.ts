@@ -22,6 +22,7 @@ function setup(file?: { isDirty: boolean; content: string; diskContent: string }
   const deps: VimExDeps = {
     resolve: vi.fn(() => ({ tabId: "tab-1", path: "/note.md" })),
     getOpenFile: vi.fn(() => file),
+    flushPendingEdit: vi.fn(),
     saveNow: vi.fn(() => Promise.resolve(true)),
     closeTab: vi.fn(),
     reloadFromDisk: vi.fn(),

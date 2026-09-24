@@ -761,33 +761,44 @@ pub struct FormulaRelation {
     pub b_snippet: String,
 }
 
-/// Every pair of notes sharing at least one normalized formula. Same-note
-/// duplicates are skipped — a relation is between two different notes.
+/// Every pair of notes sharing at least one normalized formula — one
+/// relation per (note pair, formula), pointing at each note's earliest
+/// occurrence. Collapsing to note granularity before materializing is what
+/// keeps repeated formulas cheap: 1500 identical `$$` blocks across 3 notes
+/// is 3 relations, not ~750k block-pair clones the graph caller would
+/// dedupe back down anyway.
 pub fn formula_relations(index: &AiIndex) -> Vec<FormulaRelation> {
-    let mut by_norm: HashMap<&str, Vec<(&PathBuf, &MathBlock)>> = HashMap::new();
+    let mut by_norm: HashMap<&str, HashMap<&PathBuf, &MathBlock>> = HashMap::new();
     for (path, entry) in &index.notes {
         for block in &entry.math_blocks {
             by_norm
                 .entry(block.normalized.as_str())
                 .or_default()
-                .push((path, block));
+                .entry(path)
+                .and_modify(|earliest| {
+                    if block.line < earliest.line {
+                        *earliest = block;
+                    }
+                })
+                .or_insert(block);
         }
     }
 
     let mut relations = Vec::new();
-    for blocks in by_norm.values() {
+    for per_note in by_norm.values() {
+        let mut blocks: Vec<(&PathBuf, &MathBlock)> = per_note
+            .iter()
+            .map(|(path, block)| (*path, *block))
+            .collect();
+        // Sorting by path alone would already be deterministic; including
+        // the line keeps the emitted pair order independent of the hash
+        // map's iteration order even if earliest-occurrence selection ever
+        // loosens.
+        blocks.sort_by(|(pa, a), (pb, b)| pa.cmp(pb).then(a.line.cmp(&b.line)));
         for i in 0..blocks.len() {
             for j in i + 1..blocks.len() {
                 let (a_path, a) = blocks[i];
                 let (b_path, b) = blocks[j];
-                if a_path == b_path {
-                    continue;
-                }
-                let ((a_path, a), (b_path, b)) = if (a_path, a.line) <= (b_path, b.line) {
-                    ((a_path, a), (b_path, b))
-                } else {
-                    ((b_path, b), (a_path, a))
-                };
                 relations.push(FormulaRelation {
                     a_path: a_path.clone(),
                     a_line: a.line,
@@ -1996,14 +2007,47 @@ mod tests {
         );
 
         let relations = formula_relations(&index);
-        // a–b once; a–c and b–c twice each (c's two occurrences).
-        assert_eq!(relations.len(), 5);
+        // One relation per (note pair, formula): a–b, a–c, b–c — c's second
+        // occurrence does not multiply the pair into more relations.
+        assert_eq!(relations.len(), 3);
         let ab = &relations[0];
         assert_eq!((ab.a_path.as_path(), ab.a_line), (note_a.as_path(), 7));
         assert_eq!((ab.b_path.as_path(), ab.b_line), (note_b.as_path(), 12));
-        // Each side keeps its own source line — the needle for that file.
+        // Each side keeps its own source line — the needle for that file —
+        // and c's earliest occurrence is the one reported.
         assert_eq!(ab.a_snippet, "E = mc^{2}");
         assert_eq!(ab.b_snippet, "E=mc^2");
+        let ac = relations
+            .iter()
+            .find(|r| r.a_path == note_a && r.b_path == note_c)
+            .expect("a–c relation");
+        assert_eq!(ac.b_line, 30);
         assert!(relations.iter().all(|r| r.a_path != r.b_path));
+    }
+
+    #[test]
+    fn formula_relations_repeat_blocks_do_not_multiply() {
+        // The measured blowup: one formula repeated many times in each of a
+        // few notes must stay linear in note pairs, not block pairs.
+        let shared = normalize_math("E=mc^2");
+        let mut index = AiIndex::default();
+        for name in ["a.md", "b.md", "c.md"] {
+            index.notes.insert(
+                PathBuf::from(format!("/v/{name}")),
+                NoteEntry {
+                    math_blocks: (0..500)
+                        .map(|i| MathBlock {
+                            normalized: shared.clone(),
+                            line: i,
+                            source: "E=mc^2".into(),
+                        })
+                        .collect(),
+                    ..Default::default()
+                },
+            );
+        }
+        let relations = formula_relations(&index);
+        assert_eq!(relations.len(), 3);
+        assert!(relations.iter().all(|r| r.a_line == 0 && r.b_line == 0));
     }
 }

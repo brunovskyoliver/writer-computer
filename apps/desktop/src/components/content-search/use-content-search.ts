@@ -10,8 +10,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Channel } from "@tauri-apps/api/core";
 import * as tauri from "@/lib/tauri";
-import { pdfSearchLines } from "@/lib/pdf";
-import { matchPdfPages } from "@/lib/pdf-search";
+import { searchPdfText } from "@/lib/pdf";
 import { ContentScan, createSeqGuard, type ContentScanState } from "@/lib/content-search";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import type { ContentSearchEvent, PdfCandidate, SearchMatch } from "@/types/fs";
@@ -55,17 +54,24 @@ export function useContentSearch(query: string): ContentScanState {
             let found: SearchMatch[] = [];
             let overflowed = false;
             try {
-              const pages = await pdfSearchLines(candidate.path);
-              if (pages) {
-                const relativePath =
-                  root && candidate.path.startsWith(`${root}/`)
-                    ? candidate.path.slice(root.length + 1)
-                    : candidate.path;
-                const result = matchPdfPages(pages, trimmed, {
+              const relativePath =
+                root && candidate.path.startsWith(`${root}/`)
+                  ? candidate.path.slice(root.length + 1)
+                  : candidate.path;
+              // Extract+match stream per page and stop at the per-file cap;
+              // the (path, mtime) cache inside `searchPdfText` makes repeat
+              // queries cheap and a superseded scan stops pulling pages.
+              const result = await searchPdfText(
+                candidate.path,
+                trimmed,
+                {
                   path: candidate.path,
                   relativePath,
                   modifiedAt: candidate.modified_at,
-                });
+                },
+                () => !guard.isCurrent(seq),
+              );
+              if (result) {
                 found = result.matches;
                 overflowed = result.truncated;
               }

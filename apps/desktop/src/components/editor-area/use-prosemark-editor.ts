@@ -142,6 +142,9 @@ export function useProsemarkEditor(
 
     const currentPath = filePathRef.current;
     const currentTabId = tabIdRef.current;
+    // `content` is a debounced mirror — a mount must open at the live text,
+    // not the last flush's, or the view would clobber unflushed keystrokes.
+    editorApi.flushPendingEdit(currentPath);
     const file = editorApi.getOpenFile(currentPath);
     const initialContent = file?.content ?? "";
     const viewState = editorApi.getTabViewState(currentTabId, currentPath);
@@ -224,6 +227,9 @@ export function useProsemarkEditor(
     // at this file would land in the note it used to show.
     if (pathChanged) editorApi.retargetEditorView(tabId, filePath);
 
+    // A swap writes this text into the view — flush the pending mirror so
+    // unflushed keystrokes survive the transition instead of being reverted.
+    editorApi.flushPendingEdit(filePath);
     const file = editorApi.getOpenFile(filePath);
     const content = file?.content ?? "";
 

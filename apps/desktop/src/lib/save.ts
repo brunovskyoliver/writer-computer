@@ -15,6 +15,12 @@ export interface SaveStoreAccess {
   getOpenFile: (path: string) => OpenFile | undefined;
   markSaved: (path: string, diskContent: string, hasNewerChanges: boolean) => void;
   setSaveError: (path: string, error: string) => void;
+  /** Materialize a buffered editor document into `content` before a save
+   *  reads it — `content` is a debounced mirror, not the live text. */
+  flushPendingEdit: (path: string) => void;
+  /** True while edits newer than `content` sit unflushed — the post-write
+   *  supersession signal alongside `editSeq`. */
+  hasPendingEdit: (path: string) => boolean;
 }
 
 let storeAccess: SaveStoreAccess | null = null;
@@ -164,13 +170,6 @@ async function performSave(
   if (controller.inFlight) return "busy";
 
   const store = requireStore();
-  const file = store.getOpenFile(path);
-  if (!file || !file.isDirty) {
-    controller.pending = false;
-    cleanupSaveController(path, controller);
-    return "clean";
-  }
-
   let settle!: () => void;
   controller.inFlight = new Promise<void>((resolve) => {
     settle = resolve;
@@ -178,7 +177,20 @@ async function performSave(
   controller.pending = false;
   controller.lastSaveTime = Date.now();
 
+  // `content` is a debounced mirror — materialize the live document before
+  // serializing. Marked in-flight first so the flush's own scheduleSave
+  // queues behind this write instead of re-entering performSave.
+  store.flushPendingEdit(path);
+  const file = store.getOpenFile(path);
+  if (!file || !file.isDirty) {
+    controller.inFlight = null;
+    settle();
+    cleanupSaveController(path, controller);
+    return "clean";
+  }
+
   const full = serializeForSave(file);
+  const savedSeq = file.editSeq;
   let shouldReschedule = false;
   let outcome: SaveOutcome = "saved";
 
@@ -188,7 +200,10 @@ async function performSave(
     const latestFile = store.getOpenFile(path);
     if (!latestFile) return "clean";
 
-    shouldReschedule = serializeForSave(latestFile) !== full;
+    // Newer bytes reached the store mid-write (editSeq bump) or still sit in
+    // the pending buffer — either way this write is stale and a follow-up
+    // must run.
+    shouldReschedule = latestFile.editSeq !== savedSeq || store.hasPendingEdit(path);
     if (shouldReschedule) outcome = "superseded";
     store.markSaved(path, full, shouldReschedule);
   } catch (err) {

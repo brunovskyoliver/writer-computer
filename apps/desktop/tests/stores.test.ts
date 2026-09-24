@@ -399,6 +399,45 @@ describe("editor-store", () => {
     });
   });
 
+  test("restoreSession warms only the nearest history; cold entries lazy-load on navigation", async () => {
+    mockedInvoke.mockImplementation((_command: string, args) =>
+      Promise.resolve({
+        path: ((args as { path?: string } | undefined)?.path ?? "") as string,
+        content: "x",
+        modified_at: 1,
+      }),
+    );
+    const file = (path: string) => ({ kind: "file" as const, path });
+    const tab = {
+      id: "t1",
+      location: file("/cur.md"),
+      back: ["/b1.md", "/b2.md", "/b3.md", "/b4.md", "/b5.md"].map(file),
+      forward: ["/f1.md", "/f2.md", "/f3.md"].map(file),
+    };
+
+    await useEditorStore.getState().restoreSession({ tabs: [tab], layout: createLayout(["t1"]) });
+
+    // Warm set = current + last two back + first two forward.
+    const reads = mockedInvoke.mock.calls
+      .filter(([command]) => command === "read_file")
+      .map(([, args]) => (args as { path: string }).path)
+      .sort();
+    expect(reads).toEqual(["/b4.md", "/b5.md", "/cur.md", "/f1.md", "/f2.md"].sort());
+    // The full history survives — nothing was dropped, just not loaded.
+    expect(useEditorStore.getState().tabs[0]?.back).toHaveLength(5);
+    expect(useEditorStore.getState().tabs[0]?.forward).toHaveLength(3);
+
+    // Back past the warm set reaches a cold entry — it loads on demand.
+    await useEditorStore.getState().navigateBack();
+    await useEditorStore.getState().navigateBack();
+    mockedInvoke.mockClear();
+    await useEditorStore.getState().navigateBack();
+    const lazyReads = mockedInvoke.mock.calls
+      .filter(([command]) => command === "read_file")
+      .map(([, args]) => (args as { path: string }).path);
+    expect(lazyReads).toEqual(["/b3.md"]);
+  });
+
   test("opening a file while a launcher tab is active reuses that tab id", async () => {
     mockedInvoke.mockResolvedValue({ path: "/a.md", content: "a", modified_at: 1 });
 
@@ -1224,6 +1263,7 @@ describe("workspace-store closeWorkspace", () => {
             reloadVersion: 0,
             displayDate: null,
             stats: { words: 0, characters: 0, paragraphs: 0 },
+            editSeq: 0,
           },
         ],
       ]),

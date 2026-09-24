@@ -50,6 +50,9 @@ function createSession(path: string, initial: DrawingScene) {
   // An empty scene is not "armed" until something is drawn, so a load that
   // reports zero elements cannot overwrite a real drawing with nothing.
   let armed = elements.length === 0;
+  // No memoization: Excalidraw mutates element objects in place mid-stroke,
+  // so a cached serialization can miss an unreported edit — a stale "clean"
+  // result from `isDirty` releases a session that still owns unsaved work.
   const serialize = () =>
     JSON.stringify({
       elements: elements.filter((element) => !element.isDeleted),

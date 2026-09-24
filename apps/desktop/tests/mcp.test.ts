@@ -64,6 +64,7 @@ function openFile(path: string, content: string, isDirty = false): OpenFile {
     reloadVersion: 0,
     displayDate: null,
     stats: { words: 0, characters: 0, paragraphs: 0 },
+    editSeq: 0,
   };
 }
 

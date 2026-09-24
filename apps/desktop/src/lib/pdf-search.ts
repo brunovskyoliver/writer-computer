@@ -83,6 +83,49 @@ export function findMatchRanges(
   return ranges;
 }
 
+/**
+ * Match `query` against one page's lines, appending to `matches` —
+ * `pageIndex` is zero-based (matches report `page: pageIndex + 1`).
+ * Returns true once `MAX_MATCHES_PER_FILE` is reached: the streaming
+ * extractor uses that signal to stop pulling pages. Kept per-page so
+ * `lib/pdf.ts` can interleave extraction and matching instead of scanning a
+ * fully materialized `pages` array.
+ */
+export function matchPdfPageLines(
+  lines: string[],
+  pageIndex: number,
+  query: string,
+  caseSensitive: boolean,
+  base: { path: string; relativePath: string; modifiedAt: number },
+  matches: SearchMatch[],
+): boolean {
+  for (let i = 0; i < lines.length; i++) {
+    if (matches.length >= MAX_MATCHES_PER_FILE) return true;
+    const ranges = findMatchRanges(lines[i]!, query, caseSensitive);
+    if (ranges.length === 0) continue;
+
+    const start = Math.max(0, i - CONTEXT_RADIUS);
+    const end = Math.min(lines.length, i + CONTEXT_RADIUS + 1);
+    const context: ContextLine[] = [];
+    for (let k = start; k < end; k++) {
+      context.push({ line_number: k + 1, text: lines[k]! });
+    }
+
+    matches.push({
+      path: base.path,
+      relative_path: base.relativePath,
+      modified_at: base.modifiedAt,
+      kind: "pdf",
+      line_number: null,
+      page: pageIndex + 1,
+      line_text: lines[i]!,
+      match_ranges: ranges,
+      context,
+    });
+  }
+  return matches.length >= MAX_MATCHES_PER_FILE;
+}
+
 /** Match `query` against the extracted lines of every page. `pages[0]` is
  *  page 1 — matching is per line, so a result always reports the page its
  *  matched line lives on. `context` is built from the same extracted lines
@@ -97,35 +140,7 @@ export function matchPdfPages(
   let truncated = false;
 
   for (let p = 0; p < pages.length; p++) {
-    const lines = pages[p]!;
-    for (let i = 0; i < lines.length; i++) {
-      if (matches.length >= MAX_MATCHES_PER_FILE) {
-        truncated = true;
-        break;
-      }
-      const ranges = findMatchRanges(lines[i]!, query, caseSensitive);
-      if (ranges.length === 0) continue;
-
-      const start = Math.max(0, i - CONTEXT_RADIUS);
-      const end = Math.min(lines.length, i + CONTEXT_RADIUS + 1);
-      const context: ContextLine[] = [];
-      for (let k = start; k < end; k++) {
-        context.push({ line_number: k + 1, text: lines[k]! });
-      }
-
-      matches.push({
-        path: base.path,
-        relative_path: base.relativePath,
-        modified_at: base.modifiedAt,
-        kind: "pdf",
-        line_number: null,
-        page: p + 1,
-        line_text: lines[i]!,
-        match_ranges: ranges,
-        context,
-      });
-    }
-    if (matches.length >= MAX_MATCHES_PER_FILE) {
+    if (matchPdfPageLines(pages[p]!, p, query, caseSensitive, base, matches)) {
       truncated = true;
       break;
     }

@@ -51,6 +51,7 @@ function loadVim(): Promise<VimModule> {
         return registration ? { tabId: registration.tabId, path: registration.path } : null;
       },
       getOpenFile: (path) => editorApi.getOpenFile(path) ?? undefined,
+      flushPendingEdit: editorApi.flushPendingEdit,
       saveNow,
       closeTab: editorApi.closeTab,
       reloadFromDisk: editorApi.reloadFromDisk,

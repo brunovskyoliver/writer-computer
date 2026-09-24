@@ -171,6 +171,9 @@ async function writeFile(args: unknown) {
 }
 
 async function writeFileResolved(path: string, relativePath: string, content: string) {
+  // Flush pending edits so both dirty checks and the re-dirty path below see
+  // the live text, not the debounced mirror.
+  useEditorStore.getState().flushPendingEdit(path);
   const admitted = useEditorStore.getState().openFiles.get(path);
   if (admitted?.isDirty) {
     throw unsavedConflict(relativePath, "is open with unsaved changes");

@@ -1,5 +1,5 @@
 import * as tauri from "@/lib/tauri";
-import { getOpenFile } from "@/hooks/editor-api";
+import { getOpenFile, flushPendingEdit } from "@/hooks/editor-api";
 import { serializeDocument } from "@/lib/frontmatter";
 import { getFileStem } from "@/lib/paths";
 
@@ -57,6 +57,8 @@ async function resolveDuplicatePath(sourcePath: string): Promise<string> {
 export async function duplicateFile(sourcePath: string): Promise<string> {
   const targetPath = await resolveDuplicatePath(sourcePath);
 
+  // Flush so a dirty tab's pending edits land in the duplicated file.
+  flushPendingEdit(sourcePath);
   const openFile = getOpenFile(sourcePath);
   let content: string;
 

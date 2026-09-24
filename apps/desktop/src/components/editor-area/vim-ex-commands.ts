@@ -15,6 +15,9 @@ export interface VimExDeps {
   getOpenFile: (
     path: string,
   ) => { isDirty: boolean; content: string; diskContent: string } | undefined;
+  /** Materialize a buffered document into `content` — `hasUnsavedChanges`
+   *  compares against `diskContent`, which a pending doc invalidates. */
+  flushPendingEdit: (path: string) => void;
   /** Immediate save; resolves `false` when the write failed (error already surfaced). */
   saveNow: (path: string) => Promise<boolean>;
   closeTab: (tabId: string) => void;
@@ -49,6 +52,7 @@ export function registerVimExCommands(vim: VimExRegistry, deps: VimExDeps) {
   };
 
   const hasUnsavedChanges = (path: string) => {
+    deps.flushPendingEdit(path);
     const file = deps.getOpenFile(path);
     return file !== undefined && file.isDirty && file.content !== file.diskContent;
   };

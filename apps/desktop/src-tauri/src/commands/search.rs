@@ -604,7 +604,9 @@ pub(crate) fn content_search_impl(
                 }
                 // The text cap has engaged: no more text matches can display,
                 // but the walk continues so PDF candidates still enumerate.
+                // Skipping a file here drops matches — that is truncation.
                 if total_ref.load(Ordering::Relaxed) >= MAX_TOTAL_MATCHES {
+                    truncated_ref.store(true, Ordering::Relaxed);
                     return ignore::WalkState::Continue;
                 }
                 let Some(metadata) = entry.metadata().ok() else {
