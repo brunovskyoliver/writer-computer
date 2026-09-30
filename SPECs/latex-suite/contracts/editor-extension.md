@@ -35,13 +35,13 @@ The expansion transaction: `{ changes, selection, effects: [setFrames], userEven
 
 ## Tab / Shift-Tab / Escape / Backspace (Prec.highest keymap)
 
-| Key         | Order of attempts (first `true` wins)                                                                                                                                                                                                |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `Tab`       | 1. active tabstop frame → advance to next group (pop exhausted frames, continue in outer) · 2. non-automatic snippet whose trigger ends at the caret (snippets enabled) · 3. tab-out if `latex.tab-out` and ctx is math · 4. `false` |
-| `Shift-Tab` | 1. active frame → previous group · 2. `false`                                                                                                                                                                                        |
-| `Escape`    | 1. frames present → clear all, `false` (let others also see Escape)                                                                                                                                                                  |
-| `Backspace` | 1. `lastExpansionAt === current doc-change counter` and history has an undo → `undo`, `true` · 2. `false`                                                                                                                            |
-| `Enter`     | 1. `latex.matrix-rows` on and caret inside an unclosed matrix-like env in display math with a non-blank row → insert `\\` + newline, `true` · 2. `false`                                                                             |
+| Key         | Order of attempts (first `true` wins)                                                                                                                                                                                                             |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Tab`       | 1. active tabstop frame → advance to next group (pop exhausted frames, continue in outer) · 2. non-automatic snippet whose trigger ends at the caret (snippets enabled) · 3. tab-out if `latex.tab-out` and ctx is math · 4. `false`              |
+| `Shift-Tab` | 1. active frame → previous group · 2. `false`                                                                                                                                                                                                     |
+| `Escape`    | 1. frames present → clear all, `false` (let others also see Escape)                                                                                                                                                                               |
+| `Backspace` | 1. `lastExpansionAt === current doc-change counter` and history has an undo → `undo`, `true` · 2. `false`                                                                                                                                         |
+| `Enter`     | 1. `latex.matrix-rows` on and caret inside an unclosed matrix-like env in display math with a non-blank row → insert `\\` + newline, `true` · 1b. same, on the blank last row → delete it and its `\\`, caret past `\end{…}`, `true` · 2. `false` |
 
 All five return `false` in vim Normal/Visual modes. Tab-to-next-stop dispatches a selection-only transaction (`userEvent: "select"`), so it adds no undo step.
 
@@ -76,7 +76,7 @@ From the caret to the end of the line: the first of `}`, `)`, `]`, `|`, `&` (mat
 
 ## Enter in a matrix row (`latex.matrix-rows`)
 
-In display math with the caret inside an unclosed `\begin{env}` where `env` is matrix-like (`*matrix*`, `array`, `subarray`, `cases`/`dcases`/`rcases`, `aligned`, `alignedat`, `gathered`, `split`) and the current row — text since the environment's opening group (skipping a `{…}` colspec) or the last `\\` — is non-blank, Enter dispatches `\\` + newline as `input.type` and returns `true`. Everywhere else it returns `false`.
+In display math with the caret inside an unclosed `\begin{env}` where `env` is matrix-like (`*matrix*`, `array`, `subarray`, `cases`/`dcases`/`rcases`, `aligned`, `alignedat`, `gathered`, `split`) and the current row — text since the environment's opening group (skipping a `{…}` colspec) or the last `\\` — is non-blank, Enter dispatches `\\` + newline as `input.type` and returns `true`. When the row is blank, follows a `\\`, and is the environment's last row (only whitespace before `\end{env}`), Enter deletes the `\\` and the blank row and puts the caret just past `\end{env}` — Enter twice leaves the matrix. Everywhere else it returns `false`.
 
 ## Highlighting
 

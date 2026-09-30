@@ -35,6 +35,10 @@ describe("Matrix insert prompt", function () {
     "Q=",
     "$$",
     "",
+    "$$",
+    "S=",
+    "$$",
+    "",
   ].join("\n");
 
   let workspaceRestored = false;
@@ -234,6 +238,38 @@ describe("Matrix insert prompt", function () {
     );
   });
 
+  it("leaves the matrix on Tab twice at a row's end", async function () {
+    await caretToLineEnd("a_{21} & a_{22} & a_{23}");
+    await press("Tab"); // opens an empty element
+    await press("Tab"); // …which is dropped, and the caret leaves
+    await typeText("X");
+    await browser.waitUntil(
+      async () => {
+        const lines = await docLines();
+        return (
+          lines.includes("a_{21} & a_{22} & a_{23}") &&
+          lines.some((text) => text.startsWith("\\end{bmatrix}X"))
+        );
+      },
+      { timeout: 5_000, timeoutMsg: "Tab twice did not leave the matrix" },
+    );
+  });
+
+  it("leaves the matrix on Enter twice at the last row", async function () {
+    await caretToLineEnd("p & q");
+    await browser.keys(["Enter"]); // `p & q\\` + a fresh row
+    await browser.keys(["Enter"]); // the empty row goes, the caret leaves
+    await typeText("Y");
+    await browser.waitUntil(
+      async () => {
+        const lines = await docLines();
+        const at = lines.indexOf("p & q");
+        return at !== -1 && lines[at + 1] === "\\end{bmatrix}Y";
+      },
+      { timeout: 5_000, timeoutMsg: "Enter twice did not leave the matrix" },
+    );
+  });
+
   it("does not let a left-behind subscript snippet capture Tab", async function () {
     await caretToLineEnd("p & q");
     await typeText("_"); // `_` expands to `_{$0}$1`
@@ -257,6 +293,19 @@ describe("Matrix insert prompt", function () {
     await browser.waitUntil(async () => (await docLines()).includes("Q=_{T}x"), {
       timeout: 5_000,
       timeoutMsg: "typing } inside _{…} doubled the brace",
+    });
+  });
+
+  it("steps out of a subscript on a space", async function () {
+    await caretToLineEnd("S=");
+    await typeText("x");
+    await typeText("_"); // `x_{|}`
+    await typeText("1");
+    await typeText(" ");
+    await typeText("+");
+    await browser.waitUntil(async () => (await docLines()).includes("S=x_{1} +"), {
+      timeout: 5_000,
+      timeoutMsg: "a space inside x_{1} did not step out of the subscript",
     });
   });
 });

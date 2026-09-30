@@ -21,7 +21,7 @@ import {
 import { Decoration, EditorView, ViewPlugin, keymap, type DecorationSet } from "@codemirror/view";
 import { autoFraction } from "@/lib/latex-snippets/auto-fraction";
 import { matrixCellTarget } from "@/lib/latex-snippets/matrix-cell";
-import { matrixRowBreak } from "@/lib/latex-snippets/matrix-row";
+import { matrixRowBreak, matrixRowExit } from "@/lib/latex-snippets/matrix-row";
 import { atFormulaEnd, copyStepInsert, emptyStepInsert } from "@/lib/math/steps";
 import {
   expandSnippet,
@@ -204,6 +204,7 @@ function handleInput(view: EditorView, from: number, to: number, text: string): 
   }
   if (from !== to) return false;
   if (overtypeCloser(view, from, text)) return true;
+  if (leaveScriptGroup(view, from, text)) return true;
 
   // Decide *before* touching the document. Returning `true` from an
   // `inputHandler` suppresses every lower-precedence one — `closeBrackets()`
@@ -304,6 +305,52 @@ function overtypeCloser(view: EditorView, pos: number, text: string): boolean {
   return true;
 }
 
+/**
+ * A space or `&` typed at the end of a snippet's `_{…}` / `^{…}` group lands
+ * after the group: `x_1 + x_2` reads `x_{1} + x_{2}`, not `x_{1 + x_{2}}`.
+ * Multi-character scripts (`a_{ij}`, `x_{n+1}`) are untouched — only these two
+ * characters, which never start a script's content, step out.
+ */
+function leaveScriptGroup(view: EditorView, pos: number, text: string): boolean {
+  if (text !== " " && text !== "&") return false;
+  const doc = view.state.doc;
+  if (doc.sliceString(pos, pos + 1) !== "}") return false;
+  const frames = view.state.field(tabstopField).frames;
+  const top = frames[frames.length - 1];
+  if (!top) return false;
+
+  let stopAfter = false;
+  const cursor = top.marks.iter();
+  for (; cursor.value; cursor.next()) {
+    if (cursor.from === pos + 1) stopAfter = true;
+  }
+  if (!stopAfter) return false;
+
+  // The `{` this `}` closes must open a script group.
+  const line = doc.lineAt(pos);
+  const before = doc.sliceString(line.from, pos);
+  let depth = 0;
+  let open = -1;
+  for (let at = before.length - 1; at >= 0; at -= 1) {
+    if (before[at] === "}") depth += 1;
+    else if (before[at] === "{") {
+      if (depth === 0) {
+        open = at;
+        break;
+      }
+      depth -= 1;
+    }
+  }
+  if (open < 1 || (before[open - 1] !== "_" && before[open - 1] !== "^")) return false;
+
+  view.dispatch({
+    changes: { from: pos + 1, insert: text },
+    selection: EditorSelection.cursor(pos + 1 + text.length),
+    userEvent: "input.type",
+  });
+  return true;
+}
+
 // ---------- Tab / Shift-Tab / Escape / Backspace ----------
 
 /** Move to the next group, popping frames that have none left. `null` when the
@@ -371,6 +418,15 @@ function tabCommand(getTabId: () => string) {
             selection: EditorSelection.cursor(context.node.formulaFrom + cell.to),
             userEvent: "select",
           });
+        } else if (cell.kind === "leave") {
+          view.dispatch({
+            changes: {
+              from: context.node.formulaFrom + cell.from,
+              to: context.node.formulaFrom + cell.to,
+            },
+            selection: EditorSelection.cursor(context.node.formulaFrom + cell.caret),
+            userEvent: "delete",
+          });
         } else {
           view.dispatch({
             changes: { from: context.node.formulaFrom + cell.at, insert: cell.text },
@@ -418,7 +474,8 @@ function latexKeymap(getTabId: () => string) {
     },
     {
       // Inside a matrix-like environment in display math, Enter ends the row
-      // (`\\` + newline) instead of inserting a plain newline. At the very
+      // (`\\` + newline) instead of inserting a plain newline; on the empty
+      // last row it removes that row and leaves the matrix. At the very
       // end of a display formula it closes the block and opens the next
       // step's `$$` below. Every other position falls through to the usual
       // Enter handling.
@@ -439,6 +496,18 @@ function latexKeymap(getTabId: () => string) {
 
         if (setting("latex.matrix-rows") && matrixRowBreak(formula, offset)) {
           view.dispatch(view.state.replaceSelection("\\\\\n"), { userEvent: "input.type" });
+          return true;
+        }
+        // Enter on the empty row a previous Enter opened: drop that row and
+        // its `\\`, and leave the matrix past `\end{…}`.
+        const exit = setting("latex.matrix-rows") ? matrixRowExit(formula, offset) : null;
+        if (exit) {
+          const base = context.node.formulaFrom;
+          view.dispatch({
+            changes: { from: base + exit.from, to: base + exit.to, insert: exit.insert },
+            selection: EditorSelection.cursor(base + exit.caret),
+            userEvent: "delete",
+          });
           return true;
         }
 

@@ -17,7 +17,9 @@ function apply(formula: string): string | null {
   const text =
     target.kind === "insert"
       ? plain.slice(0, target.at) + target.text + plain.slice(target.at)
-      : plain;
+      : target.kind === "leave"
+        ? plain.slice(0, target.from) + plain.slice(target.to)
+        : plain;
   return text.slice(0, at) + "|" + text.slice(at);
 }
 
@@ -134,5 +136,31 @@ describe("matrixCellTarget — refuses", () => {
 
   test("inside gathered — a single-column env has no cells", () => {
     expect(targetAt("\\begin{gathered} a| \\end{gathered}")).toBeNull();
+  });
+});
+
+describe("matrixCellTarget — leave an empty trailing element", () => {
+  test("on the last row, drops the empty element and lands past \\end", () => {
+    expect(apply("\\begin{bmatrix}\n1 & 2 & |\n\\end{bmatrix}")).toBe(
+      "\\begin{bmatrix}\n1 & 2\n\\end{bmatrix}|",
+    );
+  });
+
+  test("on a middle row, drops it and lands on the next row", () => {
+    expect(apply("\\begin{bmatrix}\n1 & 2 & |\\\\\n3 & 4\n\\end{bmatrix}")).toBe(
+      "\\begin{bmatrix}\n1 & 2\\\\\n|3 & 4\n\\end{bmatrix}",
+    );
+  });
+
+  test("works with thin-space separators", () => {
+    expect(apply("\\begin{bmatrix}5\\;6\\;|\\end{bmatrix}")).toBe(
+      "\\begin{bmatrix}5\\;6\\end{bmatrix}|",
+    );
+  });
+
+  test("Tab, Tab at a row's end: open an element, then leave", () => {
+    const opened = apply("\\begin{pmatrix} a & b| \\end{pmatrix}")!;
+    expect(opened).toBe("\\begin{pmatrix} a & b & | \\end{pmatrix}");
+    expect(apply(opened)).toBe("\\begin{pmatrix} a & b \\end{pmatrix}|");
   });
 });

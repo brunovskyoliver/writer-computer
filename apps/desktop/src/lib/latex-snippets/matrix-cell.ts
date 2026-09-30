@@ -8,7 +8,7 @@
  * Rules: SPECs/matrix-brace-tools/spec.md (FR-10).
  */
 
-import { innermostEnvAt } from "./matrix-row";
+import { innermostEnvAt, rowEndAt } from "./matrix-row";
 
 /** Environments whose rows split into elements. `gathered` is excluded — it
  *  typesets a single column, so a separator there is never an element edge. */
@@ -25,7 +25,12 @@ export type MatrixCellTarget =
   | { kind: "move"; to: number }
   /** The row's last element is reached: insert `text` at `at` and put the
    *  caret in the fresh element. */
-  | { kind: "insert"; at: number; text: string; caret: number };
+  | { kind: "insert"; at: number; text: string; caret: number }
+  /** The caret sits in an empty trailing element: delete `[from, to)` — the
+   *  separator that opened it — and put the caret at `caret` (an offset in
+   *  the formula *after* the delete): the next row's first element, or past
+   *  `\end{…}` on the last row. Tab twice at a row's end leaves the matrix. */
+  | { kind: "leave"; from: number; to: number; caret: number };
 
 /** First position after `from` that is not a space/tab/newline, capped at `to`. */
 function skipSpaces(text: string, from: number, to: number): number {
@@ -92,32 +97,7 @@ export function matrixCellTarget(formula: string, caret: number): MatrixCellTarg
   if (lastBreak !== -1 && lastBreak + 2 > rowStart) rowStart = lastBreak + 2;
   if (caret < rowStart) return null;
 
-  // The row ends at the first `\\` or `\end{…}` outside a nested environment.
-  let depth = 0;
-  let rowEnd = formula.length;
-  for (let i = caret; i < formula.length; i += 1) {
-    if (formula[i] !== "\\") continue;
-    if (formula[i + 1] === "\\") {
-      if (depth === 0) {
-        rowEnd = i;
-        break;
-      }
-      i += 1;
-      continue;
-    }
-    const token = ENV_TOKEN.exec(formula.slice(i, i + 8));
-    if (token) {
-      if (token[1] === "begin") depth += 1;
-      else if (depth > 0) depth -= 1;
-      else {
-        rowEnd = i;
-        break;
-      }
-      i += token[0].length - 1;
-      continue;
-    }
-    i += 1;
-  }
+  const rowEnd = rowEndAt(formula, caret);
 
   const ahead = nextSeparator(formula, caret, rowEnd);
   if (ahead) {
@@ -127,10 +107,55 @@ export function matrixCellTarget(formula: string, caret: number): MatrixCellTarg
   // Last element: an empty row has nothing to extend — leave Tab alone.
   if (formula.slice(rowStart, rowEnd).trim() === "") return null;
 
+  const leave = leaveEmptyElement(formula, rowStart, rowEnd, caret);
+  if (leave) return leave;
+
   let at = rowEnd;
   while (at > caret && /\s/.test(formula[at - 1]!)) at -= 1;
 
   const style = nextSeparator(formula, env.bodyStart, rowEnd);
   const text = style === null || style.raw === "&" ? " & " : style.raw;
   return { kind: "insert", at, text, caret: at + text.length };
+}
+
+/**
+ * The caret is in an empty last element (`1 & 2 & |`): the element was opened
+ * by a Tab that found nothing more to type. Undo it and move on — to the next
+ * row, or out past `\end{…}` when this is the last row. Null when the last
+ * element has content or the environment is not closed.
+ */
+function leaveEmptyElement(
+  formula: string,
+  rowStart: number,
+  rowEnd: number,
+  caret: number,
+): MatrixCellTarget | null {
+  let last: { index: number; raw: string } | null = null;
+  for (let at = rowStart; ; ) {
+    const separator = nextSeparator(formula, at, caret);
+    if (!separator) break;
+    last = separator;
+    at = separator.index + separator.raw.length;
+  }
+  if (!last) return null;
+  const elementFrom = last.index + last.raw.length;
+  if (formula.slice(elementFrom, rowEnd).trim() !== "") return null;
+
+  let from = last.index;
+  while (from > rowStart && (formula[from - 1] === " " || formula[from - 1] === "\t")) from -= 1;
+  // Up to the caret: whitespace past it (before `\end{…}`) stays put.
+  const to = Math.max(elementFrom, caret);
+  const removed = to - from;
+
+  if (formula.startsWith("\\\\", rowEnd)) {
+    return {
+      kind: "leave",
+      from,
+      to,
+      caret: skipSpaces(formula, rowEnd + 2, formula.length) - removed,
+    };
+  }
+  const close = /^\\end\{[^}]*\}/.exec(formula.slice(rowEnd));
+  if (!close) return null;
+  return { kind: "leave", from, to, caret: rowEnd + close[0].length - removed };
 }

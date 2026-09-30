@@ -1,5 +1,9 @@
 import { describe, expect, test } from "vite-plus/test";
-import { enclosingMatrixEnv, matrixRowBreak } from "../src/lib/latex-snippets/matrix-row";
+import {
+  enclosingMatrixEnv,
+  matrixRowBreak,
+  matrixRowExit,
+} from "../src/lib/latex-snippets/matrix-row";
 
 /** caret marker: `|` inside the formula string. */
 function check(formula: string): boolean {
@@ -98,5 +102,38 @@ describe("enclosingMatrixEnv", () => {
 
   test("an unclosed \\end or `\\\\begin` row text never matches", () => {
     expect(envAt("\\begin{pmatrix} a \\\\begin{pmatrix} |")).toBeNull();
+  });
+});
+
+/** Apply `matrixRowExit` at the `|` and re-render with `|` at the new caret. */
+function exitAt(formula: string): string | null {
+  const caret = formula.indexOf("|");
+  const plain = formula.replace("|", "");
+  const edit = matrixRowExit(plain, caret);
+  if (!edit) return null;
+  const text = plain.slice(0, edit.from) + edit.insert + plain.slice(edit.to);
+  return text.slice(0, edit.caret) + "|" + text.slice(edit.caret);
+}
+
+describe("matrixRowExit", () => {
+  test("Enter on the empty last row drops it and lands past \\end", () => {
+    expect(exitAt("\\begin{bmatrix}\n1 & 2\\\\\n3 & 4\\\\\n|\n\\end{bmatrix}")).toBe(
+      "\\begin{bmatrix}\n1 & 2\\\\\n3 & 4\n\\end{bmatrix}|",
+    );
+  });
+
+  test("works on one line too", () => {
+    expect(exitAt("\\begin{bmatrix}1 & 2\\\\ |\\end{bmatrix}")).toBe(
+      "\\begin{bmatrix}1 & 2 \\end{bmatrix}|",
+    );
+  });
+
+  test("an empty row with rows below it is left alone", () => {
+    expect(exitAt("\\begin{bmatrix}\n1\\\\\n|\\\\\n2\n\\end{bmatrix}")).toBeNull();
+  });
+
+  test("a row with content, or the first row, is left alone", () => {
+    expect(exitAt("\\begin{bmatrix}\n1\\\\\n2|\n\\end{bmatrix}")).toBeNull();
+    expect(exitAt("\\begin{bmatrix}\n|\n\\end{bmatrix}")).toBeNull();
   });
 });

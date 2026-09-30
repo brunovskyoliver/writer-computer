@@ -96,6 +96,64 @@ export function matrixRowBreak(formula: string, caret: number): boolean {
   return formula.slice(rowStart, caret).trim() !== "";
 }
 
+const ENV_TOKEN = /^\\(begin|end)\{/;
+
+/** Where the row containing `caret` ends: the first `\\` or `\end{…}` at
+ *  or after it outside a nested environment, or the formula's end. */
+export function rowEndAt(formula: string, caret: number): number {
+  let depth = 0;
+  for (let i = caret; i < formula.length; i += 1) {
+    if (formula[i] !== "\\") continue;
+    if (formula[i + 1] === "\\") {
+      if (depth === 0) return i;
+      i += 1;
+      continue;
+    }
+    const token = ENV_TOKEN.exec(formula.slice(i, i + 8));
+    if (token) {
+      if (token[1] === "begin") depth += 1;
+      else if (depth > 0) depth -= 1;
+      else return i;
+      i += token[0].length - 1;
+      continue;
+    }
+    i += 1;
+  }
+  return formula.length;
+}
+
+/**
+ * Enter on an empty last row (`3 & 4\\` then Enter on the blank line below):
+ * the row break was one too many. Returns the edit that deletes the `\\` and
+ * the blank row, and the caret offset (after the edit) just past `\end{…}` —
+ * Enter twice at the end of a matrix leaves it. Null anywhere else, including
+ * an empty row with more rows below it.
+ */
+export function matrixRowExit(
+  formula: string,
+  caret: number,
+): { from: number; to: number; insert: string; caret: number } | null {
+  const env = innermostEnvAt(formula, caret);
+  if (!env || !MATRIX_ENV.test(env.name)) return null;
+
+  const lastBreak = formula.slice(0, caret).lastIndexOf("\\\\");
+  if (lastBreak === -1 || lastBreak < env.bodyStart) return null;
+  if (formula.slice(lastBreak + 2, caret).trim() !== "") return null;
+
+  const end = rowEndAt(formula, caret);
+  if (formula.slice(caret, end).trim() !== "") return null;
+  const close = /^\\end\{[^}]*\}/.exec(formula.slice(end));
+  if (!close) return null;
+
+  const insert = formula.slice(lastBreak, end).includes("\n") ? "\n" : " ";
+  return {
+    from: lastBreak,
+    to: end,
+    insert,
+    caret: lastBreak + insert.length + close[0].length,
+  };
+}
+
 export interface MatrixEnvSpan {
   name: string;
   /** The env-name ranges inside the `\begin{…}` and `\end{…}` markers —

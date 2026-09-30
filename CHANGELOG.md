@@ -2,6 +2,8 @@
 
 ## 2026-09-30
 
+- Getting out of a matrix and out of subscripts. Tab at a row's end still opens a new element, but a second Tab on that empty element removes it and moves on — to the next row, or past `\end{…}` on the last row. Enter works the same way: on the empty row a previous Enter opened, it removes that row and its `\\` and leaves the matrix. And a space or `&` typed at the end of a `_{…}` or `^{…}` group steps out of it first, so `x_1 + x_2` becomes `x_{1} + x_{2}` instead of `x_{1 + x_{2}}`; `a_{ij}` and `x_{n+1}` type as before.
+
 - Write out a general matrix in one step. `Cmd+Alt+M` opens a small prompt at the caret: type a size and a letter (`3x3 a`, `2 4 b`, `2 by 3`; the letter defaults to `a`) and Enter writes a `bmatrix` of `a_{11}` … `a_{33}`, with the caret just past `\end{bmatrix}`. In display math the matrix lands at the caret, in inline math it stays on one line, and in prose it arrives in its own `$$` block. Past nine rows or columns the indices take a comma (`a_{1,10}`). Also in the command palette and the editor's Matrix submenu.
 
 - Tab in a matrix reliably moves to the next element. Two bugs sent it elsewhere. A finished snippet (a subscript `_{…}`, a fraction, a bracket pair) kept its tab stops alive, so Tab jumped the caret back into it; snippets now end once the caret leaves them or reaches their last stop. And from inside a brace group, such as `a_{1|1} & …` or `\textcolor{#e0a000}{2|} & …`, Tab skipped every `&` and appended a new cell at the end of the row; it now lands on the next element.

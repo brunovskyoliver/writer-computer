@@ -71,6 +71,11 @@ walks elements in the same row — past `&` or `\;`-style separators — and
 appends a separator when the row's last element is reached — see
 [`SPECs/matrix-brace-tools/spec.md`](../SPECs/matrix-brace-tools/spec.md).
 
+Tab on an empty trailing element (the one the previous Tab opened) removes it
+and moves to the next row, or out past `\end{…}` on the last row; Enter on the
+empty last row does the same. Tab twice or Enter twice leaves a matrix. A space
+or `&` typed at the end of a `_{…}`/`^{…}` group steps out of the group first.
+
 Cmd+Alt+M opens a small prompt at the caret: type a size and a letter
 (`3x3 a`, `2 4 b`) and Enter writes a `bmatrix` of `a_{11}` … `a_{33}`.
 Escape cancels.

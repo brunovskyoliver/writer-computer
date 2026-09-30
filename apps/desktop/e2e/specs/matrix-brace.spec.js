@@ -3,7 +3,7 @@ import { ok } from "node:assert/strict";
 // Matrix-row Enter and brace-annotation verification: seeds a document with a
 // `pmatrix` in display math plus prose, then checks
 //   - Enter inside a matrix row inserts `\\` + a fresh row
-//   - Enter on an empty matrix row falls back to a plain newline
+//   - Enter on the empty last matrix row removes it and leaves the matrix
 //   - Cmd+Alt+U / Cmd+Alt+O wrap the selection in \underbrace / \overbrace
 //     (math in place, prose inside `\text{}`) with the caret in the note
 //   - both commands are reachable from the command palette
@@ -192,23 +192,18 @@ describe("Matrix rows and brace annotations", function () {
       timeoutMsg: "Enter did not append a row break to the matrix row",
     });
 
-    // The caret sits on the fresh row: a second Enter must not add another
-    // `\\` — an empty row means a plain newline (the way out of the matrix).
+    // The caret sits on the fresh row: a second Enter on the empty last row
+    // drops it and its `\\` and leaves the matrix past `\end{pmatrix}`.
     await browser.keys(["Enter"]);
     await browser.waitUntil(
       async () => {
         const lines = await docLines();
         const at = lines.findIndex((text) => text.includes("1 & 2"));
-        return (
-          lines[at] === "1 & 2\\\\" &&
-          lines[at + 1] === "" &&
-          lines[at + 2] === "" &&
-          lines[at + 3]?.includes("\\end{pmatrix}")
-        );
+        return lines[at] === "1 & 2" && lines[at + 1] === "\\end{pmatrix}";
       },
       {
         timeout: 5_000,
-        timeoutMsg: "Enter on an empty matrix row did not fall back to a newline",
+        timeoutMsg: "Enter on the empty last matrix row did not leave the matrix",
       },
     );
   });

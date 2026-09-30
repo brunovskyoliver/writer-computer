@@ -19,8 +19,10 @@ The user types `pmat` inside `$$…$$`, gets `\begin{pmatrix}`/`\end{pmatrix}` w
 1. Typing `array` in math produces `\begin{array}{cc}` with the caret on the column spec — previously it emitted `\begin{array}` with no colspec, which does not render.
 2. Typing `smallmatrix` produces `\begin{smallmatrix}…\end{smallmatrix}` — not `small\begin{matrix}` (the bare `matrix` trigger is a suffix of `smallmatrix`; the alternation lists the longer name so the leftmost match covers the whole word).
 3. Tab inside a matrix row moves past the next `&` or `\\` on the line, then past `}`, then past `$$`. Inside a cell-capable environment Tab instead walks elements in the same row — past `&` or a thin-space separator (`\;`, `\,`, `\:`) — and at the row's last element it appends a separator in the env's existing style so a fresh element opens; the caret never crosses `\\` (Enter owns rows).
-4. Enter inside a matrix-like environment (`*matrix*`, `array`, `cases`/`dcases`/`rcases`, `aligned`, `gathered`, `split`, `subarray`) in display math inserts `\\` and a newline when the current row has content; on an empty row or outside such an environment Enter behaves as before.
-5. The behaviours are switchable per `latex.matrix-rows` and `latex.matrix-cells` in Settings → LaTeX Suite; default on.
+4. Enter inside a matrix-like environment (`*matrix*`, `array`, `cases`/`dcases`/`rcases`, `aligned`, `gathered`, `split`, `subarray`) in display math inserts `\\` and a newline when the current row has content. On the empty _last_ row (the one a previous Enter opened) it deletes that row and its `\\` and puts the caret past `\end{…}` — Enter twice leaves the matrix. An empty row with rows below it, and positions outside such an environment, behave as before.
+5. Tab on an empty trailing element (the one a previous Tab appended) deletes that separator and moves on: to the next row's first element, or past `\end{…}` on the last row — Tab twice at a row's end leaves the matrix.
+6. A space or `&` typed at the end of a snippet's `_{…}`/`^{…}` group steps out of it first, so `x_1 + x_2` reads `x_{1} + x_{2}`; `a_{ij}` and `x_{n+1}` are unaffected.
+7. The behaviours are switchable per `latex.matrix-rows` and `latex.matrix-cells` in Settings → LaTeX Suite; default on.
 
 ### US2 — Annotate a selection with a brace (P1)
 
@@ -73,6 +75,7 @@ Lecture notes spell out general matrices element by element (`a_{11} & a_{12} & 
 ## Requirements (continued)
 
 - **FR-11**: `parseMatrixSpec(input)` and `matrixTemplate(spec, { inline })` are pure (`src/lib/latex-snippets/matrix-template.ts`). The prompt is a CodeMirror tooltip anchored at the caret (`matrix-insert.ts`) — not a panel, which the theme hides — registered as `insert.matrix` in the `editorCommands` registry.
+- **FR-13**: `matrixRowExit(formula, caret)` (Enter) and the `leave` result of `matrixCellTarget` (Tab) are pure; each returns one delete plus the caret offset after it, dispatched as one undo step. A script-group step-out applies only when the `}` right of the caret closes a `_{`/`^{` group and ends right before a stop of the innermost tabstop frame.
 - **FR-12**: A snippet's tabstop frame is abandoned once the caret leaves its span (see the latex-suite editor-extension contract), so after a subscript or fraction is finished, Tab reaches the FR-10 cell walk instead of jumping back to a stale stop.
 
 ## Non-goals
