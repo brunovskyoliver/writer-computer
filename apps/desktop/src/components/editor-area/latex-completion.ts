@@ -245,8 +245,8 @@ function glyphFor(code: string): string | null {
  */
 export function editorCompletion(sources: CompletionSource[]): Extension {
   return [
-    // Appended to `document.body` so the card's backdrop blur works outside
-    // `EditorScrollContainer`'s mask (see App.css).
+    // Appended to `document.body` so the card escapes
+    // `EditorScrollContainer`'s edge-fade mask and clipping.
     tooltips({ parent: document.body }),
     autocompletion({
       override: sources,
