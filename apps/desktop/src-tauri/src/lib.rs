@@ -631,6 +631,8 @@ pub fn run() {
             commands::fonts::list_system_fonts,
             commands::latex::latex_snippets_path,
             commands::latex::reset_latex_snippets,
+            commands::latex_compile::compile_latex,
+            commands::latex_compile::latex_root,
             commands::recents::record_recent_file,
             commands::recents::remove_recent_file,
             commands::recents::get_recent_files_global,

@@ -1,4 +1,5 @@
-import { getFileStem } from "@/lib/paths";
+import { isLatexSourcePath } from "@/lib/latex-document";
+import { getFileName, getFileStem } from "@/lib/paths";
 import { definePageKind } from "./types";
 
 export type FileLocation = { kind: "file"; path: string };
@@ -7,7 +8,9 @@ export type FileLocation = { kind: "file"; path: string };
 // registered in `./views` so the data layer never imports the editor UI.
 export const fileKind = definePageKind<"file", FileLocation>({
   kind: "file",
-  title: (l) => getFileStem(l.path),
+  // A LaTeX source keeps its extension, like the sidebar: `report.tex` and
+  // its preview `report.pdf` are otherwise both "report".
+  title: (l) => (isLatexSourcePath(l.path) ? getFileName(l.path) : getFileStem(l.path)),
   description: "Open file",
   keepAlive: true,
   supportsFileContextMenu: true,

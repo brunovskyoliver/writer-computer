@@ -45,22 +45,23 @@ These shortcuts are bound to the native app menu (Tauri menu accelerators) rathe
 
 These shortcuts are handled by the `markdownFormatting` CodeMirror extension and only apply when the editor is focused.
 
-| Shortcut                | Action                    |
-| ----------------------- | ------------------------- |
-| Cmd+B                   | Bold                      |
-| Cmd+I                   | Italic                    |
-| Cmd+K                   | Insert link               |
-| Cmd+E                   | Inline code               |
-| Cmd+Shift+X             | Strikethrough             |
-| Cmd+Shift+8             | Bullet list               |
-| Cmd+Shift+7             | Numbered list             |
-| Cmd+Shift+.             | Blockquote                |
-| Cmd+Shift+Enter         | Task list                 |
-| Cmd+Alt+1 ... Cmd+Alt+6 | Heading 1-6               |
-| Cmd+Alt+0               | Paragraph (strip heading) |
-| Cmd+Alt+U               | Underbrace annotation     |
-| Cmd+Alt+O               | Overbrace annotation      |
-| Cmd+Alt+M               | Insert matrix of size…    |
+| Shortcut                | Action                     |
+| ----------------------- | -------------------------- |
+| Cmd+B                   | Bold                       |
+| Cmd+I                   | Italic                     |
+| Cmd+K                   | Insert link                |
+| Cmd+E                   | Inline code                |
+| Cmd+Shift+X             | Strikethrough              |
+| Cmd+Shift+8             | Bullet list                |
+| Cmd+Shift+7             | Numbered list              |
+| Cmd+Shift+.             | Blockquote                 |
+| Cmd+Shift+Enter         | Task list                  |
+| Cmd+Alt+1 ... Cmd+Alt+6 | Heading 1-6                |
+| Cmd+Alt+0               | Paragraph (strip heading)  |
+| Cmd+Alt+U               | Underbrace annotation      |
+| Cmd+Alt+O               | Overbrace annotation       |
+| Cmd+Alt+M               | Insert matrix of size…     |
+| Cmd+Alt+P               | Toggle PDF preview (LaTeX) |
 
 The brace commands need a selection: they wrap it in `\underbrace{…}_{}` /
 `\overbrace{…}^{}` in math, or `$\underbrace{\text{…}}_{\text{…}}$` in prose,
@@ -75,6 +76,12 @@ Tab on an empty trailing element (the one the previous Tab opened) removes it
 and moves to the next row, or out past `\end{…}` on the last row; Enter on the
 empty last row does the same. Tab twice or Enter twice leaves a matrix. A space
 or `&` typed at the end of a `_{…}`/`^{…}` group steps out of the group first.
+
+In a `.tex`/`.bib` file, Cmd+Alt+P compiles the document with Tectonic and
+opens its PDF beside the source (pressing it again closes the preview), and
+Cmd+Enter saves and compiles right away. While the preview is open every save
+recompiles. Cmd+Alt+M/U/O and the math snippets work inside the file's math —
+see [`SPECs/latex-documents/spec.md`](../SPECs/latex-documents/spec.md).
 
 Cmd+Alt+M opens a small prompt at the caret: type a size and a letter
 (`3x3 a`, `2 4 b`) and Enter writes a `bmatrix` of `a_{11}` … `a_{33}`.

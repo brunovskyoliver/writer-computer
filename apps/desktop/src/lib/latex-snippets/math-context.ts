@@ -9,9 +9,17 @@
  */
 
 import { syntaxTree } from "@codemirror/language";
-import type { EditorState } from "@codemirror/state";
+import { Facet, type EditorState, type Text } from "@codemirror/state";
 import type { SyntaxNode } from "@lezer/common";
 import { mathFormulaSpan } from "@/lib/prosemark-core/main";
+import { regionAt, scanLatexSource, type SourceRegion } from "./latex-source-math";
+
+/** Where math is found: the Markdown syntax tree (notes, the default) or the
+ *  text of a LaTeX source file (SPECs/latex-documents FR-5). Every caller of
+ *  `mathContext` — the snippet engine and all math commands — follows it. */
+export const mathSource = Facet.define<"markdown" | "latex", "markdown" | "latex">({
+  combine: (values) => values[values.length - 1] ?? "markdown",
+});
 
 /** The enclosing `Math` node: the whole node including `$` delimiters, plus
  *  the formula span between them. */
@@ -65,7 +73,33 @@ function insideTextGroup(state: EditorState, node: MathNode, pos: number): boole
   return true;
 }
 
+/** One scan per document version: every keystroke asks, the text rarely
+ *  changes between two asks. */
+const latexRegions = new WeakMap<Text, SourceRegion[]>();
+
+function latexSourceContext(state: EditorState, pos: number): MathContext {
+  let regions = latexRegions.get(state.doc);
+  if (!regions) {
+    regions = scanLatexSource(state.doc.toString());
+    latexRegions.set(state.doc, regions);
+  }
+  const region = regionAt(regions, pos);
+  if (!region) return PROSE;
+  if (region.kind === "comment") return CODE;
+  const math: MathNode = {
+    from: region.from,
+    to: region.to,
+    formulaFrom: region.formulaFrom,
+    formulaTo: region.formulaTo,
+  };
+  if (insideTextGroup(state, math, pos)) return { kind: "text", node: math };
+  return region.kind === "display"
+    ? { kind: "display", node: math }
+    : { kind: "inline", node: math };
+}
+
 export function mathContext(state: EditorState, pos: number): MathContext {
+  if (state.facet(mathSource) === "latex") return latexSourceContext(state, pos);
   // `side: -1` looks at the token before the caret, which gives the delimiter
   // rule for free: on the opening `$` the caret is still outside the node, on
   // the closing `$` it is inside.

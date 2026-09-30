@@ -92,12 +92,12 @@ a valid answer — this tool never fails with `no_workspace`.
 
 List a workspace's files with the same rules the sidebar uses: hidden files
 skipped, `.gitignore` and workspace ignore rules honored, and only the file
-kinds Writer shows (markdown, drawings, PDFs).
+kinds Writer shows (markdown, drawings, PDFs, LaTeX sources).
 
 - **Input**: `{ workspace?, path?, limit? }` — `path` restricts the listing
   to a subdirectory; `limit` defaults to 5,000 and is capped there.
 - **Output**: `{ entries: [{ path, relative_path, kind, modified_at }], truncated }`
-  — `kind` is `"markdown"`, `"drawing"`, or `"pdf"`; `truncated` is true
+  — `kind` is `"markdown"`, `"drawing"`, `"pdf"`, or `"latex"` (`.tex`, `.bib`); `truncated` is true
   when the cap cut the listing short.
 
 ### search_files

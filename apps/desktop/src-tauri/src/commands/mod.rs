@@ -3,6 +3,7 @@ pub mod fonts;
 pub mod fs;
 pub mod images;
 pub mod latex;
+pub mod latex_compile;
 pub mod mcp;
 pub mod recents;
 pub mod search;

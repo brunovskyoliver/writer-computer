@@ -3,6 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import sidebarEntryKinds from "@shared/sidebar-entry-kinds.json";
 import type { SessionV2 } from "@/lib/session";
+import type { LatexCompileResult } from "@/lib/latex-document";
 import type {
   ContentSearchEvent,
   DirEntry,
@@ -32,6 +33,16 @@ export function readFile(path: string): Promise<FileContent> {
 
 export function writeFile(path: string, content: string): Promise<WriteResult> {
   return invoke("write_file", { path, content });
+}
+
+// LaTeX documents (SPECs/latex-documents)
+export function compileLatex(path: string): Promise<LatexCompileResult> {
+  return invoke("compile_latex", { path });
+}
+
+/** The root `.tex` a LaTeX source compiles as part of, or null. */
+export function latexRoot(path: string): Promise<string | null> {
+  return invoke("latex_root", { path });
 }
 
 export function createFile(path: string): Promise<FileContent> {

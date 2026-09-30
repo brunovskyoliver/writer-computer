@@ -125,14 +125,17 @@ function classifyError(error: unknown): PdfLoadError {
  */
 type LoadedPdf = { result: PdfLoadResult; destroy: () => Promise<void> };
 
-async function loadPdf(path: string): Promise<LoadedPdf> {
+async function loadPdf(path: string, revision: number): Promise<LoadedPdf> {
   // Starts as a no-op so a failure *before* the task exists — the lazy import
   // itself — still returns a named result instead of rejecting the promise
   // every caller is awaiting.
   let destroy = async () => {};
   try {
     const { getDocument } = await pdfjs();
-    const task = getDocument({ url: convertFileSrc(path) });
+    // A revision past 0 is a rewritten file (a LaTeX recompile): the query
+    // string keeps WebKit from answering with the bytes it already has.
+    const url = convertFileSrc(path) + (revision > 0 ? `?v=${revision}` : "");
+    const task = getDocument({ url });
     destroy = () => task.destroy();
     const proxy = await task.promise;
     return { result: { ok: true, doc: { path, proxy, pageCount: proxy.numPages } }, destroy };
@@ -151,6 +154,12 @@ async function loadPdf(path: string): Promise<LoadedPdf> {
  */
 type CacheEntry = { refs: number; loaded: Promise<LoadedPdf> };
 
+/** Cache key: one entry per path *and* revision, so a reload is a fresh
+ *  document while the previous one stays alive for the tab still showing it. */
+function cacheKey(path: string, revision: number): string {
+  return `${path}\u0000${revision}`;
+}
+
 const documents = new Map<string, CacheEntry>();
 
 /**
@@ -160,11 +169,12 @@ const documents = new Map<string, CacheEntry>();
  * The entry holds the in-flight promise, not the resolved document, so two
  * tabs opening the same PDF at once share one parse instead of racing.
  */
-export function acquirePdf(path: string): Promise<PdfLoadResult> {
-  let entry = documents.get(path);
+export function acquirePdf(path: string, revision = 0): Promise<PdfLoadResult> {
+  const key = cacheKey(path, revision);
+  let entry = documents.get(key);
   if (!entry) {
-    entry = { refs: 0, loaded: loadPdf(path) };
-    documents.set(path, entry);
+    entry = { refs: 0, loaded: loadPdf(path, revision) };
+    documents.set(key, entry);
     // Any acquire keeps the worker alive — cancel a pending idle teardown.
     if (workerIdleTimer) {
       clearTimeout(workerIdleTimer);
@@ -181,12 +191,13 @@ export function acquirePdf(path: string): Promise<PdfLoadResult> {
  * The entry leaves the map before the `await`, so a re-open during teardown
  * starts a fresh load rather than handing back a proxy about to be destroyed.
  */
-export async function releasePdf(path: string): Promise<void> {
-  const entry = documents.get(path);
+export async function releasePdf(path: string, revision = 0): Promise<void> {
+  const key = cacheKey(path, revision);
+  const entry = documents.get(key);
   if (!entry) return;
   entry.refs -= 1;
   if (entry.refs > 0) return;
-  documents.delete(path);
+  documents.delete(key);
   await (await entry.loaded).destroy();
   // The map entry is already gone, so a re-open during this await starts a
   // fresh load — and any acquire that has landed is visible in `size`, which

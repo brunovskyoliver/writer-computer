@@ -18,7 +18,8 @@ import {
   prosemarkBaseThemeSetup,
   prosemarkMarkdownSyntaxExtensions,
 } from "@/lib/prosemark-core/main";
-import type { EditorFlavor } from "@/lib/editor-flavor";
+import { isLatexFlavor, type EditorFlavor } from "@/lib/editor-flavor";
+import { latexSourceExtensions } from "./latex-commands";
 import * as editorApi from "@/hooks/editor-api";
 import { dragFreezeExtensions } from "./drag-selection-gate";
 import { editorBodyContextMenuExtension } from "./editor-body-menu";
@@ -33,7 +34,7 @@ import { imageSrcResolver } from "./image-src-resolver";
 import { latexAwareCodeLanguages, latexHighlighting, latexMathNesting } from "./latex-highlighting";
 import { latexSnippetsExtension } from "./latex-snippets-extension";
 import { linkNavigationExtension } from "./link-navigation";
-import { markdownFormatting } from "./markdown-formatting";
+import { latexSourceCommands, markdownFormatting } from "./markdown-formatting";
 import { mathDecorations } from "./math-decorations";
 import { mermaidDecorations } from "./mermaid-decorations";
 import { plotDecorations } from "./plot-decorations";
@@ -140,12 +141,13 @@ function storeSyncExtension(getFilePath: () => string, getTabId: () => string): 
  *  search, focus-on-reveal) and nothing Markdown-specific. The language may
  *  need loading, so it arrives through a compartment that starts empty. */
 function codeFlavorExtensions(
-  language: Exclude<EditorFlavor, "markdown">["language"],
+  flavor: Exclude<EditorFlavor, "markdown">,
   getFilePath: () => string,
   getTabId: () => string,
   isDisposed: () => boolean,
   historyCompartment: Compartment,
 ): Extension[] {
+  const { language } = flavor;
   const languageCompartment = new Compartment();
   const loaded = language.support;
 
@@ -167,6 +169,16 @@ function codeFlavorExtensions(
     // Includes generalSyntaxHighlights, so code tokens are coloured.
     prosemarkBaseThemeSetup(),
     editorSearchExtensions,
+    // A `.tex`/`.bib` source: math snippets and matrix tools against the
+    // source text, compile + preview, compile errors in place
+    // (SPECs/latex-documents).
+    isLatexFlavor(flavor)
+      ? [
+          latexSnippetsExtension(getTabId),
+          latexSourceExtensions(getFilePath, getTabId),
+          latexSourceCommands,
+        ]
+      : [],
     storeSyncExtension(getFilePath, getTabId),
     editorClipboardExtension(getFilePath, isDisposed),
     focusOnRevealExtension(isDisposed),
@@ -181,13 +193,7 @@ export function createEditorExtensions(
   flavor: EditorFlavor,
 ): Extension[] {
   if (flavor !== "markdown") {
-    return codeFlavorExtensions(
-      flavor.language,
-      getFilePath,
-      getTabId,
-      isDisposed,
-      historyCompartment,
-    );
+    return codeFlavorExtensions(flavor, getFilePath, getTabId, isDisposed, historyCompartment);
   }
 
   return [

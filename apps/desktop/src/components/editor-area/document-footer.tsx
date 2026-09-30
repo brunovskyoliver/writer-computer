@@ -7,6 +7,8 @@ import {
   showFooterContextMenu,
   type FooterMetricSettingKey,
 } from "./footer-context-menu";
+import { isLatexSourcePath } from "@/lib/latex-document";
+import { LatexStatus } from "./latex-status";
 import { registerVimDialogHost, useVimFooterModel, type VimFooterModel } from "./vim-store";
 
 function FooterMetric({ label, value }: { label: string; value: number }) {
@@ -52,11 +54,12 @@ export function DocumentFooter({ filePath, tabId }: { filePath: string; tabId: s
   };
   // Compact windows carry no document chrome; only Vim state, which the user
   // needs to read the editor, gets a footer there.
-  const visibleMetrics = isCompact
-    ? []
-    : FOOTER_METRICS.filter((metric) => visibility[metric.settingKey]);
+  // A LaTeX source reports its compile instead of prose counts.
+  const isLatex = isLatexSourcePath(filePath);
+  const visibleMetrics =
+    isCompact || isLatex ? [] : FOOTER_METRICS.filter((metric) => visibility[metric.settingKey]);
 
-  if (visibleMetrics.length === 0 && !vim) return null;
+  if (visibleMetrics.length === 0 && !vim && !isLatex) return null;
 
   const handleContextMenu = (event: MouseEvent<HTMLDivElement>) => {
     if (isCompact) return;
@@ -81,6 +84,7 @@ export function DocumentFooter({ filePath, tabId }: { filePath: string; tabId: s
       className="flex absolute bottom-0 w-full z-40 h-11 shrink-0 items-center justify-end gap-5 bg-[var(--surface-primary)] px-6 text-[13px] leading-[1.15] text-[var(--text-muted)] md:px-8"
     >
       {vim ? <VimStatus model={vim} tabId={tabId} /> : null}
+      {isLatex ? <LatexStatus filePath={filePath} tabId={tabId} /> : null}
       {visibleMetrics.map((metric) => (
         <FooterMetric
           key={metric.settingKey}

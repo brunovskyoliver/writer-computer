@@ -50,6 +50,7 @@ import {
 } from "@/components/editor-area/markdown-formatting";
 import { ensureSyntaxTree } from "@codemirror/language";
 import { mathContext } from "@/lib/latex-snippets/math-context";
+import { isLatexSourcePath } from "@/lib/latex-document";
 import { renderMath } from "@/components/editor-area/math-renderer";
 import { searchSymbols, symbolInsertion, type MathSymbol } from "@/lib/math/symbols";
 import * as tauri from "@/lib/tauri";
@@ -74,6 +75,13 @@ const MATH_PALETTE = [
   ["math-align", "Math: Align Derivation Steps", "math.align"],
   ["math-split", "Math: Split Aligned Block Into Steps", "math.split"],
   ["math-check", "Math: Check Step Against Previous", "math.check"],
+] as const satisfies ReadonlyArray<readonly [string, string, EditorCommandId]>;
+
+/** LaTeX source commands — offered only while a `.tex`/`.bib` tab is active
+ *  (SPECs/latex-documents FR-6). */
+const LATEX_PALETTE = [
+  ["latex-toggle-preview", "LaTeX: Toggle PDF Preview", "latex.togglePreview"],
+  ["latex-compile", "LaTeX: Compile", "latex.compile"],
 ] as const satisfies ReadonlyArray<readonly [string, string, EditorCommandId]>;
 
 /** The symbol's rendered glyph — KaTeX, same renderer the math widgets use. */
@@ -400,7 +408,11 @@ export function CommandPalette() {
       },
     },
     ...(activeTabId
-      ? [...MATRIX_PALETTE, ...MATH_PALETTE].map(
+      ? [
+          ...(activeFilePath && isLatexSourcePath(activeFilePath) ? LATEX_PALETTE : []),
+          ...MATRIX_PALETTE,
+          ...MATH_PALETTE,
+        ].map(
           ([id, label, command]): Command => ({
             id,
             label,

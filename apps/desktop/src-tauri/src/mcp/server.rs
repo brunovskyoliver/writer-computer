@@ -574,6 +574,8 @@ fn entry_kind(path: &Path) -> &'static str {
         "drawing"
     } else if lower.ends_with(".pdf") {
         "pdf"
+    } else if lower.ends_with(".tex") || lower.ends_with(".bib") {
+        "latex"
     } else {
         "markdown"
     }

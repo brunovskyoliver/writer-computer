@@ -155,7 +155,9 @@ interface EditorState {
   /** Reveal `path` in this window and queue `fragment` for the tab that ends
    *  up showing it (FR-021). The caller has already established the file
    *  exists. */
-  revealPdfAnchor: (path: string, fragment: string, fromTabId: string | null) => void;
+  /** `fragment` null shows the PDF (beside the note when not already open)
+   *  without anchoring — the LaTeX preview toggle. */
+  revealPdfAnchor: (path: string, fragment: string | null, fromTabId: string | null) => void;
   setFocusedPane: (paneId: string) => void;
   /** Commit a finished divider drag. The resize library owns the live
    *  gesture; only the final ratio is layout state. */
@@ -1054,7 +1056,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
    * probed for it), so no stale link reaches this and no empty viewer is
    * created for one.
    */
-  revealPdfAnchor: (path: string, fragment: string, fromTabId: string | null) => {
+  revealPdfAnchor: (path: string, fragment: string | null, fromTabId: string | null) => {
+    const anchor = (tabId: string) => {
+      if (fragment !== null) requestPdfAnchor(tabId, fragment);
+    };
     // The whole decision runs inside one `set`, against `current` — not against
     // a snapshot taken before it. `followPdfQuoteLink` awaits a filesystem
     // probe before calling this, so the layout genuinely can move underneath:
@@ -1079,7 +1084,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       // focus out of the note would cost the caret for nothing.
       const showing = allPanes.find((pane) => isTarget(pane.activeTabId));
       if (showing?.activeTabId) {
-        requestPdfAnchor(showing.activeTabId, fragment);
+        anchor(showing.activeTabId);
         return current;
       }
 
@@ -1087,7 +1092,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       for (const pane of allPanes) {
         const backgroundTabId = pane.tabIds.find((tabId) => isTarget(tabId));
         if (backgroundTabId) {
-          requestPdfAnchor(backgroundTabId, fragment);
+          anchor(backgroundTabId);
           return publish(current.tabs, activateTabInLayout(current.layout, backgroundTabId));
         }
       }
@@ -1101,7 +1106,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       const notePaneId =
         origin && findPane(current.layout, origin.id) ? origin.id : current.layout.focusedPaneId;
       const tab = createFileTab(path);
-      requestPdfAnchor(tab.id, fragment);
+      anchor(tab.id);
       // Two steps because `splitPaneWithTab` moves a tab the layout already
       // owns: it is the app's one "open beside this" transition, and reusing it
       // keeps split geometry and focus rules in a single place.

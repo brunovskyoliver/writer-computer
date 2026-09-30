@@ -142,7 +142,8 @@ pub(crate) fn is_markdown_file(path: &Path) -> bool {
         || (lower.ends_with(".markdown") && name.len() > ".markdown".len())
 }
 
-/// The file kinds the sidebar surfaces: Markdown notes, drawings and PDFs. One
+/// The file kinds the sidebar surfaces: Markdown notes, drawings, PDFs and
+/// LaTeX sources (`.tex`, `.bib` — SPECs/latex-documents FR-1). One
 /// predicate so listing and folder visibility cannot drift apart — a drawing
 /// visible in a folder that the tree hides is the failure this prevents.
 pub(crate) fn is_sidebar_file(path: &Path) -> bool {
@@ -153,6 +154,7 @@ pub(crate) fn is_sidebar_file(path: &Path) -> bool {
     is_markdown_file(path)
         || (lower.ends_with(DRAWING_EXTENSION) && name.len() > DRAWING_EXTENSION.len())
         || (lower.ends_with(PDF_EXTENSION) && name.len() > PDF_EXTENSION.len())
+        || crate::commands::latex_compile::is_latex_source(path)
 }
 
 /// Recursively classifies a directory tree by whether it holds anything the

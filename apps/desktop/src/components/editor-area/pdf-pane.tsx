@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import { acquirePdf, pdfjsTextLayer, releasePdf, type PdfLoadError } from "@/lib/pdf";
+import { usePdfRevision } from "@/stores/pdf-revision-store";
 import {
   compactPageText,
   normalizePageText,
@@ -412,13 +413,24 @@ export function PdfPane({
     settle: ReturnType<typeof setTimeout> | null;
   } | null>(null);
 
+  // A new revision (the file was rewritten by a LaTeX recompile) loads beside
+  // the one on screen and replaces it only once ready: the old document stays
+  // acquired and painted until then, and the reading position carries over.
+  // `shownRef` is the acquisition the viewer is currently painting from.
+  const revision = usePdfRevision(location.path);
+  const shownRef = useRef<{ path: string; revision: number } | null>(null);
+  const keepScrollRef = useRef(false);
+
   useEffect(() => {
     let active = true;
-    setState({ status: "loading" });
-    void acquirePdf(location.path).then((result) => {
+    const path = location.path;
+    const reloading = shownRef.current?.path === path;
+    if (!reloading) setState({ status: "loading" });
+    void acquirePdf(path, revision).then((result) => {
       if (!active) return;
       if (!result.ok) {
-        setState({ status: "error", error: result.error });
+        // A failed reload keeps the last good rendering on screen.
+        if (!reloading) setState({ status: "error", error: result.error });
         return;
       }
       // Page 1's size seeds every page's height estimate; each page refines its
@@ -427,19 +439,39 @@ export function PdfPane({
       void result.doc.proxy.getPage(1).then((page) => {
         if (!active) return;
         const { width, height, rotation } = page.getViewport({ scale: 1 });
+        const previous = shownRef.current;
+        shownRef.current = { path, revision };
+        keepScrollRef.current = reloading;
+        restoredRef.current = false;
         setState({
           status: "ready",
           doc: result.doc.proxy,
           sizes: new Array(result.doc.pageCount).fill({ width, height, rotation }),
         });
+        if (previous && (previous.path !== path || previous.revision !== revision)) {
+          void releasePdf(previous.path, previous.revision);
+        }
       });
     });
     return () => {
       active = false;
-      restoredRef.current = false;
-      void releasePdf(location.path);
+      // The acquisition on screen is released when it is replaced or the
+      // pane unmounts; any other one (still loading, or failed) goes now.
+      const shown = shownRef.current;
+      if (!shown || shown.path !== path || shown.revision !== revision) {
+        void releasePdf(path, revision);
+      }
     };
-  }, [location.path]);
+  }, [location.path, revision]);
+
+  useEffect(
+    () => () => {
+      const shown = shownRef.current;
+      if (shown) void releasePdf(shown.path, shown.revision);
+      shownRef.current = null;
+    },
+    [],
+  );
 
   const onMeasure = useCallback((pageNumber: number, size: PageSize) => {
     setState((current) => {
@@ -515,7 +547,12 @@ export function PdfPane({
     restoredRef.current = true;
     const container = scrollRef.current;
     if (!container) return;
-    const target = offsets[Math.min(Math.max(location.page, 1), pageCount) - 1] ?? 0;
+    // A reload keeps the exact scroll offset; a first load opens at the page.
+    // The browser clamps an offset past a now-shorter document.
+    const target = keepScrollRef.current
+      ? scrollTopRef.current
+      : (offsets[Math.min(Math.max(location.page, 1), pageCount) - 1] ?? 0);
+    keepScrollRef.current = false;
     container.scrollTop = target;
     scrollTopRef.current = target;
     setScrollTop(target);

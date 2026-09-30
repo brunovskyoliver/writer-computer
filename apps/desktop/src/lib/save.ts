@@ -57,6 +57,16 @@ type SaveOutcome = "saved" | "clean" | "superseded" | "failed" | "busy";
 
 const saveControllers = new Map<string, SaveController>();
 
+/** Told when a write lands and the file is clean — the moment the bytes on
+ *  disk match the editor. The LaTeX preview recompiles on it. */
+type SavedListener = (path: string) => void;
+const savedListeners = new Set<SavedListener>();
+
+export function onFileSaved(listener: SavedListener): () => void {
+  savedListeners.add(listener);
+  return () => savedListeners.delete(listener);
+}
+
 function getSaveController(path: string): SaveController {
   let controller = saveControllers.get(path);
   if (!controller) {
@@ -221,6 +231,9 @@ async function performSave(
       cleanupSaveController(path, controller);
     }
     settle();
+  }
+  if (outcome === "saved") {
+    for (const listener of savedListeners) listener(path);
   }
   return outcome;
 }

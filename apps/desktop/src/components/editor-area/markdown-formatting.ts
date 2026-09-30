@@ -5,6 +5,7 @@ import { braceAnnotation } from "./brace-command";
 import { mathAlign, mathCheck, mathSplit, mathTidy } from "./math-commands";
 import { matrixDelimiters } from "./matrix-delimiters";
 import { insertMatrix, matrixPrompt } from "./matrix-insert";
+import { compileLatexCommand, toggleLatexPreviewCommand } from "./latex-commands";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -437,6 +438,14 @@ export const editorCommands = {
     run: matrixDelimiters("cases"),
     label: "Matrix: cases brace {",
   },
+  // Only a LaTeX source view acts on these; in a note they fall through, so
+  // Mod-Enter keeps its note meaning (SPECs/latex-documents FR-6).
+  "latex.togglePreview": {
+    run: toggleLatexPreviewCommand,
+    label: "Toggle PDF preview",
+    chord: "Mod-Alt-p",
+  },
+  "latex.compile": { run: compileLatexCommand, label: "Compile LaTeX", chord: "Mod-Enter" },
   "math.tidy": { run: mathTidy, label: "Tidy notation" },
   "math.align": { run: mathAlign, label: "Align derivation steps" },
   "math.split": { run: mathSplit, label: "Split aligned block into steps" },
@@ -480,3 +489,25 @@ const formattingKeymap: KeyBinding[] = Object.values(editorCommands).flatMap((c)
 );
 
 export const markdownFormatting: Extension = [Prec.high(keymap.of(formattingKeymap)), matrixPrompt];
+
+/** The registry commands a LaTeX source view binds: the math tools and the
+ *  compile/preview pair — none of the Markdown formatting. */
+const LATEX_SOURCE_COMMANDS: readonly EditorCommandId[] = [
+  "insert.matrix",
+  "insert.underbrace",
+  "insert.overbrace",
+  "latex.togglePreview",
+  "latex.compile",
+];
+
+export const latexSourceCommands: Extension = [
+  Prec.high(
+    keymap.of(
+      LATEX_SOURCE_COMMANDS.flatMap((id) => {
+        const command: EditorCommand = editorCommands[id];
+        return command.chord ? [{ key: command.chord, run: command.run }] : [];
+      }),
+    ),
+  ),
+  matrixPrompt,
+];
