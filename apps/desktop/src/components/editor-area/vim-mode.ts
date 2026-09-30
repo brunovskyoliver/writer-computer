@@ -7,6 +7,7 @@ import { saveNow } from "@/lib/save";
 import { useSettingsStore } from "@/stores/settings-store";
 import { createVimClipboardBridge, type VimClipboardBridge } from "./vim-clipboard";
 import { registerVimExCommands } from "./vim-ex-commands";
+import { registerVimMoveLines } from "./vim-move-lines";
 import { redirectVimScrollToOuterScroller } from "./vim-scroll";
 import {
   createTab,
@@ -64,6 +65,7 @@ function loadVim(): Promise<VimModule> {
         cm.openNotification(node, { bottom: true, duration: 5000 });
       },
     });
+    registerVimMoveLines(mod.Vim as unknown as Parameters<typeof registerVimMoveLines>[0]);
     return mod;
   });
   return vimModule;

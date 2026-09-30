@@ -2,6 +2,8 @@
 
 ## 2026-09-30
 
+- Vim: move lines from visual mode. With lines selected in `v` or `V`, `J` moves them down and `K` moves them up, and the selection stays on them so you can keep pressing — the same as the common Neovim `vnoremap J :m '>+1<CR>gv` mapping. `J` in Normal mode still joins lines.
+
 - Suggestion popups are opaque. The LaTeX and `[[wiki link]]` suggestion lists and the matrix-size prompt had a see-through, blurred card that let the text underneath bleed into the list; they now sit on a solid background.
 
 - LaTeX suggestions as you type, like VS Code. Typing `\` opens a list of commands that filters as you type, with a rendered preview of each symbol; Tab or Enter inserts it, and commands with arguments (`\frac`, `\sqrt`, `\sum`, `\underbrace`, …) put the caret in the first one, with Tab moving to the next. In notes the list opens inside math only; in `.tex` files it also offers document commands (`\section`, `\textbf`, `\includegraphics`, …) and any `\newcommand` macros the file defines. After `\begin{` it completes environments and writes the whole block through `\end{…}`; after `\ref{` it lists your `\label`s; after `\cite{` it lists the keys from the `.bib` files in the same folder, with their titles.

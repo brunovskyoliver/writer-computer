@@ -415,3 +415,9 @@ i{ a{ i< a< i" a" i' a' i\` a\``and`it at`.
   the library would be the only way to split the two, and one `Esc` doing both is what
   Obsidian's Vim mode does. Insert mode binds nothing on `Tab`, `Enter`, or `Shift+Tab`,
   so the rest of FR-029 holds without work.
+- **Deliberate divergence (2026-09-30)**: Visual-mode `J` and `K` move the selected lines
+  down / up and keep them selected, matching the user's Neovim mapping
+  (`vnoremap J :m '>+1<CR>gv`, `K :m '<-2<CR>gv`) rather than stock Vim's visual join
+  and keyword lookup. Normal-mode `J` still joins. The mapping's `=` re-indent is not
+  reproduced — prose and LaTeX have no indent engine to trust. Implementation:
+  `src/components/editor-area/vim-move-lines.ts`; e2e: `vim-move-lines.spec.js`.

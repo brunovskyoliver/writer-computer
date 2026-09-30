@@ -157,19 +157,20 @@ Everything the library ships works. The groups below are what the feature is val
 against; anything outside them (Vimscript, `:map`ping `jk` to `Esc`, folds, `:e`/`:sp`)
 is not supported.
 
-| Group            | Keys                                                                                                                                 |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| Mode transitions | `i a I A o O R v V Ctrl+V Esc`                                                                                                       |
-| Motions          | `h j k l w W b B e E ge 0 ^ $ gg G { } ( ) % f F t T ; , H M L`, with counts; `gj gk g0 g$` move by screen row in wrapped paragraphs |
-| Operators        | `d c y > < = gu gU g~ ~ J` with any motion or text object; line forms `dd cc yy >> <<`; shortcuts `x X s S D C Y r p P`              |
-| Text objects     | `iw aw iW aW is as ip ap`, bracket pairs `i( a( i[ a[ i{ a{ i< a<`, quotes `i" a" i' a'` and ``i` a` ``, tags `it at`                |
-| Undo / repeat    | `u`, `Ctrl+R`, `.` — one Insert session is one undo step                                                                             |
-| Visual           | `o` swaps ends, operators act on the selection, `gv` reselects; Visual-Block supports `I A c d y r $`                                |
-| Scrolling        | `Ctrl+D Ctrl+U` half page, `Ctrl+F Ctrl+B` full page, `Ctrl+E Ctrl+Y` one line, `zz zt zb` reposition the caret line                 |
-| Search           | `/` and `?` with wrap-around, `n N * #`; highlights clear on the first edit or click (`:noh` still works)                            |
-| Registers        | `"a`–`"z` (append with `"A`–`"Z`), the black-hole register `"_`; the unnamed register is the system clipboard                        |
-| Macros           | `q<letter>` … `q`, replay with `@<letter>`, `<count>@<letter>`, `@@`                                                                 |
-| Marks            | `m<letter>`, jump with `` ` `` and `'`                                                                                               |
+| Group            | Keys                                                                                                                                                     |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Mode transitions | `i a I A o O R v V Ctrl+V Esc`                                                                                                                           |
+| Motions          | `h j k l w W b B e E ge 0 ^ $ gg G { } ( ) % f F t T ; , H M L`, with counts; `gj gk g0 g$` move by screen row in wrapped paragraphs                     |
+| Operators        | `d c y > < = gu gU g~ ~ J` with any motion or text object; line forms `dd cc yy >> <<`; shortcuts `x X s S D C Y r p P`                                  |
+| Text objects     | `iw aw iW aW is as ip ap`, bracket pairs `i( a( i[ a[ i{ a{ i< a<`, quotes `i" a" i' a'` and ``i` a` ``, tags `it at`                                    |
+| Undo / repeat    | `u`, `Ctrl+R`, `.` — one Insert session is one undo step                                                                                                 |
+| Visual           | `o` swaps ends, operators act on the selection, `gv` reselects; Visual-Block supports `I A c d y r $`                                                    |
+| Move lines       | Visual and V-LINE `J` / `K` move the selected lines down / up and keep them selected (Neovim's `:m '>+1` / `:m '<-2` mapping); `J` in Normal still joins |
+| Scrolling        | `Ctrl+D Ctrl+U` half page, `Ctrl+F Ctrl+B` full page, `Ctrl+E Ctrl+Y` one line, `zz zt zb` reposition the caret line                                     |
+| Search           | `/` and `?` with wrap-around, `n N * #`; highlights clear on the first edit or click (`:noh` still works)                                                |
+| Registers        | `"a`–`"z` (append with `"A`–`"Z`), the black-hole register `"_`; the unnamed register is the system clipboard                                            |
+| Macros           | `q<letter>` … `q`, replay with `@<letter>`, `<count>@<letter>`, `@@`                                                                                     |
+| Marks            | `m<letter>`, jump with `` ` `` and `'`                                                                                                                   |
 
 Registers, macros, marks, and the last search pattern are shared by every pane and window
 for the session; none of them persist across restarts.
