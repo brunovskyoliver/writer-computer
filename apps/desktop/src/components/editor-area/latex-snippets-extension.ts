@@ -7,6 +7,7 @@
  * Contract: SPECs/latex-suite/contracts/editor-extension.md
  */
 
+import { acceptCompletion, completionStatus } from "@codemirror/autocomplete";
 import { isolateHistory, undo, undoDepth } from "@codemirror/commands";
 import { ensureSyntaxTree } from "@codemirror/language";
 import {
@@ -382,6 +383,8 @@ function advance(view: EditorView, dir: 1 | -1): boolean {
 function tabCommand(getTabId: () => string) {
   return (view: EditorView): boolean => {
     if (vimBlocks(getTabId)) return false;
+    // An open completion list takes Tab, the way VS Code accepts with it.
+    if (completionStatus(view.state) === "active") return acceptCompletion(view);
     if (advance(view, 1)) return true;
 
     const caret = view.state.selection.main;
@@ -482,6 +485,8 @@ function latexKeymap(getTabId: () => string) {
       key: "Enter",
       run: (view: EditorView) => {
         if (vimBlocks(getTabId)) return false;
+        // Enter picks the highlighted completion; the list's keymap owns it.
+        if (completionStatus(view.state) === "active") return false;
         const caret = view.state.selection.main;
         if (!caret.empty || view.state.selection.ranges.length > 1) return false;
 

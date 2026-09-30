@@ -41,7 +41,8 @@ import { plotDecorations } from "./plot-decorations";
 import { tableDecorations } from "./table-decorations";
 import { viewportParsePlugin } from "./viewport-parse";
 import { vimModeExtension } from "./vim-mode";
-import { wikiLinkExtension } from "./wiki-link-extension";
+import { wikiLinkCompletions, wikiLinkExtension } from "./wiki-link-extension";
+import { editorCompletion, latexCompletions } from "./latex-completion";
 import { pdfQuoteBlockExtension } from "./pdf-quote-block";
 
 // Focus the editor when its pane is revealed (tab switch). Panes hide via an
@@ -176,6 +177,7 @@ function codeFlavorExtensions(
       ? [
           latexSnippetsExtension(getTabId),
           latexSourceExtensions(getFilePath, getTabId),
+          editorCompletion([latexCompletions(getFilePath)]),
           latexSourceCommands,
         ]
       : [],
@@ -240,6 +242,7 @@ export function createEditorExtensions(
     highlightDecorations(),
     imageSrcResolver(getFilePath),
     wikiLinkExtension(getFilePath, isDisposed),
+    editorCompletion([wikiLinkCompletions, latexCompletions(getFilePath)]),
     pdfQuoteBlockExtension(getFilePath, isDisposed),
     markdownFormatting,
     storeSyncExtension(getFilePath, getTabId),

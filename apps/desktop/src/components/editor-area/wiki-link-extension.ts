@@ -2,7 +2,6 @@ import {
   Decoration,
   type DecorationSet,
   EditorView,
-  tooltips,
   type ViewUpdate,
   ViewPlugin,
   WidgetType,
@@ -10,7 +9,6 @@ import {
 import { type EditorState, type Extension, Prec, RangeSetBuilder } from "@codemirror/state";
 import { syntaxTree } from "@codemirror/language";
 import {
-  autocompletion,
   type Completion,
   type CompletionContext,
   type CompletionResult,
@@ -269,7 +267,9 @@ function wikiLinkDecorations(getFilePath: () => string) {
 // Autocomplete
 // ---------------------------------------------------------------------------
 
-async function wikiLinkCompletions(context: CompletionContext): Promise<CompletionResult | null> {
+export async function wikiLinkCompletions(
+  context: CompletionContext,
+): Promise<CompletionResult | null> {
   const match = context.matchBefore(/\[\[([^\]#^|]*)/);
   if (!match) return null;
 
@@ -594,16 +594,7 @@ export function wikiLinkExtension(
     wikiLinkDecorations(getFilePath),
     wikiLinkClickHandler(getFilePath, isDisposed),
     wikiLinkTheme,
-    // Append the autocomplete tooltip to `document.body` so it escapes
-    // `EditorScrollContainer`'s `mask-image`, which establishes a
-    // compositing context that neutralizes `backdrop-filter` on any
-    // descendant. Without this, the popover's blur is a no-op and editor
-    // text bleeds straight through the card in light mode. `position`
-    // already defaults to `"fixed"` on non-iOS.
-    tooltips({ parent: document.body }),
-    autocompletion({
-      override: [wikiLinkCompletions],
-      icons: false,
-    }),
+    // The completion popup itself is configured once per view in
+    // `editorCompletion` (latex-completion.ts), which lists this source.
   ];
 }

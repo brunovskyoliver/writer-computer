@@ -142,6 +142,7 @@ Previously-triaged work organized by phase. Pull into `Up Next` as capacity open
 
 See `CHANGELOG.md` and `git log` for shipped work. Notable items:
 
+- [x] LaTeX `\` completion: commands with previews, environments, `\ref`/`\cite` keys, document macros ([`SPECs/latex-completions/spec.md`](SPECs/latex-completions/spec.md))
 - [x] LaTeX documents with a live PDF preview (`Cmd+Alt+P`, Tectonic, reload in place, error lines, math tools in `.tex`) ([`SPECs/latex-documents/spec.md`](SPECs/latex-documents/spec.md)). Follow-ups: SyncTeX click-to-jump, texlab completion.
 - [x] Matrix size prompt (`Cmd+Alt+M`) and a math-shortcut review pass: stale tabstops no longer capture Tab, Tab inside `{…}` reaches the next cell, closer overtype, auto-fraction/snippet fixes ([`SPECs/matrix-brace-tools/spec.md`](SPECs/matrix-brace-tools/spec.md) US4, FR-11, FR-12)
 - [x] External file watcher: external file changes (Finder, git, vim, scripts) reach the sidebar and reload-from-disk reliably; dotdir workspace roots, `/var` aliases, and self-write echoes all fixed ([`SPECs/external-file-watcher-spec.md`](SPECs/external-file-watcher-spec.md))

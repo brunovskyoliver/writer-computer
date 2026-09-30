@@ -83,6 +83,12 @@ Cmd+Enter saves and compiles right away. While the preview is open every save
 recompiles. Cmd+Alt+M/U/O and the math snippets work inside the file's math —
 see [`SPECs/latex-documents/spec.md`](../SPECs/latex-documents/spec.md).
 
+Typing `\` in math (or anywhere in a `.tex` file) opens LaTeX suggestions:
+Tab or Enter accepts, the arrow keys move, Escape closes, Ctrl+Space opens the
+list on demand. While it is open, Tab and Enter belong to the list, not to the
+matrix and snippet keys — see
+[`SPECs/latex-completions/spec.md`](../SPECs/latex-completions/spec.md).
+
 Cmd+Alt+M opens a small prompt at the caret: type a size and a letter
 (`3x3 a`, `2 4 b`) and Enter writes a `bmatrix` of `a_{11}` … `a_{33}`.
 Escape cancels.
