@@ -73,6 +73,8 @@ const PARAGRAPH_SUBMENU: CommandMenuLayout = [
 ];
 
 const MATRIX_SUBMENU: CommandMenuLayout = [
+  ["mtx.insert", "insert.matrix", "Insert matrix of size\u2026"],
+  "---",
   ["mtx.parens", "matrix.parens"],
   ["mtx.square", "matrix.square"],
   ["mtx.curly", "matrix.curly"],

@@ -58,8 +58,25 @@ The user has matrices written as `\begin{cases}…\end{cases}` — a habit that 
 - **FR-9**: `enclosingMatrixEnv(formula, caret)` is pure: it returns the env name plus the two `\begin{…}`/`\end{…}` name spans of the nearest _re-bracketable_ env enclosing the caret (`[pbBvV]?matrix`, `[dr]?cases` — argument-free envs sharing the `\\`/`&` grammar). Six `matrix.*` registry commands rewrite just those spans; reachable from the palette and the context menu's Matrix submenu.
 - **FR-10**: `matrixCellTarget(formula, caret)` is pure: inside a cell-capable env (`*matrix*`, `smallmatrix`, `array`, `subarray`, `[dr]?cases`, `aligned`, `alignedat`, `split` — not `gathered`, which has one column) it returns a `move` past the next top-level `&` or `\;`/`\,`/`\:` in the same row (skipping `{…}` groups and nested environments), or an `insert` that appends a separator matching the env's existing style (`&` or the thin space) after the last element when the row has none left. Null on an empty row, inside the `\\` pair, inside `\begin{…}`/`\end{…}`, or outside an env — plain tab-out keeps those. Runs between snippet expansion and tab-out in the Tab handler, gated by `latex.matrix-cells`, one undo step for the insert.
 
+### US4 — Write out a general matrix from its size (P1)
+
+Lecture notes spell out general matrices element by element (`a_{11} & a_{12} & \dots`). `Cmd+Alt+M` opens a one-line prompt at the caret; the user types a size and a letter (`3x3 a`, `2 4 b`, `2 by 3`, `3,3,\lambda`; the letter defaults to `a`) and Enter writes a `bmatrix` whose cells are the indexed elements.
+
+**Acceptance**:
+
+1. `2x3 a` inside display math writes `\begin{bmatrix}` / `a_{11} & a_{12} & a_{13}\\` / `a_{21} & a_{22} & a_{23}` / `\end{bmatrix}` at the caret, with the caret just past `\end{bmatrix}`.
+2. Inside inline math the matrix is written on one line; in prose it arrives in its own `$$` block.
+3. Once rows or columns exceed 9 the indices take a comma (`a_{1,10}`).
+4. A size that does not parse (or exceeds 20) keeps the prompt open and marks it invalid; Escape, clicking back into the editor, or typing in it closes the prompt without writing. Code and `\text{}` refuse with a notice.
+5. Reachable from the command palette ("Matrix: Insert Matrix of Size…") and the Matrix context submenu; one undo step.
+
+## Requirements (continued)
+
+- **FR-11**: `parseMatrixSpec(input)` and `matrixTemplate(spec, { inline })` are pure (`src/lib/latex-snippets/matrix-template.ts`). The prompt is a CodeMirror tooltip anchored at the caret (`matrix-insert.ts`) — not a panel, which the theme hides — registered as `insert.matrix` in the `editorCommands` registry.
+- **FR-12**: A snippet's tabstop frame is abandoned once the caret leaves its span (see the latex-suite editor-extension contract), so after a subscript or fraction is finished, Tab reaches the FR-10 cell walk instead of jumping back to a stale stop.
+
 ## Non-goals
 
-- A matrix-size picker or grid editor — `beg` plus the env triggers cover arbitrary environments.
+- A grid editor — the size prompt (US4) plus the env triggers cover matrix entry.
 - Annotation rendering outside math (HTML/CSS braces over prose) — the portable LaTeX form is what Obsidian and other readers understand.
 - Editing/removing an existing brace annotation — plain text edits already do that.

@@ -102,6 +102,13 @@ describe("shipped default snippet set", () => {
         // A higher-priority snippet claiming the text is the file author's
         // explicit override; anything else is a trigger that can never fire.
         if (hit && hit.snippet.priority > snippet.priority) continue;
+        // A general rule that writes the same text (`cdot` → `\cdot` by the
+        // symbol-backslash rule at the start of a line) is not a shadowing.
+        if (hit) {
+          const other = expandSnippet(hit, state, hit.from, lineBefore.length);
+          const text = state.update({ changes: other.changes }).state.doc.toString();
+          if (text === prefix + reduced(snippet)) continue;
+        }
         failures.push(
           `${snippet.triggerText} matched ${hit ? `"${hit.snippet.triggerText}"` : "nothing"}`,
         );
@@ -152,5 +159,65 @@ describe("shipped default snippet set", () => {
     const average = (performance.now() - started) / 1000;
 
     expect(average).toBeLessThan(1);
+  });
+});
+
+/** Type `input` one character at a time into display math, firing automatic
+ *  snippets the way the input handler does. Returns the document with `|` at
+ *  the caret. */
+async function typeInDisplay(input: string): Promise<string> {
+  const set = await loadDefaultSet();
+  const context: MathContext = { kind: "display", node: NODE };
+  let doc = "";
+  let caret = 0;
+  for (const char of input) {
+    // The editor steps over a snippet's own closer instead of doubling it.
+    if ("})]".includes(char) && doc[caret] === char) {
+      caret += 1;
+      continue;
+    }
+    doc = doc.slice(0, caret) + char + doc.slice(caret);
+    caret += 1;
+    const lineFrom = doc.lastIndexOf("\n", caret - 1) + 1;
+    const match = matchSnippet({
+      lineBefore: doc.slice(lineFrom, caret),
+      context,
+      set,
+      kind: "auto",
+      selectionText: "",
+      typedText: char,
+      onDisable: () => {},
+    });
+    if (!match) continue;
+    const state = EditorState.create({ doc });
+    const { changes, selection } = expandSnippet(match, state, lineFrom + match.from, caret);
+    const next = state.update({ changes, selection }).state;
+    doc = next.doc.toString();
+    caret = next.selection.main.head;
+  }
+  return doc.slice(0, caret) + "|" + doc.slice(caret);
+}
+
+describe("shipped defaults while typing matrix rows", () => {
+  test("backslash rules fire at the start of a row", async () => {
+    expect(await typeInDisplay("cos")).toBe("\\cos|");
+    expect(await typeInDisplay("det")).toBe("\\det|");
+    expect(await typeInDisplay("theta")).toBe("\\theta|");
+    expect(await typeInDisplay("beta")).toBe("\\beta|");
+  });
+
+  test("a hand-typed \\begin{bmatrix} does not expand inside its braces", async () => {
+    expect(await typeInDisplay("\\begin{bmatrix}")).toBe("\\begin{bmatrix}|");
+    expect(await typeInDisplay("\\end{pmatrix}")).toBe("\\end{pmatrix}|");
+  });
+
+  test("auto-subscript leaves hex colours and open script groups alone", async () => {
+    expect(await typeInDisplay("x3")).toBe("x_{3}|");
+    expect(await typeInDisplay("a_i1")).toBe("a_{i1|}");
+    expect(await typeInDisplay("\\textcolor{#e0a000}")).toBe("\\textcolor{#e0a000}|");
+  });
+
+  test("ans and sol need a word boundary", async () => {
+    expect(await typeInDisplay("xans")).toBe("xans|");
   });
 });

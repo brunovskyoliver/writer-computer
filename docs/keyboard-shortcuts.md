@@ -60,6 +60,7 @@ These shortcuts are handled by the `markdownFormatting` CodeMirror extension and
 | Cmd+Alt+0               | Paragraph (strip heading) |
 | Cmd+Alt+U               | Underbrace annotation     |
 | Cmd+Alt+O               | Overbrace annotation      |
+| Cmd+Alt+M               | Insert matrix of size…    |
 
 The brace commands need a selection: they wrap it in `\underbrace{…}_{}` /
 `\overbrace{…}^{}` in math, or `$\underbrace{\text{…}}_{\text{…}}$` in prose,
@@ -69,6 +70,10 @@ environment in display math starts a new row. Inside a matrix environment Tab
 walks elements in the same row — past `&` or `\;`-style separators — and
 appends a separator when the row's last element is reached — see
 [`SPECs/matrix-brace-tools/spec.md`](../SPECs/matrix-brace-tools/spec.md).
+
+Cmd+Alt+M opens a small prompt at the caret: type a size and a letter
+(`3x3 a`, `2 4 b`) and Enter writes a `bmatrix` of `a_{11}` … `a_{33}`.
+Escape cancels.
 
 ## Editor (inherited from CodeMirror)
 

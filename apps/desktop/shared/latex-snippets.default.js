@@ -37,8 +37,10 @@ export default [
 		description: "Function plot fence (fires on Tab)",
 	},
 
-	{trigger: /([^\\])beg/, replacement: "[[0]]\\begin{$0}\n$1\n\\end{$0}", options: "MA"},
-	{trigger: /([^\\])beg/, replacement: "[[0]]\\begin{$0} $1 \\end{$0}", options: "nA"},
+	// `(^|[^\\])` rather than `([^\\])`: a matrix row starts at column 0, and
+	// the guard must still let `beg`, `cos`, `det`, … fire there.
+	{trigger: /(^|[^\\])beg/, replacement: "[[0]]\\begin{$0}\n$1\n\\end{$0}", options: "MA"},
+	{trigger: /(^|[^\\])beg/, replacement: "[[0]]\\begin{$0} $1 \\end{$0}", options: "nA"},
 
     // Dashes
 	// {trigger: "--", replacement: "–", options: "tA"},
@@ -86,7 +88,7 @@ export default [
 	{trigger: /\bee/, replacement: "e^{ $0 }$1", options: "mA"},
     {trigger: "invs", replacement: "^{-1}", options: "mA"},
 
-    {trigger: /([^\\])(exp|log|ln)/, replacement: "[[0]]\\[[1]]", options: "rmA"},
+    {trigger: /(^|[^\\])(exp|log|ln)/, replacement: "[[0]]\\[[1]]", options: "rmA"},
     {trigger: "conj", replacement: "^{*}", options: "mA"},
     {trigger: "Re", replacement: "\\mathrm{Re}", options: "mA"},
 	{trigger: "Im", replacement: "\\mathrm{Im}", options: "mA"},
@@ -94,7 +96,7 @@ export default [
 	{trigger: "rm", replacement: "\\mathrm{$0}$1", options: "mA"},
 
     // Linear algebra
-    {trigger: /([^\\])(det)/, replacement: "[[0]]\\[[1]]", options: "rmA"},
+    {trigger: /(^|[^\\])(det)/, replacement: "[[0]]\\[[1]]", options: "rmA"},
     {trigger: "trace", replacement: "\\mathrm{Tr}", options: "mA"},
 
     // More operations
@@ -130,9 +132,10 @@ export default [
 
     // Auto letter subscript
 	//
-	// x3 -> x_{3}, \alpha3 -> \alpha_{3}
+	// x3 -> x_{3}, \alpha3 -> \alpha_{3} — but not inside a hex colour
+	// (`\textcolor{#e0a000}`) or an already-open script group (`a_{i1}`).
 	{
-	  trigger: "(\\\\${GREEK}|[A-Za-z])(\\d)",
+	  trigger: "(?<!#[0-9A-Fa-f]*|[_^]\\{[^{}]*)(\\\\${GREEK}|[A-Za-z])(\\d)",
 	  replacement: "[[0]]_{[[1]]}",
 	  options: "rmA",
 	  priority: -1,
@@ -244,8 +247,8 @@ export default [
     // For example, ${GREEK} below is shorthand for "alpha|beta|gamma|Gamma|delta|..."
     // You can edit snippet variables under the Advanced snippet settings section.
 
-	{trigger: "([^\\\\])(${GREEK})", replacement: "[[0]]\\[[1]]", options: "rmA", description: "Add backslash before Greek letters"},
-	{trigger: "([^\\\\])(${SYMBOL})", replacement: "[[0]]\\[[1]]", options: "rmA", description: "Add backslash before symbols"},
+	{trigger: "(^|[^\\\\])(${GREEK})", replacement: "[[0]]\\[[1]]", options: "rmA", description: "Add backslash before Greek letters"},
+	{trigger: "(^|[^\\\\])(${SYMBOL})", replacement: "[[0]]\\[[1]]", options: "rmA", description: "Add backslash before symbols"},
 
     // Insert space after Greek letters and symbols. The negative lookahead
     // means "what is typed so far is not itself a complete symbol", so
@@ -285,7 +288,7 @@ export default [
     {trigger: /pa([A-Za-z])([A-Za-z])/, replacement: "\\frac{ \\partial [[0]] }{ \\partial [[1]] } ", options: "rm"},
     {trigger: "ddt", replacement: "\\frac{d}{dt} ", options: "mA"},
 
-    {trigger: /([^\\])int/, replacement: "[[0]]\\int", options: "mA", priority: -1},
+    {trigger: /(^|[^\\])int/, replacement: "[[0]]\\int", options: "mA", priority: -1},
     {trigger: "\\int", replacement: "\\int $0 \\, d${1:x} $2", options: "m"},
     {trigger: "dint", replacement: "\\int_{${0:0}}^{${1:1}} $2 \\, d${3:x} $4", options: "mA"},
     {trigger: "oint", replacement: "\\oint", options: "mA"},
@@ -296,7 +299,7 @@ export default [
 
 
     // Trigonometry
-    {trigger: /([^\\])(arcsin|sin|arccos|cos|arctan|tan|csc|sec|cot)/, replacement: "[[0]]\\[[1]]", options: "rmA", description: "Add backslash before trig funcs"},
+    {trigger: /(^|[^\\])(arcsin|sin|arccos|cos|arctan|tan|csc|sec|cot)/, replacement: "[[0]]\\[[1]]", options: "rmA", description: "Add backslash before trig funcs"},
 
     {trigger: /\\(arcsin|sin|arccos|cos|arctan|tan|csc|sec|cot)([A-Za-gi-z])/,
      replacement: "\\[[0]] [[1]]", options: "rmA",
@@ -337,8 +340,8 @@ export default [
     {trigger: "outer", replacement: "\\ket{${0:\\psi}} \\bra{${0:\\psi}} $1", options: "mA"},
 
     // Chemistry
-	{trigger: "pu", replacement: "\\pu{ $0 }", options: "mA"},
-	{trigger: "cee", replacement: "\\ce{ $0 }", options: "mA"},
+	// `pu` / `cee` (`\pu`, `\ce`) are gone: they need mhchem, which the KaTeX
+	// renderer does not load, and `pu` fired mid-expression (`pu+qv`).
 	{trigger: "he4", replacement: "{}^{4}_{2}He ", options: "mA"},
 	{trigger: "he3", replacement: "{}^{3}_{2}He ", options: "mA"},
 	{trigger: "iso", replacement: "{}^{${0:4}}_{${1:2}}${2:He}", options: "mA"},
@@ -347,7 +350,9 @@ export default [
     // Environments
     // Here the regex syntax [pbBvV]mat is used to match pmat, bmat, Bmat, vmat, Vmat
     {
-        trigger: /([pbBvV]mat)/,
+        // The lookbehind keeps a hand-typed `\begin{bmatrix}` from expanding
+        // inside its own braces.
+        trigger: /(?<!\{[A-Za-z]*)([pbBvV]mat)/,
         replacement: "\\begin{[[0]]rix}\n$0\n\\end{[[0]]rix}",
         options: "rMA",
         description: "Matrix environments with new lines",
@@ -359,7 +364,7 @@ export default [
     // letter and the Greek-letter rule rewrites `spi`, so neither word can be
     // typed. `beg` + the env name still reaches them.)
     {
-        trigger: /(smallmatrix|dcases|rcases|gathered|matrix|cases|align)/,
+        trigger: /(?<!\{[A-Za-z]*)(smallmatrix|dcases|rcases|gathered|matrix|cases|align)/,
         replacement: "\\begin{[[0]]}\n$0\n\\end{[[0]]}",
         options: "rMA",
         description: "Miscellaneous environments with new lines",
@@ -373,12 +378,12 @@ export default [
         description: "Array environment with a column spec",
     },
     {
-        trigger: /([pbBvV]mat)/,
+        trigger: /(?<!\{[A-Za-z]*)([pbBvV]mat)/,
         replacement: "\\begin{[[0]]rix}$0\\end{[[0]]rix}",
         options: "rnA",
     },
     {
-        trigger: /(smallmatrix|dcases|rcases|gathered|matrix|cases|align)/,
+        trigger: /(?<!\{[A-Za-z]*)(smallmatrix|dcases|rcases|gathered|matrix|cases|align)/,
         replacement: "\\begin{[[0]]}$0\\end{[[0]]}",
         options: "rnA",
     },
@@ -394,13 +399,13 @@ export default [
     {
         trigger: "sol",
         replacement: "= \\begin{bmatrix}\n$0\n\\end{bmatrix}",
-        options: "mA",
+        options: "mAw",
         description: "Solution column vector with =",
     },
     {
         trigger: "ans",
         replacement: "\\begin{bmatrix}\n$0\n\\end{bmatrix}",
-        options: "mA",
+        options: "mAw",
         description: "Solution column vector",
     },
 

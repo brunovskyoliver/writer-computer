@@ -16,7 +16,7 @@ export type AutoFraction = {
 const CLOSERS: Record<string, string> = { ")": "(", "]": "[", "}": "{" };
 
 /** Characters that end the operand when scanning backwards over a plain run. */
-const BREAKERS = new Set(["+", "-", "=", "<", ">", ",", "(", "[", "{"]);
+const BREAKERS = new Set(["+", "-", "=", "<", ">", ",", "(", "[", "{", "&"]);
 
 /** Start of the balanced group ending at `end` (exclusive), or `null` when the
  *  brackets do not balance. */
@@ -34,6 +34,38 @@ function balancedStart(text: string, end: number): number | null {
   return null;
 }
 
+/** Start of the operand whose last character closes a group at `end`
+ *  (exclusive): the group itself, pulled back over the macro it belongs to —
+ *  every argument of it (`\frac{a}{b}`) — and over a `^`/`_` it is the
+ *  script of, so `x^{2}` and `A_{ij}` are taken whole. */
+function groupOperandStart(text: string, end: number): number | null {
+  const group = balancedStart(text, end);
+  if (group === null) return null;
+
+  let first = group;
+  while (text[first - 1] === "}") {
+    const previous = balancedStart(text, first);
+    if (previous === null) break;
+    first = previous;
+  }
+  const command = /\\[A-Za-z]+$/.exec(text.slice(0, first));
+  let start = command ? command.index : group;
+
+  while (text[start - 1] === "^" || text[start - 1] === "_") {
+    const baseEnd = start - 1;
+    if (CLOSERS[text[baseEnd - 1]!]) {
+      const base = groupOperandStart(text, baseEnd);
+      if (base === null) break;
+      start = base;
+      continue;
+    }
+    const base = /(?:\\[A-Za-z]+|[A-Za-z0-9])$/.exec(text.slice(0, baseEnd));
+    if (!base) break;
+    start = base.index;
+  }
+  return start;
+}
+
 export function autoFraction(lineBefore: string): AutoFraction | null {
   // The `/` is already in the text; the operand is everything before it.
   const end = lineBefore.length - 1;
@@ -41,16 +73,16 @@ export function autoFraction(lineBefore: string): AutoFraction | null {
 
   let start: number;
   if (CLOSERS[lineBefore[end - 1]!]) {
-    const balanced = balancedStart(lineBefore, end);
-    if (balanced === null) return null;
-    // `\sqrt{x}` — pull in the control sequence the group belongs to.
-    const command = /\\[A-Za-z]+$/.exec(lineBefore.slice(0, balanced));
-    start = command ? command.index : balanced;
+    const group = groupOperandStart(lineBefore, end);
+    if (group === null) return null;
+    start = group;
   } else {
     start = end;
     while (start > 0) {
       const char = lineBefore[start - 1]!;
       if (/\s/.test(char) || BREAKERS.has(char)) break;
+      // A matrix cell edge: `\;` `\,` `\:` thin spaces or a `\\` row break.
+      if (/[;:\\]/.test(char) && lineBefore[start - 2] === "\\") break;
       start -= 1;
     }
   }

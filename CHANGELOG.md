@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-09-30
+
+- Write out a general matrix in one step. `Cmd+Alt+M` opens a small prompt at the caret: type a size and a letter (`3x3 a`, `2 4 b`, `2 by 3`; the letter defaults to `a`) and Enter writes a `bmatrix` of `a_{11}` … `a_{33}`, with the caret just past `\end{bmatrix}`. In display math the matrix lands at the caret, in inline math it stays on one line, and in prose it arrives in its own `$$` block. Past nine rows or columns the indices take a comma (`a_{1,10}`). Also in the command palette and the editor's Matrix submenu.
+
+- Tab in a matrix reliably moves to the next element. Two bugs sent it elsewhere. A finished snippet (a subscript `_{…}`, a fraction, a bracket pair) kept its tab stops alive, so Tab jumped the caret back into it; snippets now end once the caret leaves them or reaches their last stop. And from inside a brace group, such as `a_{1|1} & …` or `\textcolor{#e0a000}{2|} & …`, Tab skipped every `&` and appended a new cell at the end of the row; it now lands on the next element.
+
+- Smaller math-typing fixes. Typing the `}`, `)` or `]` a snippet already inserted steps over it instead of doubling it (`A^{T}` no longer becomes `A^{T}}`). Backspace only undoes a snippet expansion immediately after it, not after you have moved the caret or while a placeholder is selected. Auto-fraction takes `x^{2}`, `A_{ij}` and `\frac{a}{b}` whole and stops at `&`, `\;` and `\\`, so a `/` inside a matrix row no longer swallows the neighbouring cells.
+
+- Snippet-set fixes, in the shipped defaults. `cos`, `det`, `beg`, Greek letters and friends now expand at the start of a line, which is where every matrix row starts (`theta` used to become `th\eta` there). A hand-typed `\begin{bmatrix}` no longer expands `bmat` inside its own braces. Auto-subscript leaves hex colours (`#e0a000`) and open script groups (`a_{i1}`) alone. `ans` and `sol` need a word boundary. `pu` and `cee` are gone because they need mhchem, which isn't loaded. An existing snippet file keeps working unchanged; use Reset to defaults in Settings → LaTeX Suite to pick these up.
+
 ## 2026-09-24
 
 - Closing your last PDF now lets the PDF engine's background worker shut down after about 30 seconds idle instead of running for the rest of the session, dropping the memory it held for parsed fonts and page structures (measured: roughly 100 MB recovered in the perf fixture after the worker exits). Reopening a PDF or running a content search restarts it on demand. A retention audit of the whole app found nothing else holding memory after tabs close: editor documents, PDF handles, drawing scenes, and editor scroll state all release correctly, and what remains allocated is WebKit's own reusable pool, which the operating system reclaims under memory pressure.

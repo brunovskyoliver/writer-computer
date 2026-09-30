@@ -25,6 +25,7 @@ import { matrixRowBreak } from "@/lib/latex-snippets/matrix-row";
 import { atFormulaEnd, copyStepInsert, emptyStepInsert } from "@/lib/math/steps";
 import {
   expandSnippet,
+  frameHolds,
   frameOf,
   nextGroup,
   selectionForGroup,
@@ -81,7 +82,20 @@ export const tabstopField = StateField.define<TabstopState>({
     for (const effect of tr.effects) {
       if (effect.is(setFrames)) frames = effect.value;
     }
+    // A caret that moved out of a snippet, or reached its exit stop, is done
+    // with it. Without this a frame from a subscript typed minutes ago keeps
+    // its stops, and the next Tab jumps back to them instead of reaching the
+    // matrix-cell or tab-out rules.
+    if ((tr.selection || tr.docChanged) && frames.length > 0) {
+      const head = tr.newSelection.main.head;
+      let keep = frames.length;
+      while (keep > 0 && !frameHolds(frames[keep - 1]!, head)) keep -= 1;
+      if (keep < frames.length) frames = frames.slice(0, keep);
+    }
     if (tr.isUserEvent("input.snippet")) lastExpansionAt = docChanges;
+    // Moving the caret (Tab to a stop, arrows, a click) ends the window in
+    // which Backspace means "undo that expansion".
+    else if (tr.selection && !tr.docChanged) lastExpansionAt = null;
 
     return frames === value.frames && docChanges === value.docChanges
       ? { ...value, lastExpansionAt }
@@ -189,6 +203,7 @@ function handleInput(view: EditorView, from: number, to: number, text: string): 
     return true;
   }
   if (from !== to) return false;
+  if (overtypeCloser(view, from, text)) return true;
 
   // Decide *before* touching the document. Returning `true` from an
   // `inputHandler` suppresses every lower-precedence one — `closeBrackets()`
@@ -255,6 +270,37 @@ function handleInput(view: EditorView, from: number, to: number, text: string): 
     scrollIntoView: true,
   });
 
+  return true;
+}
+
+/**
+ * Typing the `}` / `)` / `]` a snippet already inserted steps over it instead
+ * of doubling it: `^{T` + `}` reads `^{T}`, not `^{T}}`. Only when the closer
+ * ends right before a stop of the innermost frame — i.e. it is the snippet's
+ * own closer — and the caret then continues at that stop.
+ */
+function overtypeCloser(view: EditorView, pos: number, text: string): boolean {
+  if (text !== "}" && text !== ")" && text !== "]") return false;
+  if (view.state.doc.sliceString(pos, pos + 1) !== text) return false;
+  const frames = view.state.field(tabstopField).frames;
+  const top = frames[frames.length - 1];
+  if (!top) return false;
+
+  let group: number | null = null;
+  const cursor = top.marks.iter();
+  for (; cursor.value; cursor.next()) {
+    if (cursor.from === pos + 1 && cursor.value.group !== top.currentGroup) {
+      group = cursor.value.group;
+      break;
+    }
+  }
+  if (group === null) return false;
+
+  view.dispatch({
+    selection: EditorSelection.cursor(pos + 1),
+    effects: [setFrames.of([...frames.slice(0, -1), { ...top, currentGroup: group }])],
+    userEvent: "select",
+  });
   return true;
 }
 
@@ -452,6 +498,8 @@ function latexKeymap(getTabId: () => string) {
         if (vimBlocks(getTabId)) return false;
         const { lastExpansionAt, docChanges } = view.state.field(tabstopField);
         if (lastExpansionAt !== docChanges || undoDepth(view.state) === 0) return false;
+        // A selected placeholder (`{cc}`) is being cleared, not regretted.
+        if (!view.state.selection.main.empty) return false;
         // Backspace immediately after an expansion undoes it, the way ⌘Z would.
         return undo(view);
       },

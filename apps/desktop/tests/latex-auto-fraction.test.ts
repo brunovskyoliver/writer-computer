@@ -46,4 +46,21 @@ describe("autoFraction", () => {
       { group: 1, offset: 10 },
     ]);
   });
+
+  test("a script group takes its base with it", () => {
+    expect(applied("x^{2}/")).toBe("\\frac{x^{2}}{|}");
+    expect(applied("A^{-1}/")).toBe("\\frac{A^{-1}}{|}");
+    expect(applied("a_{ij}/")).toBe("\\frac{a_{ij}}{|}");
+    expect(applied("\\alpha_{1}^{2}/")).toBe("\\frac{\\alpha_{1}^{2}}{|}");
+  });
+
+  test("a multi-argument macro is taken whole", () => {
+    expect(applied("\\frac{1}{2}/")).toBe("\\frac{\\frac{1}{2}}{|}");
+  });
+
+  test("a matrix cell edge ends the operand", () => {
+    expect(applied("1&3/")).toBe("1&\\frac{3}{|}");
+    expect(applied("1\\;3/")).toBe("1\\;\\frac{3}{|}");
+    expect(applied("1\\\\3/")).toBe("1\\\\\\frac{3}{|}");
+  });
 });

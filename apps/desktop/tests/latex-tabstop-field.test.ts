@@ -51,4 +51,84 @@ describe("tabstopField", () => {
     const after = later.field(tabstopField);
     expect(after.lastExpansionAt).not.toBe(after.docChanges);
   });
+
+  test("moving the caret after an expansion closes the Backspace-undo window", () => {
+    const expanded = stateWith("abc").update({
+      changes: { from: 3, insert: "{}" },
+      selection: { anchor: 4 },
+      userEvent: "input.snippet",
+    }).state;
+    expect(expanded.field(tabstopField).lastExpansionAt).not.toBeNull();
+    const moved = expanded.update({ selection: { anchor: 5 }, userEvent: "select" }).state;
+    expect(moved.field(tabstopField).lastExpansionAt).toBeNull();
+  });
+
+  test("moving the caret out of a frame drops it", () => {
+    const start = stateWith("a_{}  x").update({
+      effects: setFrames.of([
+        frameOf([
+          { from: 3, to: 3, group: 0 },
+          { from: 4, to: 4, group: 1 },
+        ])!,
+      ]),
+      selection: { anchor: 3 },
+    }).state;
+    expect(start.field(tabstopField).frames).toHaveLength(1);
+    const outside = start.update({ selection: { anchor: 7 } }).state;
+    expect(outside.field(tabstopField).frames).toEqual([]);
+  });
+
+  test("reaching the exit stop finishes the frame, even while typing there", () => {
+    const frame = frameOf([
+      { from: 3, to: 3, group: 0 },
+      { from: 4, to: 4, group: 1 },
+    ])!;
+    const start = stateWith("a_{}").update({
+      effects: setFrames.of([frame]),
+      selection: { anchor: 3 },
+    }).state;
+    // Arrow past `}` onto `$1`, the exit: the snippet is done.
+    const atExit = start.update({ selection: { anchor: 4 } }).state;
+    expect(atExit.field(tabstopField).frames).toEqual([]);
+    // Typing at the exit drags the empty stop along; the frame still ends.
+    const typed = start.update({
+      changes: { from: 4, insert: " + r" },
+      selection: { anchor: 8 },
+    }).state;
+    expect(typed.field(tabstopField).frames).toEqual([]);
+  });
+
+  test("leaving an inner frame keeps the enclosing one", () => {
+    const outer = frameOf([
+      { from: 1, to: 1, group: 0 },
+      { from: 9, to: 9, group: 1 },
+    ])!;
+    const inner = frameOf([
+      { from: 3, to: 3, group: 0 },
+      { from: 4, to: 4, group: 1 },
+    ])!;
+    const start = stateWith("0123456789").update({
+      effects: setFrames.of([outer, inner]),
+      selection: { anchor: 3 },
+    }).state;
+    const after = start.update({ selection: { anchor: 6 } }).state;
+    expect(after.field(tabstopField).frames).toEqual([outer]);
+  });
+
+  test("typing inside a stop keeps the frame", () => {
+    const start = stateWith("a_{}").update({
+      effects: setFrames.of([
+        frameOf([
+          { from: 3, to: 3, group: 0 },
+          { from: 4, to: 4, group: 1 },
+        ])!,
+      ]),
+      selection: { anchor: 3 },
+    }).state;
+    const typed = start.update({
+      changes: { from: 3, insert: "11" },
+      selection: { anchor: 5 },
+    }).state;
+    expect(typed.field(tabstopField).frames).toHaveLength(1);
+  });
 });

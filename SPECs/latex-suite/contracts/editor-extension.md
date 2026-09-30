@@ -51,6 +51,7 @@ All five return `false` in vim Normal/Visual modes. Tab-to-next-stop dispatches 
 - A frame holds `RangeSet<TabstopRange>` (plain range values, not decorations): a `Decoration.mark` may not be empty and most stops are.
 - Mapping: each frame's `marks.map(tr.changes)`; frames whose set becomes empty are dropped.
 - Cleared on: `Escape`, transaction with `isUserEvent("writer")` (swap/reload), vim mode leaving insert (a `ViewPlugin` watching `vim-store` for the tab), `setFrames([])`.
+- Left behind: after any selection or document change, frames are popped from the top while the main caret lies outside the frame's span (first stop's start to last stop's end). Moving or typing out of a snippet abandons it, so Tab never jumps back to a stale stop.
 - Decorations: `Decoration.mark({ class: "cm-latex-tabstop" })` for non-empty ranges; zero-width stops are not drawn.
 
 ## Math context rules

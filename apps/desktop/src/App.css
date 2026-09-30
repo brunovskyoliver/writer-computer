@@ -523,8 +523,10 @@ body.editor-dragging [data-tab-host] {
    ancestor neutralizes `backdrop-filter`. `!important` is required on
    background/border/radius because `@codemirror/view`'s baseTheme injects
    `&light .cm-tooltip { backgroundColor: #f5f5f5; border: 1px solid #bbb }`
-   after our stylesheet with higher specificity. */
-.cm-tooltip.cm-tooltip-autocomplete {
+   after our stylesheet with higher specificity. The matrix-size prompt
+   (`matrix-insert.ts`) wears the same card. */
+.cm-tooltip.cm-tooltip-autocomplete,
+.cm-tooltip.cm-matrix-prompt {
   background: transparent !important;
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
@@ -534,7 +536,8 @@ body.editor-dragging [data-tab-host] {
   isolation: isolate;
 }
 
-.cm-tooltip.cm-tooltip-autocomplete::before {
+.cm-tooltip.cm-tooltip-autocomplete::before,
+.cm-tooltip.cm-matrix-prompt::before {
   content: "";
   position: absolute;
   inset: 0;

@@ -110,6 +110,32 @@ export function selectionForGroup(
   return ranges.length === 0 ? null : EditorSelection.create(ranges, 0);
 }
 
+/**
+ * Whether the caret at `pos` is still working inside the frame: within its
+ * span (first stop's start to last stop's end) and not parked on its exit —
+ * the highest group's empty stop. An empty stop moves along with text typed
+ * at it, so a caret that reached the exit and kept typing would otherwise
+ * stay "inside" forever and Tab would re-select the spot it already is on.
+ */
+export function frameHolds(frame: TabstopFrame, pos: number): boolean {
+  let from = Infinity;
+  let to = -Infinity;
+  let exitGroup = -Infinity;
+  const cursor = frame.marks.iter();
+  for (; cursor.value; cursor.next()) {
+    from = Math.min(from, cursor.from);
+    to = Math.max(to, cursor.to);
+    exitGroup = Math.max(exitGroup, cursor.value.group);
+  }
+  if (pos < from || pos > to) return false;
+
+  const exit = frame.marks.iter();
+  for (; exit.value; exit.next()) {
+    if (exit.value.group === exitGroup && exit.from === exit.to && exit.from === pos) return false;
+  }
+  return true;
+}
+
 /** The next group in `dir` after the frame's current one, or `null` when the
  *  frame is exhausted in that direction (the caller pops it). */
 export function nextGroup(frame: TabstopFrame, dir: 1 | -1): number | null {

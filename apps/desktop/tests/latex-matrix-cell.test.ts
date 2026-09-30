@@ -63,6 +63,20 @@ describe("matrixCellTarget — move", () => {
   });
 });
 
+describe("matrixCellTarget — caret inside a group", () => {
+  test("a subscript's closing brace does not hide the next &", () => {
+    expect(apply("\\begin{bmatrix} a_{1|1} & a_{12} \\end{bmatrix}")).toBe(
+      "\\begin{bmatrix} a_{11} & |a_{12} \\end{bmatrix}",
+    );
+  });
+
+  test("works from inside a \\textcolor argument", () => {
+    expect(apply("\\begin{bmatrix}\\textcolor{#e0a000}{2|} & 3 & 1\\end{bmatrix}")).toBe(
+      "\\begin{bmatrix}\\textcolor{#e0a000}{2} & |3 & 1\\end{bmatrix}",
+    );
+  });
+});
+
 describe("matrixCellTarget — insert", () => {
   test("appends ` & ` at the end of an &-style row", () => {
     expect(apply("\\begin{pmatrix} a & b| \\end{pmatrix}")).toBe(

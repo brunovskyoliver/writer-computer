@@ -4,6 +4,7 @@ import { syntaxTree } from "@codemirror/language";
 import { braceAnnotation } from "./brace-command";
 import { mathAlign, mathCheck, mathSplit, mathTidy } from "./math-commands";
 import { matrixDelimiters } from "./matrix-delimiters";
+import { insertMatrix, matrixPrompt } from "./matrix-insert";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -407,6 +408,11 @@ export const editorCommands = {
     label: "Overbrace annotation",
     chord: "Mod-Alt-o",
   },
+  "insert.matrix": {
+    run: insertMatrix,
+    label: "Matrix of size…",
+    chord: "Mod-Alt-m",
+  },
   "matrix.parens": {
     run: matrixDelimiters("pmatrix"),
     label: "Matrix: round brackets ( )",
@@ -473,4 +479,4 @@ const formattingKeymap: KeyBinding[] = Object.values(editorCommands).flatMap((c)
   "chord" in c ? [{ key: c.chord, run: c.run }] : [],
 );
 
-export const markdownFormatting: Extension = Prec.high(keymap.of(formattingKeymap));
+export const markdownFormatting: Extension = [Prec.high(keymap.of(formattingKeymap)), matrixPrompt];

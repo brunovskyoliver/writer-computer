@@ -167,7 +167,7 @@ describe("buildEditorBodyMenuItemsSpec", () => {
     expect(items).toContain("ins.time");
   });
 
-  test("Matrix submenu contains the re-bracket commands", () => {
+  test("Matrix submenu contains the insert and re-bracket commands", () => {
     const handlers = makeBodyHandlers();
     handlers.onRunCommand = () => {};
     const spec = buildEditorBodyMenuItemsSpec(handlers, false);
@@ -176,6 +176,7 @@ describe("buildEditorBodyMenuItemsSpec", () => {
     if (matrixSubmenu?.kind !== "submenu") throw new Error("expected submenu");
     const items = matrixSubmenu.items.filter((e) => e.kind === "item").map((e) => e.id);
     expect(items).toEqual([
+      "mtx.insert",
       "mtx.parens",
       "mtx.square",
       "mtx.curly",

@@ -58,6 +58,7 @@ import type { RecentFile } from "@/lib/tauri";
 /** Matrix re-bracketing commands the palette exposes; the registry labels
  *  carry the glyphs, so only the lookup table lives here. */
 const MATRIX_PALETTE = [
+  ["matrix-insert", "Matrix: Insert Matrix of Size…", "insert.matrix"],
   ["matrix-parens", "Matrix: Round Brackets", "matrix.parens"],
   ["matrix-square", "Matrix: Square Brackets", "matrix.square"],
   ["matrix-curly", "Matrix: Curly Braces", "matrix.curly"],

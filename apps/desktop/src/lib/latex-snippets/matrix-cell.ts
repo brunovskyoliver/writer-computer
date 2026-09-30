@@ -50,7 +50,7 @@ function nextSeparator(
     if (ch === "\\") {
       const token = ENV_TOKEN.exec(formula.slice(i, i + 8));
       if (token) {
-        nested += token[1] === "begin" ? 1 : -1;
+        nested = Math.max(0, nested + (token[1] === "begin" ? 1 : -1));
         i += token[0].length - 1;
         continue;
       }
@@ -63,7 +63,9 @@ function nextSeparator(
     }
     if (braces === 0 && nested === 0 && ch === "&") return { index: i, raw: "&" };
     if (ch === "{") braces += 1;
-    else if (ch === "}") braces -= 1;
+    // A `}` with no `{` since `from` closes the group the caret started in
+    // (`a_{1|1} & …`); the separators after it are top-level again.
+    else if (ch === "}") braces = Math.max(0, braces - 1);
   }
   return null;
 }
