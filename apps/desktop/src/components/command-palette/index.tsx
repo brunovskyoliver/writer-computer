@@ -18,6 +18,8 @@ import {
 } from "@/hooks/use-command-palette";
 import { useSidebar } from "@/hooks/use-sidebar";
 import { useCloseWorkspace, useIsCompactFileMode, useWorkspace } from "@/hooks/use-workspace";
+import { workspaceLabels } from "@/components/sidebar/workspace-menu";
+import { useWorkspaceStore } from "@/stores/workspace-store";
 import {
   useActiveFilePath,
   useActiveTabId,
@@ -128,7 +130,14 @@ export function CommandPalette() {
   const search = useCommandPaletteSearch();
   const setSearch = useSetCommandPaletteSearch();
   const { toggleSidebar } = useSidebar();
-  const { root, isIndexing, openWorkspace } = useWorkspace();
+  const { root, isIndexing, openWorkspace, recentWorkspaces } = useWorkspace();
+  const switchWorkspace = useWorkspaceStore((s) => s.switchWorkspace);
+  const refreshRecentWorkspaces = useWorkspaceStore((s) => s.refreshRecentWorkspaces);
+  // The recents list is shared by every window; one opened elsewhere since
+  // this window loaded must still be offered as "Switch Workspace: …".
+  useEffect(() => {
+    if (isOpen) void refreshRecentWorkspaces();
+  }, [isOpen, refreshRecentWorkspaces]);
   const closeWorkspace = useCloseWorkspace();
   const openFile = useOpenFile();
   const closeActiveTab = useCloseActiveTab();
@@ -299,6 +308,21 @@ export function CommandPalette() {
       description: "Command",
       run: () => void handleOpenWorkspace(),
     },
+    // One row per other known workspace: shown here, or in the window that
+    // already has it (SPECs/workspace-switching-spec.md).
+    ...(isCompactFileMode ? [] : recentWorkspaces)
+      .filter((path) => path !== root)
+      .map(
+        (path): Command => ({
+          id: `switch-workspace:${path}`,
+          label: `Switch Workspace: ${workspaceLabels(recentWorkspaces).get(path)}`,
+          description: "Command",
+          run: () => {
+            close();
+            void switchWorkspace(path);
+          },
+        }),
+      ),
     root && {
       id: "close-workspace",
       label: "Close Workspace",

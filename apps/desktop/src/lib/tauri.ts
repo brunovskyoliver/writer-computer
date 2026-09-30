@@ -108,6 +108,19 @@ export function openWorkspaceInNewWindow(path: string, file?: string | null): Pr
   return invoke("open_workspace_in_new_window", { path, file: file ?? null });
 }
 
+export type WorkspaceWindow = { root: string; current: boolean };
+
+/** Every workspace open in a window of this process; `current` marks the
+ *  window that asked. */
+export function workspaceWindows(): Promise<WorkspaceWindow[]> {
+  return invoke("workspace_windows");
+}
+
+/** Focus the other window already showing `path`; `false` when none does. */
+export function focusWorkspaceWindow(path: string): Promise<boolean> {
+  return invoke("focus_workspace_window", { path });
+}
+
 /** Bundled startup-restore IPC. Returns workspace info, root directory
  *  entries, the recents list, the persisted session, and (when available)
  *  the active tab's file content in a single round trip. */

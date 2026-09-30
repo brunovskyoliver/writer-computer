@@ -623,6 +623,8 @@ pub fn run() {
             commands::workspace::restore_workspace,
             commands::workspace::get_recent_workspaces,
             commands::workspace::remove_recent_workspace,
+            commands::workspace::workspace_windows,
+            commands::workspace::focus_workspace_window,
             commands::workspace::take_pending_open,
             commands::workspace::save_session,
             commands::workspace::load_session,

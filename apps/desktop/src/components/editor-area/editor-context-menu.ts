@@ -1,6 +1,7 @@
 import { Menu } from "@tauri-apps/api/menu/menu";
 import { PredefinedMenuItem } from "@tauri-apps/api/menu/predefinedMenuItem";
 import { MenuItem } from "@tauri-apps/api/menu/menuItem";
+import { CheckMenuItem } from "@tauri-apps/api/menu/checkMenuItem";
 import { Submenu } from "@tauri-apps/api/menu/submenu";
 import { LogicalPosition } from "@tauri-apps/api/dpi";
 import {
@@ -237,6 +238,7 @@ export function buildTitleMenuItemsSpec(
 
 export type MenuItemSpec =
   | { kind: "item"; id: string; text: string; action: () => void; accelerator?: string }
+  | { kind: "check"; id: string; text: string; checked: boolean; action: () => void }
   | { kind: "separator" }
   | { kind: "submenu"; text: string; items: MenuItemSpec[] };
 
@@ -247,6 +249,14 @@ async function buildMenuItems(
     spec.map(async (entry) => {
       if (entry.kind === "separator") {
         return PredefinedMenuItem.new({ item: "Separator" });
+      }
+      if (entry.kind === "check") {
+        return CheckMenuItem.new({
+          id: entry.id,
+          text: entry.text,
+          checked: entry.checked,
+          action: entry.action,
+        });
       }
       if (entry.kind === "submenu") {
         const children = await buildMenuItems(entry.items);

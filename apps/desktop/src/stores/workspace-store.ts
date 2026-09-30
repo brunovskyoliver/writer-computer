@@ -34,6 +34,9 @@ interface WorkspaceState {
   recentWorkspaces: string[];
 
   openWorkspace: (path: string) => Promise<void>;
+  /** Show `path` in *this* window: focus the window that already has it, or
+   *  close this window's workspace (session saved) and open `path` here. */
+  switchWorkspace: (path: string) => Promise<void>;
   /** Hydrate from a prefetched `RestoreWorkspaceResponse` (startup cold-path
    *  and user-initiated switches via the `restore_workspace` IPC). */
   restoreFromBundle: (bundle: RestoreWorkspaceResponse) => Promise<void>;
@@ -51,6 +54,8 @@ interface WorkspaceState {
   rewritePinnedPath: (oldPath: string, newPath: string) => void;
   bumpSidebarMetadataVersion: () => void;
   removeRecentWorkspace: (path: string) => Promise<void>;
+  /** Re-read the shared recents list — another window may have added to it. */
+  refreshRecentWorkspaces: () => Promise<void>;
 }
 
 function pinnedFilesPreferenceKey(root: string) {
@@ -161,6 +166,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     // being shown, so its session must not land in the current layout.
     if (get().root !== info.root) return;
     await applySessionRecord(info.root, record, null, { background: false });
+  },
+
+  switchWorkspace: async (path: string) => {
+    if (get().root === path) return;
+    // One window per workspace: if another window shows it, go there.
+    if (await tauri.focusWorkspaceWindow(path)) return;
+    if (get().root) await get().closeWorkspace();
+    // With no root left, `openWorkspace` opens in this window.
+    await get().openWorkspace(path);
   },
 
   closeWorkspace: async () => {
@@ -392,6 +406,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   bumpSidebarMetadataVersion: () => {
     set((state) => ({ sidebarMetadataVersion: state.sidebarMetadataVersion + 1 }));
+  },
+
+  refreshRecentWorkspaces: async () => {
+    const recents = await tauri.getRecentWorkspaces();
+    set({ recentWorkspaces: recents });
   },
 
   removeRecentWorkspace: async (path: string) => {

@@ -699,6 +699,56 @@ pub fn get_recent_workspaces(app: tauri::AppHandle) -> Vec<String> {
     load_recent_workspaces(&app).unwrap_or_default()
 }
 
+/// A workspace some window is showing, for the sidebar switcher.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct WorkspaceWindow {
+    pub root: String,
+    /// The window that asked.
+    pub current: bool,
+}
+
+/// Every workspace currently open in a window of this process.
+#[tauri::command]
+pub fn workspace_windows(webview: tauri::Webview, app: tauri::AppHandle) -> Vec<WorkspaceWindow> {
+    let own = webview.label().to_string();
+    app.state::<AppState>()
+        .workspace_targets()
+        .into_iter()
+        .filter_map(|(label, root, _file)| {
+            root.map(|root| WorkspaceWindow {
+                root: root.to_string_lossy().into_owned(),
+                current: label == own,
+            })
+        })
+        .collect()
+}
+
+/// Bring forward the *other* window already showing `path`. `false` when no
+/// other window has it — the caller then switches this window in place.
+#[tauri::command]
+pub fn focus_workspace_window(
+    path: String,
+    webview: tauri::Webview,
+    app: tauri::AppHandle,
+) -> bool {
+    let Ok(workspace) = PathBuf::from(&path).canonicalize() else {
+        return false;
+    };
+    let Some(label) = app.state::<AppState>().find_by_workspace(&workspace) else {
+        return false;
+    };
+    if label == webview.label() {
+        return false;
+    }
+    match app.get_webview_window(&label) {
+        Some(window) => {
+            let _ = window.unminimize();
+            window.set_focus().is_ok()
+        }
+        None => false,
+    }
+}
+
 #[tauri::command]
 pub fn remove_recent_workspace(path: String, app: tauri::AppHandle) -> Result<(), AppError> {
     let mut recents = load_recent_workspaces(&app).unwrap_or_default();
@@ -728,7 +778,7 @@ fn save_recent_workspace(app: &tauri::AppHandle, workspace_path: &str) -> Result
     let mut recents = load_recent_workspaces(app).unwrap_or_default();
     recents.retain(|p| p != workspace_path);
     recents.insert(0, workspace_path.to_string());
-    recents.truncate(10); // Keep max 10 recent workspaces
+    recents.truncate(20); // Keep max 20 recent workspaces
     save_recent_workspaces_list(app, &recents)
 }
 

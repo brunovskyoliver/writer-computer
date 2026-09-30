@@ -1,10 +1,9 @@
 import { useRef } from "react";
 import { useCloseWorkspace, useWorkspace } from "@/hooks/use-workspace";
 import * as tauri from "@/lib/tauri";
-import {
-  showNativeContextMenu,
-  type MenuItemSpec,
-} from "@/components/editor-area/editor-context-menu";
+import { showNativeContextMenu } from "@/components/editor-area/editor-context-menu";
+import { useWorkspaceStore } from "@/stores/workspace-store";
+import { workspaceMenuSpec } from "./workspace-menu";
 
 function getFolderName(path: string): string {
   const parts = path.replace(/\\/g, "/").split("/");
@@ -12,54 +11,41 @@ function getFolderName(path: string): string {
 }
 
 export function WorkspaceSwitcher() {
-  const { root, recentWorkspaces, openWorkspace } = useWorkspace();
+  const { root } = useWorkspace();
   const closeWorkspace = useCloseWorkspace();
   const buttonRef = useRef<HTMLButtonElement>(null);
 
   const workspaceName = root ? getFolderName(root) : "No Workspace";
 
-  async function handleOpenFolder() {
-    const picked = await tauri.pickWorkspace();
-    if (picked) {
-      await openWorkspace(picked);
-    }
-  }
-
   async function showMenu() {
-    const others = recentWorkspaces.filter((p) => p !== root);
-    const items: MenuItemSpec[] = [];
-
-    for (const path of others) {
-      items.push({
-        kind: "item",
-        id: `switch:${path}`,
-        text: getFolderName(path),
-        action: () => {
-          void openWorkspace(path);
+    const store = useWorkspaceStore.getState();
+    // Read fresh: another window may have opened or recorded a workspace
+    // since this one loaded its list.
+    const [recents, windows] = await Promise.all([
+      tauri.getRecentWorkspaces(),
+      tauri.workspaceWindows(),
+    ]);
+    const items = workspaceMenuSpec({
+      root,
+      recents,
+      openElsewhere: windows.filter((w) => !w.current).map((w) => w.root),
+      actions: {
+        switchTo: (path) => void store.switchWorkspace(path),
+        openInNewWindow: (path) => void tauri.openWorkspaceInNewWindow(path),
+        openFolder: () => {
+          void tauri.pickWorkspace().then((picked) => {
+            if (picked) void store.switchWorkspace(picked);
+          });
         },
-      });
-    }
-    if (others.length > 0) {
-      items.push({ kind: "separator" });
-    }
-    items.push({
-      kind: "item",
-      id: "open-folder",
-      text: "Open Folder\u2026",
-      action: () => {
-        void handleOpenFolder();
+        openFolderInNewWindow: () => {
+          void tauri.pickWorkspace().then((picked) => {
+            if (picked) void tauri.openWorkspaceInNewWindow(picked);
+          });
+        },
+        closeWorkspace: () => closeWorkspace(),
+        forget: (path) => void store.removeRecentWorkspace(path),
       },
     });
-    if (root) {
-      items.push({
-        kind: "item",
-        id: "close-workspace",
-        text: "Close Workspace",
-        action: () => {
-          closeWorkspace();
-        },
-      });
-    }
 
     const rect = buttonRef.current?.getBoundingClientRect();
     const itemRowHeight = 22;
