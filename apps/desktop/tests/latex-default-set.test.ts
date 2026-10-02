@@ -140,6 +140,43 @@ describe("shipped default snippet set", () => {
     expect(failures).toEqual([]);
   });
 
+  test("every default pattern agrees with native captures on short inputs", async () => {
+    const set = await loadDefaultSet();
+    const subjects = [
+      "",
+      "cos",
+      "arcsin",
+      "theta",
+      "xhat",
+      "x3",
+      "#e3",
+      "a_i1",
+      "\\alphax",
+      "\\int",
+      "\\begin{bmatrix}",
+      "bmat",
+      "{bmat",
+      "matrix",
+      "\\cosx",
+      "par2",
+      "dm",
+      " dm",
+      "é3",
+      "😀sin",
+    ];
+    for (const snippet of allSnippets(set)) {
+      const native = new RegExp(snippet.pattern.source, "u");
+      for (const subject of subjects) {
+        const expected = native.exec(subject);
+        const actual = snippet.pattern.exec(subject);
+        expect(
+          actual && { index: actual.index, values: Array.from(actual) },
+          `${snippet.id} on ${JSON.stringify(subject)}`,
+        ).toEqual(expected && { index: expected.index, values: Array.from(expected) });
+      }
+    }
+  });
+
   test("scanning a 200-char math line with no match stays under 1ms (SC-004)", async () => {
     const set = await loadDefaultSet();
     const line = `\\qquad ${"zZ".repeat(96)}`;

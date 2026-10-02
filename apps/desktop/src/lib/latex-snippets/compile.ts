@@ -1,12 +1,13 @@
 /**
  * Turn parsed entries into the pre-sorted, pre-bucketed set the editor scans
  * on every keystroke. All validation lives here: after this module, matching
- * is a straight loop over regexes that are known to compile.
+ * is a straight loop over compiled, bounded patterns.
  *
  * Rules: SPECs/latex-suite/contracts/snippet-file-format.md ("Option letters",
  * "Trigger semantics") and SPECs/latex-suite/data-model.md.
  */
 
+import { createSnippetPattern, PATTERN_SOURCE_LIMIT, type SnippetPattern } from "./bounded-pattern";
 import {
   letterToMode,
   MODE_LETTERS,
@@ -24,7 +25,7 @@ import {
 
 export type CompiledSnippet = {
   id: number;
-  pattern: RegExp;
+  pattern: SnippetPattern;
   /** The literal trigger, or `null` for a regex trigger. Visual matching and
    *  error messages use it. */
   triggerText: string | null;
@@ -96,28 +97,40 @@ export function parseVariables(items: string[]): {
   return { variables, errors };
 }
 
-/** Substitute `${NAME}` from the variable map. Returns the unresolved name
- *  instead of a string when one is missing. */
+type CompileFailure = { code: EntryError["code"]; message: string };
+
+/** Count projected trigger length before constructing its expanded value. */
 function substitute(
   text: string,
   variables: Map<string, string>,
-): { text: string } | { unknown: string } {
-  let unknown: string | null = null;
-  const substituted = text.replace(VARIABLE_REFERENCE, (whole, name: string) => {
-    if (name === "VISUAL" || /^\d(?::|$)/.test(name)) return whole;
-    const value = variables.get(name);
-    if (value === undefined) {
-      unknown ??= name;
-      return whole;
-    }
-    return value;
-  });
-  return unknown === null ? { text: substituted } : { unknown };
-}
-
-/** Regex-escape a literal trigger so `+` or `(` in a trigger is just text. */
-function escapeRegex(text: string): string {
-  return text.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
+  limit = Infinity,
+): { text: string } | CompileFailure {
+  const chunks: string[] = [];
+  let length = 0;
+  let from = 0;
+  VARIABLE_REFERENCE.lastIndex = 0;
+  for (let match = VARIABLE_REFERENCE.exec(text); match; match = VARIABLE_REFERENCE.exec(text)) {
+    const name = match[1]!;
+    const value = name === "VISUAL" || /^\d(?::|$)/.test(name) ? match[0] : variables.get(name);
+    if (value === undefined)
+      return { code: "unknown-variable", message: `Unknown snippet variable \${${name}}` };
+    length += match.index - from + value.length;
+    if (length > limit)
+      return {
+        code: "invalid-pattern",
+        message: `Snippet triggers are limited to ${limit} characters`,
+      };
+    if (match.index > from) chunks.push(text.slice(from, match.index));
+    if (value.length > 0) chunks.push(value);
+    from = match.index + match[0].length;
+  }
+  if (length + text.length - from > limit)
+    return {
+      code: "invalid-pattern",
+      message: `Snippet triggers are limited to ${limit} characters`,
+    };
+  chunks.push(text.slice(from));
+  return { text: chunks.join("") };
 }
 
 function validateOptions(options: string): string | null {
@@ -130,15 +143,6 @@ function validateOptions(options: string): string | null {
   return null;
 }
 
-/** Groups in a pattern: match the source against itself-or-empty and count
- *  the captures the engine reports. Cheaper and more correct than counting
- *  unescaped `(` by hand. */
-function countCaptures(source: string): number {
-  return (new RegExp(`${source}|`, "u").exec("")?.length ?? 1) - 1;
-}
-
-type CompileFailure = { code: EntryError["code"]; message: string };
-
 function compileEntry(
   entry: SnippetEntry,
   variables: Map<string, string>,
@@ -146,20 +150,16 @@ function compileEntry(
   const isRegex = entry.trigger.kind === "regex" || entry.options.includes("r");
   const rawSource = entry.trigger.kind === "regex" ? entry.trigger.source : entry.trigger.value;
 
-  const triggerSource = substitute(rawSource, variables);
-  if ("unknown" in triggerSource) {
+  if (rawSource.length > PATTERN_SOURCE_LIMIT) {
     return {
-      code: "unknown-variable",
-      message: `Unknown snippet variable \${${triggerSource.unknown}}`,
+      code: "invalid-pattern",
+      message: `Snippet triggers are limited to ${PATTERN_SOURCE_LIMIT} characters`,
     };
   }
+  const triggerSource = substitute(rawSource, variables, PATTERN_SOURCE_LIMIT);
+  if ("code" in triggerSource) return triggerSource;
   const replacement = substitute(entry.replacement, variables);
-  if ("unknown" in replacement) {
-    return {
-      code: "unknown-variable",
-      message: `Unknown snippet variable \${${replacement.unknown}}`,
-    };
-  }
+  if ("code" in replacement) return replacement;
 
   const optionsProblem = validateOptions(entry.options);
   if (optionsProblem) return { code: "invalid-options", message: optionsProblem };
@@ -175,19 +175,15 @@ function compileEntry(
     };
   }
 
-  const source = isRegex ? triggerSource.text : escapeRegex(triggerSource.text);
-  const boundary = entry.options.includes("w") ? "(?<![\\p{L}\\p{N}_])" : "";
-
-  let pattern: RegExp;
-  let captureCount: number;
+  let pattern: SnippetPattern;
   try {
     // Anchored at the caret: the subject is the line up to the caret, so the
     // trigger always matches the text that was just typed.
-    pattern = new RegExp(`${boundary}(?:${source})$`, "u");
-    captureCount = countCaptures(source);
+    pattern = createSnippetPattern(triggerSource.text, isRegex, entry.options.includes("w"));
   } catch (error) {
     return { code: "invalid-pattern", message: (error as Error).message };
   }
+  const captureCount = pattern.captureCount;
 
   const template = parseReplacement(replacement.text);
   const maxCapture = maxCaptureIndex(template);

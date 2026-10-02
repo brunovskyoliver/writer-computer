@@ -149,7 +149,7 @@ describe("matchSnippet", () => {
       { trigger: "oom", replacement: "ok", options: "mA" },
     ]);
     const first = set.byMode.inline.auto[0]!;
-    first.pattern = { exec: () => throwing() } as unknown as RegExp;
+    first.pattern = { exec: () => throwing() } as unknown as typeof first.pattern;
 
     const disabled: EntryError[] = [];
     const hit = match(set, "boom", { onDisable: (_id, error) => disabled.push(error) });

@@ -9,7 +9,9 @@
 
 ## Done
 
-- Review 17: Handle zero in complex powers and roots ([ticket](SPECs/Agent/worksheet-review-17-math-zero.md)). Zero-domain regressions and 104 targeted tests pass.
+- Review 18: Prevent snippet regexes from blocking the editor ([ticket](SPECs/Agent/worksheet-review-18-snippet-budget.md)). Bounded interpreter, default compatibility and browser typing verified; 1,675 frontend tests pass.
+
+- Review 17: Handle zero in complex powers and roots ([ticket](SPECs/Agent/worksheet-review-17-math-zero.md)). `b14f23d`. Zero-domain regressions and 104 targeted tests pass.
 
 - Review 16: Follow TeX token rules for superscripts ([ticket](SPECs/Agent/worksheet-review-16-math-exponents.md)). `57cd58c`. QA approved; full 1,607-test frontend suite passes.
 
@@ -145,7 +147,6 @@
 
 ## Up Next
 
-- Review 18: Prevent snippet regexes from blocking the editor ([ticket](SPECs/Agent/worksheet-review-18-snippet-budget.md)).
 - Review 19: Clear removed tab view states on editor reset ([ticket](SPECs/Agent/worksheet-review-19-tab-view-reset.md)).
 - Review 20: Unregister failed MCP handshakes ([ticket](SPECs/Agent/worksheet-review-20-mcp-handshake-cleanup.md)).
 - Review 22: Bound wiki image resolution caching ([ticket](SPECs/Agent/worksheet-review-22-embed-resolution-cache.md)). Adjacent memory issue: successful embed resolutions retain workspace/note/target keys for the window lifetime.

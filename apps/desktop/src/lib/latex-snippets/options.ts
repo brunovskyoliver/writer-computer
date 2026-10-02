@@ -63,8 +63,8 @@ export type LoadError = {
   column?: number;
 };
 
-/** A single `RegExp.exec` may not take longer than this. Over budget, the
- *  snippet is disabled and reported instead of stalling every keystroke. */
+/** Deadline shared across the full scan; the VM also bounds work and states.
+ *  Only an individual pattern's limit disables it until reload. */
 export const PATTERN_TIME_BUDGET_MS = 20;
 
 /** File name inside the app's global config directory. */

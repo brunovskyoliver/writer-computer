@@ -22,24 +22,24 @@ Elements that are not object literals, or objects whose `trigger`/`replacement`/
 
 Output of `compile.ts` for each valid entry.
 
-| Field          | Type                                        | Notes                                                                                       |
-| -------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `id`           | number                                      | entry index                                                                                 |
-| `pattern`      | RegExp                                      | anchored `(?:…)$`, flag `u`; string triggers escaped; `w` adds the non-word lookbehind      |
-| `triggerText`  | string \| null                              | the literal trigger for non-regex snippets (used by visual matching and error messages)     |
-| `template`     | `ReplacementSegment[]`                      | see below; variables already substituted                                                    |
-| `mode`         | `"text" \| "math" \| "inline" \| "display"` | from `t` / `m` / `n` / `M`; exactly one is required                                         |
-| `automatic`    | boolean                                     | `A`                                                                                         |
-| `visual`       | boolean                                     | template contains a `visual` segment                                                        |
-| `priority`     | number                                      | default 0                                                                                   |
-| `captureCount` | number                                      | groups in `pattern` (computed by matching the pattern's source against `new RegExp(...\|)`) |
-| `description`  | string \| undefined                         |                                                                                             |
-| `disabled`     | `EntryError \| null`                        | set at runtime by the matcher on timeout/throw; a disabled snippet is skipped               |
+| Field          | Type                                        | Notes                                                                                                                       |
+| -------------- | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `id`           | number                                      | entry index                                                                                                                 |
+| `pattern`      | SnippetPattern                              | bounded `exec`/`test`, `source`, `captureCount`, `kind`; literal suffix checks or compact regex programs with `u` semantics |
+| `triggerText`  | string \| null                              | the literal trigger for non-regex snippets (used by visual matching and error messages)                                     |
+| `template`     | `ReplacementSegment[]`                      | see below; variables already substituted                                                                                    |
+| `mode`         | `"text" \| "math" \| "inline" \| "display"` | from `t` / `m` / `n` / `M`; exactly one is required                                                                         |
+| `automatic`    | boolean                                     | `A`                                                                                                                         |
+| `visual`       | boolean                                     | template contains a `visual` segment                                                                                        |
+| `priority`     | number                                      | default 0                                                                                                                   |
+| `captureCount` | number                                      | groups counted from parsed syntax, without executing the trigger                                                            |
+| `description`  | string \| undefined                         |                                                                                                                             |
+| `disabled`     | `EntryError \| null`                        | set at runtime by the matcher on timeout/throw; a disabled snippet is skipped                                               |
 
 **Validation rules** (each failure → `EntryError` with the entry index; the entry is skipped, others load — FR-018):
 
 - `options` may contain only letters from `OPTION_LETTERS = "tmnMArw"`; exactly one of `t m n M`; `r` is implied for regex-literal triggers and allowed redundantly.
-- `pattern` must compile (`new RegExp(src, "u")`); a thrown `SyntaxError` → `invalid-pattern` with the engine's message.
+- `pattern` must compile within the syntax/source/nesting/capture/program limits in [the format contract](./contracts/snippet-file-format.md); rejection produces `invalid-pattern` with the reason. No whole-pattern native execution occurs while compiling or matching.
 - Every `[[n]]` in the replacement must satisfy `n < captureCount` → else `missing-capture`.
 - Every `${NAME}` must resolve in the variable map → else `unknown-variable` (`${VISUAL}` and `${digit:…}` are not variables).
 - `priority`, when present, must be a finite number → else `invalid-priority`.
@@ -64,11 +64,11 @@ Ordering rule for stops: ascending `index`; `$0` first (Obsidian semantics). Rep
 
 ## CompiledSnippetSet
 
-| Field    | Type                                                                                                                                                                                                      |
-| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `byMode` | `Record<"text" \| "inline" \| "display", { auto: CompiledSnippet[]; tab: CompiledSnippet[] }>` — `math` snippets appear in both `inline` and `display`; each list pre-sorted by priority desc, then index |
-| `visual` | `Map<string, CompiledSnippet[]>` keyed by `triggerText`, per mode                                                                                                                                         |
-| `count`  | number of loaded snippets                                                                                                                                                                                 |
+| Field    | Type                                                                                                                                                                                                                           |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `byMode` | `Record<"text" \| "inline" \| "display", { auto: CompiledSnippet[]; tab: CompiledSnippet[] }>` — `math` snippets appear in both `inline` and `display`; each list pre-sorted by priority desc, trigger length desc, then index |
+| `visual` | `Map<string, CompiledSnippet[]>` keyed by `triggerText`, per mode                                                                                                                                                              |
+| `count`  | number of loaded snippets                                                                                                                                                                                                      |
 
 ## SnippetLoadStatus (store)
 

@@ -8,6 +8,7 @@
  */
 
 import type { CompiledSnippet, CompiledSnippetSet, MatchMode } from "./compile";
+import { MatchingBudget, PatternBudgetExceeded } from "./bounded-pattern";
 import type { MathContext } from "./math-context";
 import { PATTERN_TIME_BUDGET_MS, type EntryError } from "./options";
 
@@ -60,26 +61,33 @@ function macroStart(lineBefore: string): number | null {
 }
 
 /** Run one pattern under the time budget. A snippet that overruns or throws is
- *  disabled for the session rather than stalling every keystroke (FR-019). */
+ *  disabled for the session rather than stalling every keystroke (FR-012).
+ *  Exhausting a scan after earlier candidates leaves this pattern enabled. */
 function execGuarded(
   snippet: CompiledSnippet,
   lineBefore: string,
   onDisable: MatchArgs["onDisable"],
+  budget: MatchingBudget,
 ): RegExpExecArray | null {
   const started = performance.now();
   let result: RegExpExecArray | null;
   try {
-    result = snippet.pattern.exec(lineBefore);
+    result = snippet.pattern.exec(lineBefore, budget);
   } catch (error) {
+    if (error instanceof PatternBudgetExceeded && error.scope === "scan") return null;
     onDisable(snippet.id, {
-      code: "pattern-threw",
+      code: error instanceof PatternBudgetExceeded ? "pattern-timeout" : "pattern-threw",
       index: snippet.id,
       ...(snippet.triggerText === null ? {} : { trigger: snippet.triggerText }),
-      message: `Snippet pattern threw: ${error instanceof Error ? error.message : String(error)}`,
+      message:
+        error instanceof PatternBudgetExceeded
+          ? `${error.message}; disabled until reload`
+          : `Snippet pattern threw: ${error instanceof Error ? error.message : String(error)}`,
     });
     return null;
   }
   if (performance.now() - started > PATTERN_TIME_BUDGET_MS) {
+    budget.exhausted = true;
     onDisable(snippet.id, {
       code: "pattern-timeout",
       index: snippet.id,
@@ -108,13 +116,16 @@ export function matchSnippet(args: MatchArgs): SnippetMatch | null {
     return { snippet, from: -1, to: -1, groups: [], visualText: selectionText };
   }
 
+  const budget = new MatchingBudget();
   const macro = kind === "auto" ? macroStart(lineBefore) : null;
 
   // The list is pre-sorted (priority desc, then file order), so first hit wins.
   for (const snippet of set.byMode[mode][kind === "auto" ? "auto" : "tab"]) {
+    if (!budget.hasTime()) break;
     if (snippet.disabled !== null || snippet.visual) continue;
+    if (budget.exhausted && snippet.pattern.kind !== "literal") continue;
 
-    const found = execGuarded(snippet, lineBefore, onDisable);
+    const found = execGuarded(snippet, lineBefore, onDisable, budget);
     if (!found) continue;
 
     const from = lineBefore.length - found[0].length;

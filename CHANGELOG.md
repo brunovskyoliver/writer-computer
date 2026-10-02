@@ -2,6 +2,8 @@
 
 ## 2026-10-02
 
+- Custom snippet regexes now run with interruptible work, time and memory limits. Pathological triggers cannot hold the editor in native backtracking; unsupported syntax and oversized triggers produce entry errors. Shipped captures and lookbehind guards keep working.
+
 - Zero roots, positive fractional zero powers and inverse-function endpoints now evaluate correctly. Undefined zero powers remain unannotated.
 
 - Math evaluation follows TeX superscript and argument token boundaries. Multi-token exponents need braces; unsupported scripts remain unannotated. Plot fences retain ordinary power syntax and bare function names.

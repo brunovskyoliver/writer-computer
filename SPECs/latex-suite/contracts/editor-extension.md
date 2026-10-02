@@ -31,6 +31,8 @@ dispatch(expansion(m ?? frac)) ; return true
 
 Nothing is dispatched on a miss. Returning `true` from an `inputHandler` suppresses every lower-precedence one — `closeBrackets()` among them — so the decision is made against the _pre-insert_ document (where the trigger already is) and the insert only happens once the expansion is certain.
 
+Regex candidates share one bounded scan per auto/Tab decision. Exhausting the scan skips remaining regex work without disabling healthy snippets; the ordinary input handler still runs on a miss. Individual pattern failures disable only that snippet until reload. Direct literal candidates may still match within the scan deadline. See [trigger limits](./snippet-file-format.md#trigger-semantics).
+
 The expansion transaction: `{ changes, selection, effects: [setFrames], userEvent: "input.snippet", annotations: isolateHistory.of("full") }`. Visual snippets replace the selection instead of the trigger; the selection captured _before_ the insert is used because the insert already replaced it.
 
 ## Tab / Shift-Tab / Escape / Backspace (Prec.highest keymap)

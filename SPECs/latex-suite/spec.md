@@ -104,7 +104,7 @@ In the LaTeX Suite settings section the user can turn the whole feature off, tog
 - **Vim mode**: snippets fire only in Insert mode; Tab/tabstop navigation applies in Insert mode; leaving Insert mode clears active tabstops.
 - **Multiple carets**: expansion applies to the primary caret only; other carets are unaffected, or expansion is suppressed entirely when more than one caret exists (implementation picks the simpler correct behaviour and documents it).
 - **Composition / IME input**: no snippet fires mid-composition; the trigger is evaluated once the composed text is committed.
-- **Very long or pathological regex triggers**: a trigger is evaluated only against the current line's text up to the caret; a snippet whose pattern throws or exceeds a small time budget is disabled with an error shown in Settings, not allowed to freeze typing.
+- **Very long or pathological regex triggers**: triggers are restricted by the syntax and compilation limits in the snippet-file contract. A bounded interpreter shares work/time limits across the full candidate scan. An individually failing pattern is disabled with an error shown in Settings; aggregate scan exhaustion preserves healthy entries for later input and returns normal input fallback.
 - **Snippet file open in two windows**: both are the same file; save from either reloads once.
 - **Snippet file removed while the app runs**: the last valid set stays active; opening from Settings recreates it from defaults.
 - **Undo after Tab**: Tab-to-next-stop is not an edit and adds no undo step.
@@ -128,7 +128,7 @@ In the LaTeX Suite settings section the user can turn the whole feature off, tog
 - **FR-009**: A snippet expansion MUST be a single undo step that restores the exact pre-expansion text and caret.
 - **FR-010**: Visual snippets (replacement containing `${VISUAL}`) MUST fire only when there is a non-empty selection and MUST wrap that selection; all other snippets MUST fire only when there is no selection.
 - **FR-011**: Snippet expansion MUST be inert inside vim Normal/Visual modes and inside IME composition.
-- **FR-012**: Snippet evaluation MUST not measurably delay typing: on a document of typical size the per-keystroke cost of matching the full default set stays below the threshold where a user perceives lag (see SC-004).
+- **FR-012**: Snippet evaluation MUST not measurably delay typing: on a document of typical size the per-keystroke cost of matching the full default set stays below the threshold where a user perceives lag (see SC-004). Custom patterns MUST run with interruptible work, state and time limits, including a shared full-scan deadline. Shared exhaustion MUST NOT disable healthy candidates merely because earlier entries consumed the budget.
 
 **Tab-out and auto-fraction**
 
@@ -178,7 +178,7 @@ In the LaTeX Suite settings section the user can turn the whole feature off, tog
 - **SC-003**: A change saved to the snippet file is usable in an open note within 1 second, with zero visible changes to the note's scroll position, caret, selection, or rendered widgets.
 - **SC-004**: With the full default set loaded, snippet matching adds no perceptible latency: the 95th-percentile keystroke-to-paint time in a 5,000-line document stays within 2 ms of the same measurement with snippets disabled.
 - **SC-005**: A deliberately broken snippet file never disables math typing: 100% of previously working snippets keep working, and the error is visible in Settings within 1 second of the save.
-- **SC-006**: A user who has used Obsidian Latex Suite can paste their existing snippet file and have all declarative entries (string/regex triggers with string replacements) load without edits; the two function-replacement entries in the reference file are listed by index rather than failing the whole file.
+- **SC-006**: Obsidian Latex Suite declarative entries use the same file syntax and replacement vocabulary. Custom regex triggers must satisfy Writer's supported syntax and compilation limits; unsupported entries are listed by index rather than failing the whole file. The reference file's four function-replacement entries are reported individually, and the shipped adaptation compiles without errors.
 - **SC-007**: In unfolded math source, five token classes (command, grouping, operator, number, comment) are visually distinguishable in both the default light and dark themes.
 
 ## Clarifications

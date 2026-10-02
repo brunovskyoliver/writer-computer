@@ -1,15 +1,33 @@
 # Prevent snippet regexes from blocking the editor
 
-Status: Up next.
+Status: Complete.
 
 Spec: [Code review fixes](../review-fixes/spec.md). Review finding 18.
 
 ## Plan
 
-Provide a bounded matcher for accepted custom regex patterns. Keep shipped patterns and captures compatible; reject unsupported patterns explicitly.
+Read snippet compile/match/options and extension contract, shipped defaults, existing compile/match/default-set tests and consolidation/editor docs. A post-exec timer cannot interrupt catastrophic native regex backtracking; capture counting also executes the custom pattern while loading.
 
-Load the owning source, tests and guideline docs. Add a regression check for the reported case and the adjacent success/failure boundary, then make the smallest coherent fix. Review the plan and implementation per docs/workflows/agent-review.md.
+Add a small bounded regex VM in lib/latex-snippets. Parse ECMAScript-u patterns with @eslint-community/regexpp, compile an ordered instruction program, then release the parser AST. Bound source length (2,048), syntactic nesting (32), captures (128), operation count (25,000 per pattern, 50,000 per scan), active backtracking states (256) and matching time (20ms). Preserve ordered alternatives, greedy/lazy quantifiers, captures, character classes/properties, anchors, word boundaries and forward/reverse lookarounds needed by shipped defaults. Lookbehind runs its subprogram in reverse with the same budget. Quantifier captures reset each iteration; zero-width progress is guarded. Native matching is allowed only for a single-codepoint character predicate, never execution of a whole custom pattern. Acorn's existing regex-literal syntax validation constructs an unused native RegExp but does not execute it; file-parser allocation limits are outside this matcher fix. Reject backreferences, named groups, inline flag modifiers or unsupported AST nodes with explicit invalid-pattern errors. Count captures from the parsed program, without executing user patterns.
+
+Check source length and nesting before invoking regexpp. Compile counted repetitions as counters, never unrolled instructions; cap the combined instruction count across lookaround subprograms at 8,192. Programs retain no AST references. Keep UTF-16 offsets and decode one code point on demand; do not preprocess or copy the full subject. Count lookaround stacks toward the shared active-state cap. Conservative consumed-length bounds and a last-character predicate can reduce anchored search work without truncating the subject or changing capture order.
+
+Reject oversized raw triggers and count projected expanded trigger length during variable substitution before allocating the result, for both literal and regex triggers. Replacement substitution keeps its existing behavior.
+
+Compiled patterns expose exec/test/source/captureCount behind one module. Literal triggers use a direct suffix check plus the existing Unicode word guard. Keep synchronous editor APIs, matching order, replacement captures and session disabling behavior. Share the 20ms deadline and 50,000 operations across one complete matcher scan, with separate accounting for each pattern's own limits. Only individual pattern exhaustion produces a pattern-timeout and session disable. Shared scan exhaustion skips remaining regex candidates without disabling the current or untouched healthy patterns. Continue direct literal checks while the scan deadline permits; the next input gets a fresh budget. Check the deadline between all candidates, including literal fallbacks, and return normal input fallback when it expires. Unexpected errors remain pattern-threw. Keep the existing post-call time check for injected matcher failures/slow custom test doubles; the VM enforces the real runtime budget. No worker/async input-handler change.
+
+QA, Editor and Systems review plan/implementation. Test catastrophic nested/overlapping quantifiers, multiple hostile patterns in one scan, compact huge repetition counts, capture/alternative/greediness/lookaround parity against native regex on short safe inputs, empty repetitions, assertion captures, astral characters/UTF-16 offsets, Unicode literal word guards, the entire current default set and the reference file, unsupported/load limits, deterministic operation exhaustion and actual editor responsiveness with a hostile custom trigger and later input. Retain the default-set latency test. Update contracts/data-model/spec FR-012 runtime-budget wording, worksheet and changelog. Full frontend gates and browser real EditorView check before commit.
+
+Plan review: QA, Editor and Systems identified aggregate runtime, budget attribution and counted-repetition compilation gaps; shared scan limits with separate per-pattern accounting, pre-parse nesting checks and compact/capped programs address them. Include a nearly exhausted scan followed by a cheap candidate, and confirm it can still match on fresh input. Parser API checked against the [regexpp primary documentation](https://github.com/eslint-community/regexpp).
 
 ## Report
 
-Pending implementation and validation.
+Implemented compact bounded regex programs with counter repetitions, Unicode/capture/lookaround semantics, pre-allocation trigger limits and literal suffix checks. Matching enforces 25,000 operations per pattern, 50,000 across the scan, 20ms deadlines and 256 active states. Individual failures disable only their offender; aggregate exhaustion preserves healthy entries. No whole custom pattern is executed to count captures or match input.
+
+QA, Editor and Systems approved the final implementation. Review fixed timer attribution, continuation after local state failure, AST closure retention, literal surrogate boundaries and a deadline test using the wrong context. Systems confirmed four AST WeakRefs clear while compiled patterns remain usable. Reviewers also completed 95,522 short-input differential comparisons with no remaining mismatch.
+
+Validation: nine new load-limit checks failed against the old implementation and now pass; the own-timer regression also went red before its fix. All 97 targeted compile/match/default/file/budget tests pass, including the unchanged default-set latency threshold. Full frontend tests: 1,675 passed. vp check: no errors, 10 existing warnings. In a real browser EditorView with the shipped Markdown/math grammar and actual snippet input handlers, hostile matching returned normal typing in 3.4ms and reported pattern-timeout; subsequent literal expansion took 0.4ms. Matrix lookbehind protection and captured expansion each took 0.2ms. The view and temporary store state were destroyed/restored afterward.
+
+Updated the format contract, data model, extension contract, spec and changelog. Whole-file parsing and replacement expansion retain their existing behavior; WebKit/native allocator profiling remains outside this verification.
+
+Implementation review refinements: each pattern starts its own timer at invocation; local state/work failure disables only its offender and preserves remaining shared capacity. A 25,000-operation local allowance sits below the 50,000-operation scan limit, so an expensive pattern can be isolated after earlier cheap candidates. Predicate factories live at module scope to release compiler ASTs. Literal suffixes cannot start inside a surrogate pair. Clock attribution, shared exhaustion, state-failure continuation and Unicode boundary tests cover these cases.
