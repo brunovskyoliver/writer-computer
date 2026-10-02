@@ -108,13 +108,14 @@ tooltip. Results memoize per formula string. Behind `latex.eval-annotations`
 ## FR-7 Math: check step (command)
 
 `math.check`: compares the caret's `$$` formula with the previous `$$`
-block in the same run. Each formula reduces to `lhs − rhs` (or the whole
-expression with no `=`); free variables get deterministic sample values
-(three trials). All trials within epsilon → "looks equal (numerically)";
-any trial outside → "differs", with the counterexample values in the
-notice. Unparseable or open-ended formulas report why. Deliberately
-numeric, not symbolic — it catches dropped signs and bad arithmetic, which
-is what actually goes wrong in these notes.
+block in the same run. Two bare expressions compare their numeric values
+within relative epsilon. Two single equations compare `lhs − rhs` residuals
+up to a constant nonzero factor, allowing transformations such as
+`2x = 6` to `x = 3`. Mixed expression/equation inputs and equation chains
+report unsupported rather than a result. Free variables get deterministic
+sample values (three trials); a counterexample reports "differs" with its
+values. Unparseable or open-ended formulas report why. This is a numeric
+check, not a symbolic proof.
 
 ## FR-8 ` ```plot ` fenced block
 

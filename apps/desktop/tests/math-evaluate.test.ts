@@ -118,6 +118,31 @@ describe("checkEquivalent", () => {
     expect(checkEquivalent("2x = 6", "x = 3").kind).toBe("equal");
   });
 
+  it.each([
+    ["x", "2x"],
+    ["x", "-x"],
+    ["j", "-j"],
+    ["1", "99"],
+    ["j", "2j"],
+    ["x+1", "3x+3"],
+  ])("compares expression values rather than scale: %s versus %s", (prev, next) => {
+    expect(checkEquivalent(prev, next).kind).toBe("differs");
+  });
+
+  it.each([
+    ["x=1", "x-1"],
+    ["x-1", "x=1"],
+    ["x=1=2", "x=1"],
+    ["x=1", "x=1=2"],
+  ])("refuses mixed forms and equation chains: %s versus %s", (prev, next) => {
+    expect(checkEquivalent(prev, next).kind).toBe("open");
+  });
+
+  it("accepts equal closed expressions and scaled single equations", () => {
+    expect(checkEquivalent("2+3", "5").kind).toBe("equal");
+    expect(checkEquivalent("x=3", "-2x=-6").kind).toBe("equal");
+  });
+
   it("flags a dropped sign", () => {
     expect(checkEquivalent("(x-1)(x+1)", "x^2 - 2x - 1").kind).toBe("differs");
   });

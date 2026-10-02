@@ -577,11 +577,9 @@ function sampleEnv(vars: string[], trial: number): Record<string, Complex> {
   return env;
 }
 
-/** `lhs = rhs` reduces to `lhs - (rhs)`; a bare expression stands alone. */
-function differenceSource(src: string): string {
-  const sides = equalitySides(src);
-  if (!sides) return src;
-  return sides.slice(1).reduce((acc, side) => `(${acc})-(${side})`, sides[0]!);
+/** Only single equations reduce to a residual; expressions retain their value. */
+function differenceSource(src: string, sides: string[] | null): string {
+  return sides ? `(${sides[0]})-(${sides[1]})` : src;
 }
 
 export type CheckResult =
@@ -590,19 +588,23 @@ export type CheckResult =
   | { kind: "open"; reason: string }
   | { kind: "error"; message: string };
 
-/**
- * Numerically compare two steps. Each formula reduces to `lhs − rhs` (or
- * itself); the steps are equivalent when those residuals stay *proportional*
- * — `f = c·g` for a constant c — across deterministic trials. Proportion,
- * not identity, because `2x = 6 → x = 3` divides both sides and the steps
- * do follow. One trial with a non-constant ratio is the counterexample.
- */
+/** Compare expressions pointwise, or single-equation residuals up to a
+ * constant nonzero factor. These are numeric checks, not symbolic proofs. */
 export function checkEquivalent(prevSrc: string, nextSrc: string): CheckResult {
+  const prevSides = equalitySides(prevSrc);
+  const nextSides = equalitySides(nextSrc);
+  if ((prevSides && prevSides.length !== 2) || (nextSides && nextSides.length !== 2)) {
+    return { kind: "open", reason: "Equation chains are not supported" };
+  }
+  if (Boolean(prevSides) !== Boolean(nextSides)) {
+    return { kind: "open", reason: "Compare two expressions or two single equations" };
+  }
+  const proportional = prevSides !== null;
   let prevExpr: Expr;
   let nextExpr: Expr;
   try {
-    prevExpr = parseExpression(differenceSource(prevSrc));
-    nextExpr = parseExpression(differenceSource(nextSrc));
+    prevExpr = parseExpression(differenceSource(prevSrc, prevSides));
+    nextExpr = parseExpression(differenceSource(nextSrc, nextSides));
   } catch (err) {
     return {
       kind: "open",
@@ -623,6 +625,12 @@ export function checkEquivalent(prevSrc: string, nextSrc: string): CheckResult {
       continue; // A sample lands on a singularity — try the next one.
     }
     if (![prev.re, prev.im, next.re, next.im].every(Number.isFinite)) continue;
+
+    if (!proportional) {
+      if (sameValue(prev, next)) continue;
+      const varName = vars[0] ?? "";
+      return { kind: "differs", varName, sample: env[varName]?.re ?? 0, prev, next };
+    }
 
     const prevZero = abs(prev) <= EPS;
     const nextZero = abs(next) <= EPS;

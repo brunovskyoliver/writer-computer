@@ -2,6 +2,8 @@
 
 ## 2026-10-02
 
+- Math step checks compare bare expression values directly. Equation scaling applies only to two single equations; mixed forms and equation chains report unsupported.
+
 - Matrix tidy preserves spacing inside text, fractions, script groups, optional root arguments, column specifications and comments. Nested environments retain their own cell grammar.
 
 - Tidying nested matrices rewrites each separator once, avoiding extra columns.
