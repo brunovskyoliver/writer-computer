@@ -4,8 +4,8 @@
  * (including `\left(…\right)`), elementary functions, `\lvert…\rvert`/`|…|`
  * absolute value, and the constants `\pi`, `e`, `i`, `j` — complex
  * arithmetic throughout, so `2660-2565*j` evaluates the way the notes mean
- * it. Bare `sin(x)`-style names work too, so the same engine serves the
- * `plot` fence.
+ * it. Plot syntax also recognizes bare `sin(x)`-style names and ordinary
+ * powers; rendered TeX keeps its own token boundaries.
  *
  * Anything outside the subset — `\text`, environments, `\\`, `\%`, unknown
  * commands, unknown letters — reports `open`, never a guess. Free variables
@@ -121,13 +121,17 @@ export class OpenFormula extends Error {}
 
 /** Characters that begin a factor — the juxtaposition test at term level. */
 const FACTOR_START = /[\d.(|a-zA-Z\\]/;
+const FRACTION_COMMANDS = new Set(["frac", "dfrac", "tfrac"]);
 
 class Parser {
   pos = 0;
   /** Inside a `|…|` absolute-value group a `|` is the closer, not a factor
    *  start — juxtaposition checks this. */
   private absDepth = 0;
-  constructor(readonly src: string) {}
+  constructor(
+    readonly src: string,
+    readonly syntax: "tex" | "plot",
+  ) {}
 
   private ws() {
     while (this.pos < this.src.length && /\s/.test(this.src[this.pos]!)) this.pos += 1;
@@ -226,10 +230,16 @@ class Parser {
     const base = this.postfix();
     if (this.peek() === "^") {
       this.pos += 1;
-      const exponent = this.signed();
+      const exponent = this.exponent();
       return { t: "bin", op: "^", a: base, b: exponent };
     }
     return base;
+  }
+
+  private exponent(): Expr {
+    if (this.syntax === "plot") return this.signed();
+    if (this.peek() === "\\") return this.commandAtom("script");
+    return this.groupOrAtom();
   }
 
   /** A `{…}` group or a *single token* atom — TeX argument rules, so
@@ -243,15 +253,16 @@ class Parser {
       this.expect("}");
       return inner;
     }
-    if (ch === "\\") return this.commandAtom();
+    if (ch === "\\") return this.commandAtom(this.syntax === "tex" ? "argument" : "expression");
     if (/\d/.test(ch)) {
       this.pos += 1;
       return numLit(Number(ch));
     }
     if (/[a-zA-Z]/.test(ch)) {
       this.pos += 1;
-      return this.named(ch);
+      return this.named(ch, this.syntax === "plot");
     }
+    if (this.syntax === "tex") throw new OpenFormula("Unsupported unbraced argument; use braces");
     return this.postfix();
   }
 
@@ -293,7 +304,7 @@ class Parser {
       // constant — `ab` is a·b, `asin` is a·sin(…). Anything else consumes
       // one letter and lets juxtaposition multiply the rest.
       const word = /^[a-zA-Z]+/.exec(this.src.slice(this.pos))![0];
-      const whole = word in FUNCTIONS || word === "pi";
+      const whole = this.syntax === "plot" && (word in FUNCTIONS || word === "pi");
       const name = whole ? word : word[0]!;
       this.pos += name.length;
       return this.named(name);
@@ -309,8 +320,14 @@ class Parser {
     throw new OpenFormula(`unexpected ${JSON.stringify(ch)}`);
   }
 
-  private commandAtom(): Expr {
+  private commandAtom(context: "expression" | "script" | "argument" = "expression"): Expr {
     const name = this.command()!;
+    if (
+      (context === "argument" && name !== "pi") ||
+      (context === "script" && name !== "pi" && !FRACTION_COMMANDS.has(name))
+    ) {
+      throw new OpenFormula(`Unsupported unbraced ${context} command \\${name}; use braces`);
+    }
 
     if (name === "left") {
       const open = this.src[this.pos];
@@ -336,7 +353,7 @@ class Parser {
     }
     if (name === "right") throw new OpenFormula("unbalanced \\right");
 
-    if (name === "frac" || name === "dfrac" || name === "tfrac") {
+    if (FRACTION_COMMANDS.has(name)) {
       const num = this.groupOrAtom();
       const den = this.groupOrAtom();
       return { t: "bin", op: "/", a: num, b: den };
@@ -387,7 +404,7 @@ class Parser {
     this.ws();
     if (this.src[this.pos] === "^") {
       this.pos += 1;
-      const exp = this.groupOrAtom();
+      const exp = this.exponent();
       // `-1` means the inverse function; anything else powers the result.
       const isNegOne = exp.t === "neg" && exp.a.t === "num" && exp.a.v.re === 1 && exp.a.v.im === 0;
       if (isNegOne && INVERSES[fn]) {
@@ -403,7 +420,7 @@ class Parser {
   }
 
   /** A bare word: `x` → variable, `e`/`i`/`j`/`pi` → constant, `sin` → fn. */
-  private named(name: string): Expr {
+  private named(name: string, allowSubscript = true): Expr {
     if (name in FUNCTIONS) return this.fnCall(name);
     if (name === "pi") return numLit(Math.PI);
     if (name === "e") return numLit(Math.E);
@@ -415,7 +432,7 @@ class Parser {
       throw new OpenFormula(`unknown word ${name}`);
     }
     let varName = name;
-    if (this.src[this.pos] === "_") {
+    if (allowSubscript && this.src[this.pos] === "_") {
       this.pos += 1;
       if (this.src[this.pos] === "{") {
         this.pos += 1;
@@ -445,8 +462,8 @@ export type EvalOutcome =
   | { kind: "open"; reason: string; freeVars: string[] }
   | { kind: "error"; message: string };
 
-export function parseExpression(src: string): Expr {
-  return new Parser(src).parse();
+export function parseExpression(src: string, syntax: "tex" | "plot" = "tex"): Expr {
+  return new Parser(src, syntax).parse();
 }
 
 export function freeVariables(expr: Expr): string[] {

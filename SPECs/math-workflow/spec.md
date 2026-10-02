@@ -95,7 +95,12 @@ Both refuse with a notice when no run/env exists at the caret.
 `\sqrt{…}`, `\sqrt[n]{…}`, parentheses including `\left( \right)`,
 `\sin \cos \tan \arcsin…`, `\sinh \cosh \tanh` + `^{-1}` inverses,
 `\exp \ln \log`, `\lvert…\rvert`/`|…|` abs, `\pi`, `e`, and `i`/`j` as the
-imaginary unit (complex arithmetic, `a+bj` display). `\%`, `\text`,
+imaginary unit (complex arithmetic, `a+bj` display). Superscripts follow TeX
+token boundaries: an unbraced digit or letter is one token; multi-token
+exponents need braces. Bare pi/fraction script nuclei are supported, while
+roots/grouping and nested fraction arguments need braces. Unsupported tokens
+and repeated superscripts stay open. Bare multi-letter function/pi aliases
+are reserved for plot syntax; TeX uses explicit control commands. `\%`, `\text`,
 environments, `\\`, unknown commands, and any letter that is not a known
 constant mark the formula as _open_ — it is skipped entirely.
 
@@ -134,6 +139,8 @@ A `plot` code fence renders an inline SVG function plot:
 - Each non-empty line is an expression in `x` (a leading `y =`/`f(x) =` is
   stripped) or a `domain=a:b` / `range=a:b` setting. Multiple expressions
   draw multiple series.
+- Plot expressions use ordinary signed, multi-digit, right-associated powers
+  (`x^12`, `2^3^2`), separate from TeX superscript token rules.
 - ~240 samples per series across the domain; non-finite or steeply jumping
   samples break the polyline (asymptotes stay gaps, not walls).
 - Axes through 0 when in view, light tick labels, first series in

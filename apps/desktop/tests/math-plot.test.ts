@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
+import { evaluateExpr } from "../src/lib/math/evaluate";
 import { parsePlot, renderPlotSvg } from "../src/lib/math/plot";
 
 describe("parsePlot", () => {
@@ -6,6 +7,19 @@ describe("parsePlot", () => {
     const spec = parsePlot("x^2 - 4\ny = sin(x)\nf(x) = e^{-x}");
     expect(spec.series).toHaveLength(3);
     expect(spec.errors).toHaveLength(0);
+  });
+
+  it("keeps ordinary multi-digit, signed and right-associated plot powers", () => {
+    const spec = parsePlot("x^12\n2^3^2\n2^-2");
+    expect(spec.errors).toEqual([]);
+    const values = spec.series.map((s) => evaluateExpr(s.expr, { x: { re: 2, im: 0 } }).re);
+    expect(values).toEqual([4096, 512, 0.25]);
+  });
+
+  it("retains bare function and pi aliases in plot syntax", () => {
+    const spec = parsePlot("sin(0)+cos(0)\npi");
+    expect(spec.errors).toEqual([]);
+    expect(spec.series.map((s) => evaluateExpr(s.expr, {}).re)).toEqual([1, Math.PI]);
   });
 
   it("parses domain and range settings", () => {

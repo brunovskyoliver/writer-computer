@@ -1,8 +1,11 @@
+import katex from "katex";
 import { describe, expect, it } from "vite-plus/test";
 import {
   checkEquivalent,
   equalitySides,
   evaluateSource,
+  evaluateExpr,
+  parseExpression,
   formatComplex,
   sameValue,
 } from "../src/lib/math/evaluate";
@@ -32,13 +35,65 @@ describe("evaluateSource", () => {
     expect(near(re("2^{10}"), 1024)).toBe(true);
   });
 
+  it.each([
+    ["2^12", 4],
+    ["2^{12}", 4096],
+    ["2^0.5", 0.5],
+    ["2^{2^12}", 16],
+    ["2^{\\sqrt{4}}", 4],
+    ["2^\\frac12", Math.sqrt(2)],
+    ["2^\\frac{\\sqrt4}3", Math.pow(2, 2 / 3)],
+    ["2^\\pi", Math.pow(2, Math.PI)],
+  ])("follows TeX superscript token boundaries: %s", (source, expected) => {
+    expect(() => katex.renderToString(source)).not.toThrow();
+    expect(re(source)).toBeCloseTo(expected, 10);
+  });
+
+  it("ends a bare letter exponent before the next letter", () => {
+    const env = { x: { re: 2, im: 0 }, a: { re: 3, im: 0 }, b: { re: 4, im: 0 } };
+    expect(evaluateExpr(parseExpression("x^ab"), env).re).toBe(32);
+    expect(evaluateExpr(parseExpression("x^{ab}"), env).re).toBe(4096);
+  });
+
+  it.each([
+    "2^-2",
+    "2^(1+2)",
+    "2^3^2",
+    "2^{3}^2",
+    "2^\\sin(0)",
+    "2^x_1",
+    "2^pi",
+    "2^sin(0)",
+    "2^\\sqrt{4}",
+    "2^\\left(4\\right)",
+    "2^\\frac(1+2)3",
+    "\\sin^(2)(0)",
+    "\\frac(1+2)3",
+    "\\sqrt(9)",
+    "2^\\frac\\frac123",
+    "2^\\frac\\sqrt43",
+  ])("leaves unsupported or malformed TeX scripts open: %s", (source) => {
+    expect(evaluateSource(source).kind).toBe("open");
+  });
+
+  it("does not swallow a base subscript into an unbraced exponent", () => {
+    expect(() => parseExpression("2^x_1")).toThrow();
+  });
+
+  it.each(["sin(0)", "cos(0)", "pi"])(
+    "keeps bare plot aliases open in rendered TeX: %s",
+    (source) => {
+      expect(evaluateSource(source).kind).toBe("open");
+    },
+  );
+
   it("evaluates functions and inverses", () => {
     expect(near(re("\\sin{\\frac{\\pi}{2}}"), 1)).toBe(true);
     expect(near(re("\\cosh^{-1}(2)"), Math.acosh(2))).toBe(true);
     expect(near(re("\\ln(e^2)"), 2)).toBe(true);
     expect(near(re("\\log(1000)"), 3)).toBe(true);
     expect(near(re("\\sin^2(0.5) + \\cos^2(0.5)"), 1)).toBe(true);
-    expect(near(re("sin(0) + cos(0)"), 1)).toBe(true);
+    expect(near(re("\\sin(0) + \\cos(0)"), 1)).toBe(true);
   });
 
   it("evaluates \\left(\\right) and absolute values", () => {

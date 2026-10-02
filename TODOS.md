@@ -9,7 +9,9 @@
 
 ## Done
 
-- Review 15: Preserve integer zeros in evaluated values ([ticket](SPECs/Agent/worksheet-review-15-math-format.md)). Eight formatting regressions and 60 targeted tests pass.
+- Review 16: Follow TeX token rules for superscripts ([ticket](SPECs/Agent/worksheet-review-16-math-exponents.md)). QA approved; full 1,607-test frontend suite passes.
+
+- Review 15: Preserve integer zeros in evaluated values ([ticket](SPECs/Agent/worksheet-review-15-math-format.md)). `527071c`. Eight formatting regressions and 60 targeted tests pass.
 
 - Review 14: Require valid evidence before reporting math equality ([ticket](SPECs/Agent/worksheet-review-14-math-valid-samples.md)). `106580b`. QA approved; full 1,568-test frontend suite passes.
 
@@ -141,7 +143,6 @@
 
 ## Up Next
 
-- Review 16: Follow TeX token rules for superscripts ([ticket](SPECs/Agent/worksheet-review-16-math-exponents.md)).
 - Review 17: Handle zero in complex powers and roots ([ticket](SPECs/Agent/worksheet-review-17-math-zero.md)).
 - Review 18: Prevent snippet regexes from blocking the editor ([ticket](SPECs/Agent/worksheet-review-18-snippet-budget.md)).
 - Review 19: Clear removed tab view states on editor reset ([ticket](SPECs/Agent/worksheet-review-19-tab-view-reset.md)).

@@ -2,6 +2,8 @@
 
 ## 2026-10-02
 
+- Math evaluation follows TeX superscript and argument token boundaries. Multi-token exponents need braces; unsupported scripts remain unannotated. Plot fences retain ordinary power syntax and bare function names.
+
 - Evaluated values preserve integer zeros and scientific exponents. Large complex values no longer format as zero when their combined magnitude overflows.
 
 - Math checks require finite evidence before reporting equality, recover past singular samples and report indeterminate when too few samples work. Large complex comparisons avoid overflow-driven false matches.

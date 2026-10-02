@@ -4,8 +4,8 @@
  *
  * Each non-empty line is an expression in `x` (a leading `y =`/`f(x) =` is
  * stripped) or a `domain=a:b` / `range=a:b` setting. Evaluation reuses the
- * math evaluator, so the fence speaks the same dialect as the notes —
- * `x^2 - 4`, `sin(x)`, `e^{-x}` all work.
+ * math evaluator with ordinary signed, multi-digit and right-associated
+ * powers plus bare function aliases; `x^12`, `sin(x)`, `e^{-x}` all work.
  *
  * Rules: SPECs/math-workflow/spec.md (FR-8).
  */
@@ -57,7 +57,7 @@ export function parsePlot(source: string): PlotSpec {
 
     const text = line.replace(LHS_RE, "");
     try {
-      const expr = parseExpression(text);
+      const expr = parseExpression(text, "plot");
       const unknown = freeVariables(expr).filter((name) => name !== "x");
       if (unknown.length > 0) {
         spec.errors.push(
