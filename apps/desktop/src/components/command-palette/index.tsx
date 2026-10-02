@@ -17,7 +17,12 @@ import {
   useSetCommandPaletteSearch,
 } from "@/hooks/use-command-palette";
 import { useSidebar } from "@/hooks/use-sidebar";
-import { useCloseWorkspace, useIsCompactFileMode, useWorkspace } from "@/hooks/use-workspace";
+import {
+  useCloseWorkspace,
+  useIsCompactFileMode,
+  useSwitchWorkspace,
+  useWorkspace,
+} from "@/hooks/use-workspace";
 import { workspaceLabels } from "@/components/sidebar/workspace-menu";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import {
@@ -131,7 +136,7 @@ export function CommandPalette() {
   const setSearch = useSetCommandPaletteSearch();
   const { toggleSidebar } = useSidebar();
   const { root, isIndexing, openWorkspace, recentWorkspaces } = useWorkspace();
-  const switchWorkspace = useWorkspaceStore((s) => s.switchWorkspace);
+  const switchWorkspace = useSwitchWorkspace();
   const refreshRecentWorkspaces = useWorkspaceStore((s) => s.refreshRecentWorkspaces);
   // The recents list is shared by every window; one opened elsewhere since
   // this window loaded must still be offered as "Switch Workspace: …".
@@ -319,7 +324,7 @@ export function CommandPalette() {
           description: "Command",
           run: () => {
             close();
-            void switchWorkspace(path);
+            switchWorkspace(path);
           },
         }),
       ),

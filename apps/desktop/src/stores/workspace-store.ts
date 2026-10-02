@@ -1,4 +1,6 @@
 import { withDrawingSaveBoundary, hasDrawingSession } from "@/lib/drawing-sessions";
+import { freezeEditorInput, settleEditorInput } from "@/lib/editor-input";
+import { saveNow } from "@/lib/save";
 import { create } from "zustand";
 import type { DirEntry } from "@/types/fs";
 import type { RestoreWorkspaceResponse } from "@/lib/tauri";
@@ -172,36 +174,58 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     if (get().root === path) return;
     // One window per workspace: if another window shows it, go there.
     if (await tauri.focusWorkspaceWindow(path)) return;
-    if (get().root) await get().closeWorkspace();
-    // With no root left, `openWorkspace` opens in this window.
-    await get().openWorkspace(path);
+    const release = freezeEditorInput();
+    try {
+      if (get().root) await get().closeWorkspace();
+      // With no root left, `openWorkspace` opens in this window. Keep input
+      // paused until the target's saved tabs finish restoring too.
+      await get().openWorkspace(path);
+    } finally {
+      release();
+    }
   },
 
   closeWorkspace: async () => {
     const root = get().root;
     if (!root) return;
-    // Flush the snapshot as it stands now; it must be on disk before the
-    // state it describes is cleared.
-    scheduleSessionSave(root);
-    const flushed = sessionPersister.flush();
-    await withDrawingSaveBoundary(() => tauri.closeWorkspace(root));
-    await flushed;
-    if (get().root !== root) return;
-    sessionPersister.cancel();
-    useEditorStore.getState().resetEditorState();
-    set((state) =>
-      withNextWorkspaceGeneration(state, {
-        root: null,
-        workspaceEpoch: null,
-        chromeMode: "workspace",
-        fileCount: 0,
-        directoryCache: new Map(),
-        expandedDirs: new Set(),
-        pinnedFiles: [],
-        sidebarMetadataVersion: 0,
-        isIndexing: false,
-      }),
-    );
+    const release = freezeEditorInput();
+    try {
+      // Clipboard reads and image exports started before the gate can still
+      // dispatch. Let them finish before taking the final text snapshot.
+      await settleEditorInput();
+      const saved = await Promise.all(
+        [...useEditorStore.getState().openFiles.keys()].map(async (path) => ({
+          path,
+          saved: await saveNow(path),
+        })),
+      );
+      const failed = saved.find((file) => !file.saved);
+      if (failed) throw new Error(`Failed to save ${failed.path}. The workspace is still open.`);
+      if (get().root !== root) return;
+
+      scheduleSessionSave(root);
+      const flushed = sessionPersister.flush();
+      await withDrawingSaveBoundary(() => tauri.closeWorkspace(root));
+      await flushed;
+      if (get().root !== root) return;
+      sessionPersister.cancel();
+      useEditorStore.getState().resetEditorState();
+      set((state) =>
+        withNextWorkspaceGeneration(state, {
+          root: null,
+          workspaceEpoch: null,
+          chromeMode: "workspace",
+          fileCount: 0,
+          directoryCache: new Map(),
+          expandedDirs: new Set(),
+          pinnedFiles: [],
+          sidebarMetadataVersion: 0,
+          isIndexing: false,
+        }),
+      );
+    } finally {
+      release();
+    }
   },
 
   restoreFromBundle: async (bundle) => {

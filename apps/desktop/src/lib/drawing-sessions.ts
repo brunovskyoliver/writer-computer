@@ -6,6 +6,8 @@ import type {
 import { deleteEntry } from "./tauri";
 import { saveDrawing, type DrawingScene } from "./drawings";
 import { notifyDrawingSaved } from "./drawing-embed-sync";
+import { freezeEditorInput as freezeDrawingInput } from "./editor-input";
+export { freezeEditorInput as freezeDrawingInput } from "./editor-input";
 
 /**
  * One drawing session per canonical path, however many panes show it.
@@ -266,22 +268,6 @@ export function discardDrawingSessions(prefix: string) {
   for (const path of [...sessions.keys()]) {
     if (path === prefix || path.startsWith(`${prefix}/`)) sessions.delete(path);
   }
-}
-
-let freezeCount = 0;
-let previousInert = false;
-export function freezeDrawingInput() {
-  if (typeof document === "undefined") return () => {};
-  if (freezeCount++ === 0) {
-    previousInert = document.body.inert;
-    document.body.inert = true;
-  }
-  let released = false;
-  return () => {
-    if (released) return;
-    released = true;
-    if (--freezeCount === 0) document.body.inert = previousInert;
-  };
 }
 
 export async function withDrawingSaveBoundary<T>(

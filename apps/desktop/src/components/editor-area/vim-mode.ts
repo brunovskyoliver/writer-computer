@@ -8,6 +8,8 @@ import { useSettingsStore } from "@/stores/settings-store";
 import { createVimClipboardBridge, type VimClipboardBridge } from "./vim-clipboard";
 import { registerVimExCommands } from "./vim-ex-commands";
 import { registerVimMoveLines } from "./vim-move-lines";
+import { registerVimPaste } from "./vim-paste";
+import { showEditorNotice } from "./editor-notice-store";
 import { redirectVimScrollToOuterScroller } from "./vim-scroll";
 import {
   createTab,
@@ -66,6 +68,11 @@ function loadVim(): Promise<VimModule> {
       },
     });
     registerVimMoveLines(mod.Vim as unknown as Parameters<typeof registerVimMoveLines>[0]);
+    registerVimPaste(mod.Vim, {
+      readText,
+      isDisposed: (cm) => !editorApi.getEditorRegistrationForView(cm.cm6),
+      notify: (cm, message) => showEditorNotice(message, editorApi.getTabIdForView(cm.cm6)),
+    });
     return mod;
   });
   return vimModule;

@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import { useCloseWorkspace, useWorkspace } from "@/hooks/use-workspace";
+import { useCloseWorkspace, useSwitchWorkspace, useWorkspace } from "@/hooks/use-workspace";
 import * as tauri from "@/lib/tauri";
 import { showNativeContextMenu } from "@/components/editor-area/editor-context-menu";
 import { useWorkspaceStore } from "@/stores/workspace-store";
@@ -13,6 +13,7 @@ function getFolderName(path: string): string {
 export function WorkspaceSwitcher() {
   const { root } = useWorkspace();
   const closeWorkspace = useCloseWorkspace();
+  const switchWorkspace = useSwitchWorkspace();
   const buttonRef = useRef<HTMLButtonElement>(null);
 
   const workspaceName = root ? getFolderName(root) : "No Workspace";
@@ -30,11 +31,11 @@ export function WorkspaceSwitcher() {
       recents,
       openElsewhere: windows.filter((w) => !w.current).map((w) => w.root),
       actions: {
-        switchTo: (path) => void store.switchWorkspace(path),
+        switchTo: switchWorkspace,
         openInNewWindow: (path) => void tauri.openWorkspaceInNewWindow(path),
         openFolder: () => {
           void tauri.pickWorkspace().then((picked) => {
-            if (picked) void store.switchWorkspace(picked);
+            if (picked) switchWorkspace(picked);
           });
         },
         openFolderInNewWindow: () => {

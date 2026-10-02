@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-02
+
+- Closing or switching workspaces now saves the latest text edits before clearing the editor, including edits waiting for autosave or an older write. Failed saves keep the workspace open and report the failure.
+
 ## 2026-10-01
 
 - Switch between workspaces without picking the folder again. The workspace menu at the bottom of the sidebar now lists every workspace you have opened, with the current one checked; picking another shows it in the same window and brings back the tabs you had open there when you return. A workspace already open in another window is brought to the front instead of opening twice, and is marked "— other window" in the list. "Open in New Window" gives any workspace its own window with its own sidebar and tabs, so two workspaces can sit side by side. The command palette offers the same switch as "Switch Workspace: <name>", and "Remove from List" forgets a workspace. Folders with the same name show their parent folder, and up to 20 workspaces are remembered.

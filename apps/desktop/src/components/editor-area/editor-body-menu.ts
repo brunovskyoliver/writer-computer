@@ -4,6 +4,8 @@ import { writeText, readText } from "@tauri-apps/plugin-clipboard-manager";
 import { buildEditorBodyMenuItemsSpec, showNativeContextMenu } from "./editor-context-menu";
 import { followLink, linkHrefAtPos } from "./link-navigation";
 import { runEditorCommand } from "./markdown-formatting";
+import { isEditorInputFrozen, runAsyncEditorInput } from "@/lib/editor-input";
+import { showEditorNotice } from "./editor-notice-store";
 
 /** Right-click menu over the editor body: clipboard, the command submenus,
  *  and link actions when the click landed on a link. */
@@ -24,6 +26,7 @@ export function editorBodyContextMenuExtension(
         buildEditorBodyMenuItemsSpec(
           {
             onCut: () => {
+              if (isDisposed() || isEditorInputFrozen()) return;
               const { from, to } = view.state.selection.main;
               if (from === to) return;
               void writeText(view.state.sliceDoc(from, to));
@@ -35,9 +38,12 @@ export function editorBodyContextMenuExtension(
               void writeText(view.state.sliceDoc(from, to));
             },
             onPaste: () => {
-              void readText().then((text) => {
+              void runAsyncEditorInput(async () => {
+                const text = await readText();
                 if (!text || isDisposed()) return;
                 view.dispatch(view.state.replaceSelection(text));
+              }).catch((error: unknown) => {
+                showEditorNotice(error instanceof Error ? error.message : String(error));
               });
             },
             onSelectAll: () => {
@@ -56,6 +62,7 @@ export function editorBodyContextMenuExtension(
                 }
               : undefined,
             onRunCommand: (id) => {
+              if (isDisposed() || isEditorInputFrozen()) return;
               view.focus();
               runEditorCommand(view, id);
             },

@@ -54,3 +54,18 @@ export function useCloseWorkspace() {
     });
   }, [closeWorkspace]);
 }
+
+/** All switch entry points report a failed save or workspace transition. */
+export function useSwitchWorkspace() {
+  const switchWorkspace = useWorkspaceStore((s) => s.switchWorkspace);
+  return useCallback(
+    (path: string) => {
+      void switchWorkspace(path).catch((error: unknown) => {
+        window.alert(
+          `Failed to switch workspace: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+    },
+    [switchWorkspace],
+  );
+}
