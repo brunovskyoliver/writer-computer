@@ -188,6 +188,8 @@ If your renderer is sync and cache-backed (or cheap to call), paint in `toDOM`. 
 
 Reference: `mermaid-decorations.ts` mounts the canvas synchronously in `toDOM`; the SVG cache is bounded LRU and the output is sanitised before reaching `innerHTML`.
 
+Wiki image and drawing embeds share `lib/wiki-links.ts`'s positive resolution cache. It holds 256 recent entries, each limited to 8,192 UTF-16 characters across its serialized key and resolved path. Oversized entries resolve without caching; misses and errors are retried. The resolver owns clearing through `lib/editor-reset.ts`, and an async completion crossing a reset must not populate the new cache. PDF navigation keeps using the uncached resolver.
+
 ## Test the dispatch path, not just the helpers
 
 Pure-helper tests (`computeToggleSelection`-style) catch math bugs but not focus races, `posAtDOM` boundary errors, or cross-widget interference. The actual contract is "click does the right thing in CM," which only an integration test can verify.

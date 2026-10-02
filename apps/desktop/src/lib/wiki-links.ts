@@ -1,4 +1,6 @@
 import { getFileStem, getParentDir, normalizePath } from "./paths";
+import { editorGeneration, onEditorReset } from "./editor-reset";
+import { LruCache } from "./lru";
 import type { SearchResult } from "@/types/fs";
 
 export type WikiLinkTarget = { kind: "internal"; path: string } | { kind: "unresolved" };
@@ -183,6 +185,49 @@ export async function resolveWikiImage(
     return findFileByName(root, target);
   }
   return null;
+}
+
+const MAX_EMBED_RESOLUTIONS = 256;
+const MAX_EMBED_ENTRY_CHARS = 8192;
+const embedResolutionCache = new LruCache<string>(MAX_EMBED_RESOLUTIONS);
+
+onEditorReset(() => embedResolutionCache.clear());
+
+/** Resolve an image or drawing embed with bounded, workspace-owned caching.
+ * Misses re-probe so newly created images can appear on the next render. */
+export async function resolveWikiImageEmbed(
+  target: string,
+  workspaceRoot: string | null,
+  currentFilePath: string | null,
+  fileExists: (path: string) => Promise<boolean>,
+  findFileByName: (root: string, fileName: string) => Promise<string | null>,
+): Promise<string | null> {
+  // Serialize bounded inputs into an independent key: concatenation or a
+  // target sliced from a large document can retain that document's storage.
+  const inputLength = (workspaceRoot?.length ?? 0) + (currentFilePath?.length ?? 0) + target.length;
+  const key =
+    inputLength <= MAX_EMBED_ENTRY_CHARS
+      ? JSON.stringify([workspaceRoot ?? "", currentFilePath ?? "", target])
+      : null;
+  const cached = key !== null ? embedResolutionCache.get(key) : undefined;
+  if (cached) return cached;
+  const generation = editorGeneration();
+  const resolved = await resolveWikiImage(
+    target,
+    workspaceRoot,
+    currentFilePath,
+    fileExists,
+    findFileByName,
+  );
+  if (
+    resolved &&
+    key !== null &&
+    key.length + resolved.length <= MAX_EMBED_ENTRY_CHARS &&
+    generation === editorGeneration()
+  ) {
+    embedResolutionCache.set(key, resolved);
+  }
+  return resolved;
 }
 
 /**

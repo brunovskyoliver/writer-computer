@@ -9,7 +9,9 @@
 
 ## Done
 
-- Review 20: Unregister failed MCP handshakes ([ticket](SPECs/Agent/worksheet-review-20-mcp-handshake-cleanup.md)). Cleanup and atomic registration verified; 276 Rust tests pass.
+- Review 22: Bound wiki image resolution caching ([ticket](SPECs/Agent/worksheet-review-22-embed-resolution-cache.md)). Bounded reset-aware caching and live widget checks pass; all 1,687 frontend tests pass.
+
+- Review 20: Unregister failed MCP handshakes ([ticket](SPECs/Agent/worksheet-review-20-mcp-handshake-cleanup.md)). `a60b60e`. Cleanup and atomic registration verified; 276 Rust tests pass.
 
 - Review 19: Clear removed tab view states on editor reset ([ticket](SPECs/Agent/worksheet-review-19-tab-view-reset.md)). `7b92fbb`. Two-pane reset regression and editor/reset tests pass.
 
@@ -151,7 +153,6 @@
 
 ## Up Next
 
-- Review 22: Bound wiki image resolution caching ([ticket](SPECs/Agent/worksheet-review-22-embed-resolution-cache.md)). Adjacent memory issue: successful embed resolutions retain workspace/note/target keys for the window lifetime.
 - WebContent retention caveat: [`SPECs/Agent/worksheet-webcontent-retention.md`](SPECs/Agent/worksheet-webcontent-retention.md) — post-close WebContent RSS is ~790 MB while `footprint` shows ~264 MB live + ~544 MB reclaimable. Split live-JS vs allocator pools via a heap-snapshot diff and fix anything still reachable.
 
 ## Backlog

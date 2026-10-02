@@ -26,7 +26,7 @@ import {
   canonicalWikiTarget,
   parseWikiLink,
   parseWikiImageEmbedTarget,
-  resolveWikiImage,
+  resolveWikiImageEmbed,
   resolveWikiLink,
   resolveWikiPdf,
 } from "@/lib/wiki-links";
@@ -115,30 +115,18 @@ class WikiLinkWidget extends WidgetType {
 
 const wikiLinkEditingMark = Decoration.mark({ class: "cm-wiki-link-editing" });
 
-// Resolved embed targets, keyed by workspace root + note dir + target.
-// Positive-only: a hit means the file existed at that absolute path when we
-// looked; misses re-probe on the next widget build so newly added images
-// appear without an invalidation channel. Bounded in practice by the number
-// of distinct embeds the user views in a session.
-const embedResolutionCache = new Map<string, string>();
-
-async function resolveEmbed(
+function resolveEmbed(
   target: string,
   workspaceRoot: string | null,
   currentFilePath: string | null,
 ): Promise<string | null> {
-  const key = `${workspaceRoot ?? ""}\0${currentFilePath ?? ""}\0${target}`;
-  const cached = embedResolutionCache.get(key);
-  if (cached) return cached;
-  const resolved = await resolveWikiImage(
+  return resolveWikiImageEmbed(
     target,
     workspaceRoot,
     currentFilePath,
     tauri.fileExists,
     tauri.findFileByName,
   );
-  if (resolved) embedResolutionCache.set(key, resolved);
-  return resolved;
 }
 
 /** Obsidian-style image embed `![[image.png]]`. Renders the resolved image

@@ -2,6 +2,8 @@
 
 ## 2026-10-02
 
+- Wiki image and drawing lookup caching now keeps only recent, bounded entries, clears on workspace reset and ignores older lookup completions. Missing images remain retryable.
+
 - Failed MCP handshakes now release their connection records. Connections that finish immediately or race a settings disable no longer leave completed tasks registered.
 
 - Closing or switching a workspace now releases the removed tabs' cursor and scroll records.

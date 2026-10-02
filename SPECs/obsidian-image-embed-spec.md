@@ -53,8 +53,15 @@ Reuse the existing wiki-link resolver (already shipped for `[[Doc]]` navigation)
   note-relative; bare basenames probe note dir and workspace root, then fall
   back to the `find_file_by_name` Rust command — an on-demand gitignore-aware
   walk with case-insensitive basename match, shortest path winning on
-  duplicates. There is no persistent media index; positive resolutions are
-  cached per (workspace, note, target) in the extension.
+  duplicates. There is no persistent media index. `resolveWikiImageEmbed`
+  owns the positive cache per (workspace, note, target), shared by inline
+  rendering and drawing-open actions. It retains at most 256 recently used
+  resolutions, with at most 8,192 UTF-16 characters in each serialized key
+  plus resolved path. Oversized entries still resolve without caching.
+- Editor reset clears the cache; a lookup started before reset cannot
+  repopulate it. Misses and errors remain uncached. Positive hits retain the
+  existing policy of re-probing after eviction or reset, so filesystem
+  changes can leave a hit stale until then.
 - Compact windows (no workspace) resolve note-relative only.
 - Rendered embeds reuse `.cm-image` styling and the shared image
   height-stability cache (`attachStableImageHeight` in `fold/image.ts`).
