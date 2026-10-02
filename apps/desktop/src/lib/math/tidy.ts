@@ -8,13 +8,13 @@
  * - `*` between operands becomes ` \cdot `, except the conjugate forms
  *   `^*`, `^{*}`, and `*` inside a `^{…}` group.
  *
- * `\text{…}` groups pass through untouched — a `*` there is prose. The
+ * Literal arguments, full script groups and comments keep their stars. The
  * function reports a change count so the command can say what it did.
  *
  * Rules: SPECs/math-workflow/spec.md (FR-4).
  */
 
-import { ENV_RE, matchBrace } from "./scan";
+import { commentMask, ENV_RE, matchBrace, topLevelMask } from "./scan";
 
 /** Environments whose bodies use `&` as the cell separator and where a `\;`
  *  family spacing command is almost surely a mis-typed separator. `cases`,
@@ -31,10 +31,12 @@ const SEPARATOR_RE = /\\[;:,]/g;
  *  nest — an outer matrix's body legitimately contains an inner one, and
  *  both use the same `&` grammar, so overlapping spans are fine. */
 function cellEnvBodies(formula: string): Array<{ from: number; to: number }> {
+  const comments = commentMask(formula);
   const stack: { name: string; beginEnd: number }[] = [];
   const bodies: Array<{ from: number; to: number }> = [];
 
   for (const match of formula.matchAll(ENV_RE)) {
+    if (comments[match.index]) continue;
     // `\\begin` is a row break followed by the word "begin", not an opener.
     if (match.index > 0 && formula[match.index - 1] === "\\") continue;
     const name = match[2]!;
@@ -47,10 +49,17 @@ function cellEnvBodies(formula: string): Array<{ from: number; to: number }> {
       const open = stack.splice(at, 1)[0]!;
       if (!CELL_ENV.test(open.name)) break;
 
-      let bodyFrom = open.beginEnd;
-      if (COLSPEC_ENV.has(open.name) && formula[bodyFrom] === "{") {
+      let bodyFrom = skipTrivia(formula, open.beginEnd, comments);
+      if ((open.name === "array" || open.name.endsWith("*")) && formula[bodyFrom] === "[") {
+        const close = optionalArgEnd(formula, bodyFrom);
+        if (close === null || close >= match.index) break;
+        bodyFrom = skipTrivia(formula, close + 1, comments);
+      }
+      if (COLSPEC_ENV.has(open.name)) {
+        if (formula[bodyFrom] !== "{") break;
         const close = matchBrace(formula, bodyFrom);
-        if (close !== null) bodyFrom = close + 1;
+        if (close === null || close >= match.index) break;
+        bodyFrom = close + 1;
       }
       bodies.push({ from: bodyFrom, to: match.index });
       break;
@@ -59,7 +68,7 @@ function cellEnvBodies(formula: string): Array<{ from: number; to: number }> {
   return bodies;
 }
 
-type CommandRole = { operand: boolean; literalArgs?: number };
+type CommandRole = { operand: boolean; literalArgs?: number; optionalArg?: boolean };
 const COMMAND_ROLES: Record<string, CommandRole | undefined> = {
   ...Object.fromEntries(
     (
@@ -75,17 +84,21 @@ const COMMAND_ROLES: Record<string, CommandRole | undefined> = {
       .split(" ")
       .map((name) => [name, { operand: true, literalArgs: 1 }]),
   ),
-  textcolor: { operand: true, literalArgs: 1 },
+  sqrt: { operand: true, optionalArg: true },
+  xleftarrow: { operand: true, optionalArg: true },
+  xrightarrow: { operand: true, optionalArg: true },
+  includegraphics: { operand: true, literalArgs: 1, optionalArg: true },
+  textcolor: { operand: true, literalArgs: 1, optionalArg: true },
   href: { operand: true, literalArgs: 1 },
   url: { operand: true, literalArgs: 1 },
   tag: { operand: false, literalArgs: 1 },
   label: { operand: false, literalArgs: 1 },
   ref: { operand: true, literalArgs: 1 },
   eqref: { operand: true, literalArgs: 1 },
-  color: { operand: false, literalArgs: 1 },
+  color: { operand: false, literalArgs: 1, optionalArg: true },
   hspace: { operand: false, literalArgs: 1 },
   vspace: { operand: false, literalArgs: 1 },
-  rule: { operand: false, literalArgs: 2 },
+  rule: { operand: false, literalArgs: 2, optionalArg: true },
   begin: { operand: false, literalArgs: 1 },
   end: { operand: false, literalArgs: 1 },
 };
@@ -108,6 +121,40 @@ function skipTrivia(formula: string, at: number, mask: Uint8Array): number {
     at = skipSpace(formula, to);
   }
   return at;
+}
+
+/** Optional arguments end at an unescaped ] outside brace groups and comments. */
+function optionalArgEnd(text: string, from: number): number | null {
+  for (let i = from + 1; i < text.length; i += 1) {
+    if (text[i] === "\\") {
+      i += 1;
+      continue;
+    }
+    if (text[i] === "%") {
+      const newline = text.indexOf("\n", i + 1);
+      if (newline === -1) return null;
+      i = newline;
+    } else if (text[i] === "{") {
+      const close = matchBrace(text, i);
+      if (close === null) return null;
+      i = close;
+    } else if (text[i] === "]") return i;
+  }
+  return null;
+}
+
+function cellMask(body: string): boolean[] {
+  const mask = topLevelMask(body);
+  const comments = commentMask(body);
+  for (const match of body.matchAll(/\\([A-Za-z]+)/g)) {
+    if (!mask[match.index] || (match.index > 0 && body[match.index - 1] === "\\")) continue;
+    if (!COMMAND_ROLES[match[1]!]?.optionalArg) continue;
+    const from = skipTrivia(body, match.index + match[0].length, comments);
+    if (body[from] !== "[") continue;
+    const to = optionalArgEnd(body, from) ?? body.length - 1;
+    mask.fill(false, from, to + 1);
+  }
+  return mask;
 }
 
 /** Invocation-local mask: 1 is literal syntax, 2 is comment text. */
@@ -138,13 +185,24 @@ function starMask(formula: string): Uint8Array {
       const name = formula.slice(i + 1, end);
       const role = COMMAND_ROLES[name];
       let at = skipTrivia(formula, end, mask);
-      const starred = formula[at] === "*" && !(role?.operand && !role.literalArgs);
+      const starred =
+        formula[at] === "*" && !(role?.operand && !role.literalArgs && !role.optionalArg);
       if (starred) {
         mask[at] = 1;
         at = skipTrivia(formula, at + 1, mask);
       }
-      let args = role?.literalArgs ?? (starred ? Infinity : 0);
       let consumed = end;
+      if (role?.optionalArg && role.literalArgs && formula[at] === "[") {
+        const close = optionalArgEnd(formula, at);
+        if (close === null) {
+          mask.fill(1, at);
+          break;
+        }
+        consumed = close + 1;
+        mask.fill(1, at, consumed);
+        at = skipTrivia(formula, consumed, mask);
+      }
+      let args = role?.literalArgs ?? (starred ? Infinity : 0);
       for (let arg = 0; arg < args && formula[at] === "{"; arg += 1) {
         const to = (matchBrace(formula, at) ?? formula.length - 1) + 1;
         if (arg === 0 && name === "begin" && COLSPEC_ENV.has(formula.slice(at + 1, to - 1)))
@@ -173,7 +231,7 @@ function betweenOperands(formula: string, pos: number, mask: Uint8Array): boolea
     while (formula[slash] === "\\") slash -= 1;
     if ((start - 1 - slash) % 2 === 1) {
       const role = COMMAND_ROLES[formula.slice(start, left + 1)];
-      if (!role?.operand || role.literalArgs) return false;
+      if (!role?.operand || role.literalArgs || role.optionalArg) return false;
     }
   }
   let right = skipSpace(formula, pos + 1);
@@ -204,8 +262,11 @@ export function tidyFormula(formula: string): TidyResult {
   const stars: number[] = [];
 
   for (const body of bodies) {
+    const text = formula.slice(body.from, body.to);
+    const mask = cellMask(text);
     SEPARATOR_RE.lastIndex = 0;
-    for (const match of formula.slice(body.from, body.to).matchAll(SEPARATOR_RE)) {
+    for (const match of text.matchAll(SEPARATOR_RE)) {
+      if (!mask[match.index]) continue;
       const at = body.from + match.index;
       // `\\;` is a row break plus a stray `;` — the second `\` is the escape.
       if (at > body.from && formula[at - 1] === "\\") continue;

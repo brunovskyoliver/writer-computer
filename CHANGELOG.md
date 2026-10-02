@@ -2,6 +2,8 @@
 
 ## 2026-10-02
 
+- Matrix tidy preserves spacing inside text, fractions, script groups, optional root arguments, column specifications and comments. Nested environments retain their own cell grammar.
+
 - Tidying nested matrices rewrites each separator once, avoiding extra columns.
 
 - Tidying math preserves starred LaTeX commands, exponent groups, text, metadata and comments while converting multiplication between operands.

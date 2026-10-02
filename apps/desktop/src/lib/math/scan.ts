@@ -32,13 +32,35 @@ export function matchBrace(text: string, openIndex: number): number | null {
   return null;
 }
 
+/** Invocation-local mask of unescaped TeX comments, excluding the newline. */
+export function commentMask(text: string): Uint8Array {
+  const mask = new Uint8Array(text.length);
+  for (let i = 0; i < text.length; i += 1) {
+    if (text[i] === "\\") {
+      i += 1;
+      continue;
+    }
+    if (text[i] !== "%") continue;
+    const newline = text.indexOf("\n", i + 1);
+    const to = newline === -1 ? text.length : newline;
+    mask.fill(1, i, to);
+    i = to - 1;
+  }
+  return mask;
+}
+
 /** Whole-env spans: `\begin{x}` through its matching `\end{x}`, innermost
  *  match wins on `end`. `\\begin` is a row break followed by the word
  *  "begin", not an opener. */
 export function envSpans(text: string): Array<{ from: number; to: number }> {
+  return scanEnvSpans(text, commentMask(text));
+}
+
+function scanEnvSpans(text: string, comments: Uint8Array): Array<{ from: number; to: number }> {
   const stack: { name: string; from: number }[] = [];
   const spans: Array<{ from: number; to: number }> = [];
   for (const match of text.matchAll(ENV_RE)) {
+    if (comments[match.index]) continue;
     if (match.index > 0 && text[match.index - 1] === "\\") continue;
     const name = match[2]!;
     if (match[1] === "begin") {
@@ -61,15 +83,18 @@ export function envSpans(text: string): Array<{ from: number; to: number }> {
  * are the row grammar; anything deeper belongs to a nested structure.
  */
 export function topLevelMask(text: string): boolean[] {
-  const mask = Array.from({ length: text.length }, () => true);
-  for (const span of envSpans(text)) {
+  const comments = commentMask(text);
+  const mask = Array.from({ length: text.length }, (_, i) => !comments[i]);
+  for (const span of scanEnvSpans(text, comments)) {
     for (let i = span.from; i < span.to; i += 1) mask[i] = false;
   }
   let depth = 0;
   for (let i = 0; i < text.length; i += 1) {
+    if (comments[i]) continue;
     if (text[i] === "\\") {
       // Keep the escapee's mask bit equal to the backslash's own level.
-      if (depth > 0 && i + 1 < text.length) mask[i + 1] = false;
+      if (depth > 0) mask[i] = false;
+      if (i + 1 < text.length) mask[i + 1] = mask[i]!;
       i += 1;
       continue;
     }

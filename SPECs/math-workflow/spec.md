@@ -49,7 +49,11 @@ selection):
 - inside a matrix cell environment (`pmatrix`, `bmatrix`, `Bmatrix`,
   `vmatrix`, `Vmatrix`, `matrix`, their starred variants, `smallmatrix`,
   `array` or `subarray`), the spacing commands `\;` `\,` `\:` used between
-  row elements become `&`. `cases` and aligned environments keep their
+  row elements become `&` only at that body's cell level, outside brace
+  groups, nested environments, recognized optional command arguments and
+  comments. Array/subarray column specifications and optional array/matrix
+  arguments stay intact; incomplete specifications are not scanned.
+  `cases` and aligned environments keep their
   deliberate spacing. Nested matrix bodies rewrite each source separator once;
 - a `*` between plausible operands becomes `\cdot`. Conjugate stars,
   complete superscript groups, starred command suffixes, environment names,
@@ -57,7 +61,7 @@ selection):
   arguments (including URLs) stay unchanged. Comments between commands or
   superscripts and their argument groups do not break protection. Unknown starred macros and their immediate
   argument groups also stay unchanged;
-- unescaped `%` comments keep their stars; commented braces do not affect
+- unescaped `%` comments keep their contents; commented braces do not affect
   protected argument boundaries.
   Escaped percent signs remain literal.
   Nothing else is touched. Zero changes → a notice says so; otherwise the

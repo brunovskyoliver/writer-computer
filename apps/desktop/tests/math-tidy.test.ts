@@ -104,6 +104,64 @@ describe("tidyFormula", () => {
     });
   });
 
+  it.each([
+    [
+      "\\begin{bmatrix}\\text{a\\;b}\\;c\\end{bmatrix}",
+      "\\begin{bmatrix}\\text{a\\;b} & c\\end{bmatrix}",
+    ],
+    [
+      "\\begin{bmatrix}\\frac{a\\,b}{c\\:d}\\;e\\end{bmatrix}",
+      "\\begin{bmatrix}\\frac{a\\,b}{c\\:d} & e\\end{bmatrix}",
+    ],
+    ["\\begin{bmatrix}a^{b\\;c}\\;d\\end{bmatrix}", "\\begin{bmatrix}a^{b\\;c} & d\\end{bmatrix}"],
+    ["\\begin{array} {c@{\\,}c} a\\;b\\end{array}", "\\begin{array} {c@{\\,}c} a & b\\end{array}"],
+    [
+      "\\begin{subarray}% columns\\;\n{c} a\\;b\\end{subarray}",
+      "\\begin{subarray}% columns\\;\n{c} a & b\\end{subarray}",
+    ],
+    ["\\begin{array}a\\;b\\end{array}", "\\begin{array}a\\;b\\end{array}"],
+    ["\\begin{array}{cc a\\;b\\end{array}", "\\begin{array}{cc a\\;b\\end{array}"],
+    [
+      "\\begin{bmatrix}a\\;b % }\\end{bmatrix} \\;ignored\nc\\;d\\end{bmatrix}",
+      "\\begin{bmatrix}a & b % }\\end{bmatrix} \\;ignored\nc & d\\end{bmatrix}",
+    ],
+    [
+      "% \\begin{bmatrix}a\\;b\\end{bmatrix}\nx\\;y",
+      "% \\begin{bmatrix}a\\;b\\end{bmatrix}\nx\\;y",
+    ],
+    [
+      "\\begin{bmatrix}a\\;\\begin{cases}b\\;c\\end{cases}\\end{bmatrix}",
+      "\\begin{bmatrix}a & \\begin{cases}b\\;c\\end{cases}\\end{bmatrix}",
+    ],
+    [
+      "\\begin{bmatrix}\\sqrt[3\\,n]{x}\\;b\\end{bmatrix}",
+      "\\begin{bmatrix}\\sqrt[3\\,n]{x} & b\\end{bmatrix}",
+    ],
+    ["\\begin{array}[t]{cc}a\\;b\\end{array}", "\\begin{array}[t]{cc}a & b\\end{array}"],
+    [
+      "\\begin{bmatrix}\\sqrt[3% ]\\;ignored\n\\,n]{x}\\;b\\end{bmatrix}",
+      "\\begin{bmatrix}\\sqrt[3% ]\\;ignored\n\\,n]{x} & b\\end{bmatrix}",
+    ],
+    [
+      "\\begin{bmatrix}\\sqrt[{]}3\\,n]{x}\\;b\\end{bmatrix}",
+      "\\begin{bmatrix}\\sqrt[{]}3\\,n]{x} & b\\end{bmatrix}",
+    ],
+    [
+      "\\begin{bmatrix}\\sqrt[3\\,n{x}\\;b\\end{bmatrix}",
+      "\\begin{bmatrix}\\sqrt[3\\,n{x}\\;b\\end{bmatrix}",
+    ],
+    ["\\begin{array}[t{cc}a\\;b\\end{array}", "\\begin{array}[t{cc}a\\;b\\end{array}"],
+  ])("preserves spacing outside the cell grammar: %s", (formula, expected) => {
+    expect(tidyFormula(formula).text).toBe(expected);
+  });
+
+  it.each(["\\sqrt*{x}", "\\xrightarrow*{x}"])(
+    "preserves a command's star argument while tidying an external product: %s",
+    (command) => {
+      expect(tidyFormula(`${command} + 2*x`).text).toBe(`${command} + 2 \\cdot x`);
+    },
+  );
+
   it("counts every rewrite", () => {
     expect(tidyFormula("a*b + \\begin{bmatrix} c\\;d \\end{bmatrix}").changes).toBe(2);
   });
