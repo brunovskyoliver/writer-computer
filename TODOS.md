@@ -9,7 +9,9 @@
 
 ## Done
 
-- Review 07: Abort LaTeX commands after a failed save ([ticket](SPECs/Agent/worksheet-review-07-compile-save-failure.md)). Failed-save command regressions pass.
+- Review 08: Refresh roots when choosing LaTeX previews ([ticket](SPECs/Agent/worksheet-review-08-preview-root.md)). Actual-root preview, queue ownership and reset regressions pass; full 1,481-test frontend suite passes.
+
+- Review 07: Abort LaTeX commands after a failed save ([ticket](SPECs/Agent/worksheet-review-07-compile-save-failure.md)). `60b8284`. Failed-save command regressions pass.
 
 - Review 06: Serialize LaTeX builds by resolved root ([ticket](SPECs/Agent/worksheet-review-06-compile-root-lock.md)). `01e01a8`. Canonical-root serialization and async ownership regressions pass.
 
@@ -125,7 +127,6 @@
 
 ## Up Next
 
-- Review 08: Refresh roots when choosing LaTeX previews ([ticket](SPECs/Agent/worksheet-review-08-preview-root.md)).
 - Review 09: Preserve surrounding source when splitting aligned math ([ticket](SPECs/Agent/worksheet-review-09-math-split.md)).
 - Review 10: Preserve TeX syntax stars during tidy ([ticket](SPECs/Agent/worksheet-review-10-tidy-stars.md)).
 - Review 11: Deduplicate nested matrix separator edits ([ticket](SPECs/Agent/worksheet-review-11-tidy-nesting.md)).
@@ -138,6 +139,7 @@
 - Review 18: Prevent snippet regexes from blocking the editor ([ticket](SPECs/Agent/worksheet-review-18-snippet-budget.md)).
 - Review 19: Clear removed tab view states on editor reset ([ticket](SPECs/Agent/worksheet-review-19-tab-view-reset.md)).
 - Review 20: Unregister failed MCP handshakes ([ticket](SPECs/Agent/worksheet-review-20-mcp-handshake-cleanup.md)).
+- Review 22: Bound wiki image resolution caching ([ticket](SPECs/Agent/worksheet-review-22-embed-resolution-cache.md)). Adjacent memory issue: successful embed resolutions retain workspace/note/target keys for the window lifetime.
 - WebContent retention caveat: [`SPECs/Agent/worksheet-webcontent-retention.md`](SPECs/Agent/worksheet-webcontent-retention.md) — post-close WebContent RSS is ~790 MB while `footprint` shows ~264 MB live + ~544 MB reclaimable. Split live-JS vs allocator pools via a heap-snapshot diff and fix anything still reachable.
 
 ## Backlog

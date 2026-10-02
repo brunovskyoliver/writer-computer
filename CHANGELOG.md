@@ -2,6 +2,8 @@
 
 ## 2026-10-02
 
+- LaTeX previews follow saved root declarations and the PDF returned by compilation. Failed builds use only their own document's previous PDF, and autosave stops queued work when that preview closes.
+
 - Explicit LaTeX compilation and preview commands stop when saving the source fails, preserving the save error instead of compiling older disk content.
 
 - Chapters and root path aliases now share LaTeX build status and one compile queue. Builds in different windows serialize writes to the same document PDF.

@@ -83,6 +83,57 @@ test("editor reset clears builds, root mappings and PDF revision paths", async (
   expect(usePdfRevisionStore.getState().revisions).toEqual({});
 });
 
+test.each(["start", "association", "completion"] as const)(
+  "reset during %s publication stops subsequent compile effects",
+  async (stage) => {
+    if (stage === "association")
+      mocks.compile.mockResolvedValue({
+        ...result(),
+        root: "/w/other.tex",
+        pdf_path: "/w/other.pdf",
+      });
+    const unsubscribe = useLatexCompileStore.subscribe((state) => {
+      const shouldReset =
+        (stage === "start" && state.builds["/w/main.tex"]?.state === "compiling") ||
+        (stage === "association" && state.roots["/w/chapter.tex"] === "/w/other.tex") ||
+        (stage === "completion" && state.builds["/w/main.tex"]?.state === "ok");
+      if (shouldReset) useEditorStore.getState().resetEditorState();
+    });
+    try {
+      await compileLatexSource("/w/chapter.tex");
+    } finally {
+      unsubscribe();
+    }
+    expect(mocks.compile).toHaveBeenCalledTimes(stage === "start" ? 0 : 1);
+    expect(useLatexCompileStore.getState().builds).toEqual({});
+    expect(useLatexCompileStore.getState().roots).toEqual({});
+    expect(usePdfRevisionStore.getState().revisions).toEqual({});
+  },
+);
+
+test.each(["direct", "preview"] as const)(
+  "reset while a %s lookup failure clears its association stops later effects",
+  async (command) => {
+    const source = "/w/chapter.tex";
+    await compileLatexSource(source);
+    mocks.root.mockRejectedValueOnce(new Error("old lookup error"));
+    const unsubscribe = useLatexCompileStore.subscribe((state) => {
+      if (!state.roots[source] && state.builds["/w/main.tex"])
+        useEditorStore.getState().resetEditorState();
+    });
+    try {
+      if (command === "direct") await compileLatexSource(source);
+      else await toggleLatexPreview(source, "source");
+    } finally {
+      unsubscribe();
+    }
+    expect(useLatexCompileStore.getState().builds).toEqual({});
+    expect(useLatexCompileStore.getState().roots).toEqual({});
+    expect(usePdfRevisionStore.getState().revisions).toEqual({});
+    expect(mocks.notice).not.toHaveBeenCalled();
+  },
+);
+
 test.each(["ok", "failed"] as const)(
   "old %s compile and rerun cannot replace a new same-path build",
   async (status) => {
@@ -213,13 +264,13 @@ test("an automatic root lookup joins a pending preview request without canceling
   const lookup = deferred<string>();
   mocks.root.mockReturnValueOnce(lookup.promise);
   const preview = toggleLatexPreview("/w/chapter.tex", "source");
-  expect(mocks.root).toHaveBeenCalledOnce();
+  await vi.waitFor(() => expect(mocks.root).toHaveBeenCalledOnce());
   mocks.saved!("/w/chapter.tex");
   expect(mocks.root).toHaveBeenCalledOnce();
   lookup.resolve("/w/main.tex");
   await preview;
   expect(mocks.compile).toHaveBeenCalledOnce();
-  expect(mocks.root).toHaveBeenCalledTimes(2);
+  await vi.waitFor(() => expect(mocks.root).toHaveBeenCalledTimes(3));
   expect(
     useEditorStore
       .getState()

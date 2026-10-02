@@ -34,6 +34,11 @@ The user approved fixing the 20 findings from the full desktop code review on 20
 19. [Clear removed tab view states on editor reset](../Agent/worksheet-review-19-tab-view-reset.md)
 20. [Unregister failed MCP handshakes](../Agent/worksheet-review-20-mcp-handshake-cleanup.md)
 
+## Adjacent fixes
+
+- [Native shutdown text saves](../Agent/worksheet-review-21-native-shutdown.md): window close/quit also needs the same text save barrier as workspace close.
+- [Bound wiki image resolution caching](../Agent/worksheet-review-22-embed-resolution-cache.md): successful wiki embed resolutions retain path keys across the window lifetime and workspace resets.
+
 ## Validation
 
 Run the relevant regression tests for each ticket. Finish with vp check, vp test, cargo test, cargo clippy and cargo fmt --check. Native/WebKit allocation profiling is a separate remaining validation gap; unit tests cannot certify allocator behavior.
