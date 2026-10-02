@@ -68,9 +68,13 @@ the step (outside `\begin…\end` and braces) gains a leading `&`. Steps
 without a relation go in unchanged. `\\` inside nested environments is left
 alone.
 
-`math.split`: a `$$` block containing `\begin{aligned}` (or `align`,
-`gathered`) is rewritten back into one `$$` block per row, `&` markers
-stripped.
+`math.split`: a formula consisting only of an aligned-family environment
+(`aligned`, `alignedat`, `align`, `align*`, `gathered` or `split`) is
+rewritten back into one `$$` block per row, with top-level `&` markers
+stripped. Surrounding expressions, sibling environments and other wrappers
+cause refusal, preserving the whole source. Nested rows/cells stay intact.
+Every resulting formula must render in display mode before the single
+transaction is dispatched; one invalid row leaves the document untouched.
 
 Both refuse with a notice when no run/env exists at the caret.
 

@@ -9,7 +9,9 @@
 
 ## Done
 
-- Review 08: Refresh roots when choosing LaTeX previews ([ticket](SPECs/Agent/worksheet-review-08-preview-root.md)). Actual-root preview, queue ownership and reset regressions pass; full 1,481-test frontend suite passes.
+- Review 09: Preserve surrounding source when splitting aligned math ([ticket](SPECs/Agent/worksheet-review-09-math-split.md)). Source-preserving command, display validation and undo checks pass; full 1,496-test frontend suite passes.
+
+- Review 08: Refresh roots when choosing LaTeX previews ([ticket](SPECs/Agent/worksheet-review-08-preview-root.md)). `2f436ae`. Actual-root preview, queue ownership and reset regressions pass; full 1,481-test frontend suite passes.
 
 - Review 07: Abort LaTeX commands after a failed save ([ticket](SPECs/Agent/worksheet-review-07-compile-save-failure.md)). `60b8284`. Failed-save command regressions pass.
 
@@ -127,7 +129,6 @@
 
 ## Up Next
 
-- Review 09: Preserve surrounding source when splitting aligned math ([ticket](SPECs/Agent/worksheet-review-09-math-split.md)).
 - Review 10: Preserve TeX syntax stars during tidy ([ticket](SPECs/Agent/worksheet-review-10-tidy-stars.md)).
 - Review 11: Deduplicate nested matrix separator edits ([ticket](SPECs/Agent/worksheet-review-11-tidy-nesting.md)).
 - Review 12: Preserve argument and text spacing during tidy ([ticket](SPECs/Agent/worksheet-review-12-tidy-text.md)).

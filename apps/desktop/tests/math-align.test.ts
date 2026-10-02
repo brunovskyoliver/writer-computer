@@ -35,6 +35,37 @@ describe("alignRun", () => {
 });
 
 describe("splitAligned", () => {
+  it.each([
+    "a + \\begin{aligned} x &= 1 \\end{aligned}",
+    "\\begin{aligned} x &= 1 \\end{aligned} + b",
+    "\\begin{bmatrix}\\begin{aligned} x &= 1 \\end{aligned}\\end{bmatrix}",
+    "\\begin{aligned} x &= 1 \\end{aligned}\\begin{aligned} y &= 2 \\end{aligned}",
+  ])("refuses an aligned environment with surrounding source: %s", (formula) => {
+    expect(splitAligned(formula)).toBeNull();
+  });
+
+  it("splits the whole outer aligned body while preserving nested aligned rows", () => {
+    expect(
+      splitAligned(
+        "\\begin{aligned}\\begin{aligned}x&=1\\\\y&=2\\end{aligned}&=v\\\\z&=0\\end{aligned}",
+      ),
+    ).toEqual(["\\begin{aligned}x&=1\\\\y&=2\\end{aligned}=v", "z=0"]);
+  });
+
+  it("consumes alignedat's column argument after whitespace", () => {
+    expect(splitAligned("\\begin{alignedat} \n{2}x&=1\\\\y&=2\\end{alignedat}")).toEqual([
+      "x=1",
+      "y=2",
+    ]);
+  });
+
+  it.each(["\\begin{alignedat}x&=1\\end{alignedat}", "\\begin{alignedat}{2 x&=1\\end{alignedat}"])(
+    "refuses malformed alignedat column arguments: %s",
+    (formula) => {
+      expect(splitAligned(formula)).toBeNull();
+    },
+  );
+
   it("splits rows and strips alignment &", () => {
     expect(splitAligned("\\begin{aligned} x &= 1 \\\\ y &= 2 \\end{aligned}")).toEqual([
       "x = 1",

@@ -38,7 +38,7 @@ const RELATIONS = [
  *  splits on. */
 const SPLITTABLE_ENV = /^(?:aligned|alignedat|align|align\*|gathered|split)$/;
 
-/** The env body of the first splittable environment in `formula`, or null. */
+/** A splittable environment covering the whole trimmed formula, or null. */
 function splittableBody(formula: string): { name: string; from: number; to: number } | null {
   const stack: { name: string; from: number; beginEnd: number }[] = [];
   for (const match of formula.matchAll(ENV_RE)) {
@@ -52,11 +52,16 @@ function splittableBody(formula: string): { name: string; from: number; to: numb
       if (stack[at]!.name !== name) continue;
       const open = stack.splice(at, 1)[0]!;
       if (!SPLITTABLE_ENV.test(name)) break;
+      const end = match.index + match[0].length;
+      if (formula.slice(0, open.from).trim() || formula.slice(end).trim()) break;
 
       let bodyFrom = open.beginEnd;
-      if (name === "alignedat" && formula[bodyFrom] === "{") {
+      if (name === "alignedat") {
+        while (bodyFrom < match.index && /\s/.test(formula[bodyFrom]!)) bodyFrom += 1;
+        if (formula[bodyFrom] !== "{") return null;
         const close = matchBrace(formula, bodyFrom);
-        if (close !== null) bodyFrom = close + 1;
+        if (close === null || close >= match.index) return null;
+        bodyFrom = close + 1;
       }
       return { name, from: bodyFrom, to: match.index };
     }
@@ -96,7 +101,7 @@ export function alignRun(steps: string[]): string | null {
 }
 
 /**
- * Split a formula's first `aligned`-family body into rows: one row per
+ * Split a whole `aligned`-family formula into rows: one row per
  * top-level `\\` (an optional `\\[dim]` spacing arg is consumed with it),
  * top-level `&` stripped. Returns null when there is no such environment.
  */

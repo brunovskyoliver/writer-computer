@@ -18,6 +18,7 @@ import { tidyFormula } from "@/lib/math/tidy";
 import { alignRun, splitAligned } from "@/lib/math/align";
 import { checkEquivalent, formatComplex } from "@/lib/math/evaluate";
 import { showEditorNotice } from "./editor-notice-store";
+import { validateMath } from "./math-renderer";
 
 const PARSE_BUDGET_MS = 50;
 const MATH_KINDS = new Set<MathContext["kind"]>(["inline", "display", "text"]);
@@ -174,7 +175,7 @@ export const mathAlign: StateCommand = ({ state, dispatch }) => {
 };
 
 /**
- * `math.split` — a `$$` block containing `\begin{aligned}`/`align`/
+ * `math.split` — a formula consisting only of `\begin{aligned}`/`align`/
  * `gathered` becomes one `$$` block per row again, `&` markers stripped.
  */
 export const mathSplit: StateCommand = ({ state, dispatch }) => {
@@ -187,7 +188,11 @@ export const mathSplit: StateCommand = ({ state, dispatch }) => {
   const formula = state.doc.sliceString(node.formulaFrom, node.formulaTo);
   const rows = splitAligned(formula);
   if (!rows) {
-    showEditorNotice("No aligned environment around the caret.");
+    showEditorNotice("Split needs a formula containing only an aligned environment.");
+    return true;
+  }
+  if (!rows.every((row) => validateMath(row, true))) {
+    showEditorNotice("Could not split: a resulting formula cannot render.");
     return true;
   }
 
