@@ -87,6 +87,29 @@ describe("evaluateSource", () => {
     },
   );
 
+  it.each([
+    ["\\sqrt{0}", 0],
+    ["\\sqrt[3]{0}", 0],
+    ["0^{0.5}", 0],
+    ["0^{\\pi}", 0],
+    ["0^0", 1],
+    ["\\arcsin(1)", Math.PI / 2],
+    ["\\arcsin(-1)", -Math.PI / 2],
+    ["\\arccos(1)", 0],
+    ["\\cosh^{-1}(1)", 0],
+  ])("handles zero-base and inverse-function boundaries: %s", (source, expected) => {
+    const value = val(source);
+    expect(value.re).toBeCloseTo(expected, 10);
+    expect(value.im).toBeCloseTo(0, 10);
+  });
+
+  it.each(["0^{-1}", "0^{-0.5}", "0^{j}", "0^{1/0}"])(
+    "leaves undefined zero powers open: %s",
+    (source) => {
+      expect(evaluateSource(source).kind).toBe("open");
+    },
+  );
+
   it("evaluates functions and inverses", () => {
     expect(near(re("\\sin{\\frac{\\pi}{2}}"), 1)).toBe(true);
     expect(near(re("\\cosh^{-1}(2)"), Math.acosh(2))).toBe(true);

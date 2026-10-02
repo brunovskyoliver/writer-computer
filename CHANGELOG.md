@@ -2,6 +2,8 @@
 
 ## 2026-10-02
 
+- Zero roots, positive fractional zero powers and inverse-function endpoints now evaluate correctly. Undefined zero powers remain unannotated.
+
 - Math evaluation follows TeX superscript and argument token boundaries. Multi-token exponents need braces; unsupported scripts remain unannotated. Plot fences retain ordinary power syntax and bare function names.
 
 - Evaluated values preserve integer zeros and scientific exponents. Large complex values no longer format as zero when their combined magnitude overflows.

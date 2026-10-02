@@ -104,6 +104,10 @@ are reserved for plot syntax; TeX uses explicit control commands. `\%`, `\text`,
 environments, `\\`, unknown commands, and any letter that is not a known
 constant mark the formula as _open_ — it is skipped entirely.
 
+A zero base with a finite positive real exponent evaluates to zero, including
+roots and inverse-function boundary cases. The existing `0^0 = 1` convention
+remains; undefined negative or complex zero powers stay open.
+
 Every rendered Math widget whose formula is closed gets a muted ` ≈ value`
 annotation appended. Formatting trims fractional zeros while preserving
 integer place values and scientific exponents, including complex components.

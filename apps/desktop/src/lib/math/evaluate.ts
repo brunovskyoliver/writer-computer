@@ -38,6 +38,7 @@ const exp = (a: Complex) => {
 };
 const ln = (a: Complex) => cx(Math.log(abs(a)), arg(a));
 const pow = (a: Complex, b: Complex): Complex => {
+  if (a.re === 0 && a.im === 0 && b.im === 0 && Number.isFinite(b.re) && b.re > 0) return cx(0);
   // Real base + real integer exponent: the common case stays exact-ish.
   if (a.im === 0 && b.im === 0 && Number.isInteger(b.re)) {
     return cx(Math.pow(a.re, b.re));
