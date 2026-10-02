@@ -1655,7 +1655,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   resetEditorState: () => {
     notifyEditorReset();
     for (const path of get().openFiles.keys()) cancelSave(path);
-    for (const tabId of get().tabs) pendingNavigationVersionByTabId.delete(tabId.id);
+    for (const tab of get().tabs) {
+      pendingNavigationVersionByTabId.delete(tab.id);
+      clearTabViewState(tab.id);
+    }
     pendingDocs.clear();
     for (const timer of pendingFlushTimers.values()) clearTimeout(timer);
     pendingFlushTimers.clear();

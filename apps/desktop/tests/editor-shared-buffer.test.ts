@@ -234,6 +234,22 @@ describe("shared markdown buffer across duplicate views", () => {
     expect(editorApi.getTabViewState("tab-a", PATH).cursor).toBe(4);
   });
 
+  test("workspace reset releases both panes' cursor and scroll records", () => {
+    openTwoViews(PATH, "one shared document");
+    editorApi.setTabCursor("tab-a", PATH, 3);
+    editorApi.setTabScroll("tab-a", PATH, 120);
+    editorApi.setTabCursor("tab-b", PATH, 9);
+    editorApi.setTabScroll("tab-b", PATH, 240);
+
+    useEditorStore.getState().resetEditorState();
+
+    expect(editorApi.getTabViewState("tab-a", PATH)).toEqual({ cursor: 0, scroll: 0 });
+    expect(editorApi.getTabViewState("tab-b", PATH)).toEqual({ cursor: 0, scroll: 0 });
+    expect(editorViews.editorViewDebugCounts().viewStates).toBe(0);
+    editorApi.setTabCursor("tab-a", PATH, 1);
+    expect(editorApi.getTabViewState("tab-a", PATH)).toMatchObject({ cursor: 1, scroll: 0 });
+  });
+
   test("frontmatter edits stay on the document and dirty it once", () => {
     openTwoViews(PATH, "body");
     useEditorStore.getState().updateFrontmatter(PATH, "title: Shared");

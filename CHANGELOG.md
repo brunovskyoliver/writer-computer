@@ -2,6 +2,8 @@
 
 ## 2026-10-02
 
+- Closing or switching a workspace now releases the removed tabs' cursor and scroll records.
+
 - Custom snippet regexes now run with interruptible work, time and memory limits. Pathological triggers cannot hold the editor in native backtracking; unsupported syntax and oversized triggers produce entry errors. Shipped captures and lookbehind guards keep working.
 
 - Zero roots, positive fractional zero powers and inverse-function endpoints now evaluate correctly. Undefined zero powers remain unannotated.
