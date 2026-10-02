@@ -2,6 +2,8 @@
 
 ## 2026-10-02
 
+- Chapters and root path aliases now share LaTeX build status and one compile queue. Builds in different windows serialize writes to the same document PDF.
+
 - Closing a workspace clears LaTeX build records and PDF revisions, cancels pending preview compiles, and ignores old build, lookup and save completions.
 
 - Image height hints now use a bounded cache and compact keys for embedded images, keeping scrolling stable without retaining encoded image data in metadata.

@@ -45,12 +45,16 @@ export const useLatexCompileStore = create<LatexCompileState>(() => ({
 /** How long autosaves may keep coming before the preview recompiles. */
 const AUTO_COMPILE_DELAY_MS = 400;
 
-function keyFor(source: string): string {
-  return useLatexCompileStore.getState().roots[source] ?? source;
-}
+let requestOrder = 0;
+let buildOrders = new WeakMap<LatexBuild, number>();
 
-function setBuild(key: string, build: LatexBuild) {
-  useLatexCompileStore.setState((state) => ({ builds: { ...state.builds, [key]: build } }));
+function setBuild(key: string, build: LatexBuild, order = ++requestOrder) {
+  buildOrders.set(build, order);
+  useLatexCompileStore.setState((state) => {
+    const current = state.builds[key];
+    if (current && (buildOrders.get(current) ?? 0) > order) return state;
+    return { builds: { ...state.builds, [key]: build } };
+  });
 }
 
 function rememberRoot(source: string, root: string) {
@@ -60,7 +64,7 @@ function rememberRoot(source: string, root: string) {
 }
 
 const running = new Map<string, Promise<LatexCompileResult>>();
-const rerun = new Set<string>();
+const rerun = new Map<string, string>();
 
 async function runCompile(
   source: string,
@@ -68,12 +72,14 @@ async function runCompile(
   generation: number,
 ): Promise<LatexCompileResult> {
   const previous = useLatexCompileStore.getState().builds[key];
-  setBuild(key, {
+  const order = ++requestOrder;
+  const compiling: LatexBuild = {
     state: "compiling",
     diagnostics: previous?.diagnostics ?? [],
     durationMs: previous?.durationMs ?? null,
     pdfPath: previous?.pdfPath ?? null,
-  });
+  };
+  setBuild(key, compiling, order);
 
   let result: LatexCompileResult;
   try {
@@ -91,18 +97,40 @@ async function runCompile(
   }
 
   if (generation !== editorGeneration()) return result;
-  if (result.root) rememberRoot(source, result.root);
+  if (result.root && useLatexCompileStore.getState().roots[source] === key)
+    rememberRoot(source, result.root);
+  const completedRoot = result.root;
+  const previousAtRoot =
+    completedRoot && completedRoot !== key
+      ? useLatexCompileStore.getState().builds[completedRoot]
+      : previous;
   const build: LatexBuild = {
     state: result.status === "ok" ? "ok" : result.status,
     diagnostics: result.diagnostics,
     durationMs: result.duration_ms,
     // A failed compile keeps pointing at the last good PDF.
-    pdfPath: result.pdf_path ?? previous?.pdfPath ?? null,
+    pdfPath: result.pdf_path ?? previousAtRoot?.pdfPath ?? null,
   };
-  setBuild(key, build);
-  // The builds of a root are shared; a source compiled under its own path
-  // before its root was known moves over.
-  if (result.root && result.root !== key) setBuild(result.root, build);
+  buildOrders.set(build, order);
+  if (completedRoot && completedRoot !== key) {
+    // A magic comment changed between lookup and the native compile. Keep
+    // the result with its actual root, restoring the old root's last status.
+    useLatexCompileStore.setState((state) => {
+      const builds = { ...state.builds };
+      if (state.builds[key] === compiling) {
+        if (previous) builds[key] = previous;
+        else delete builds[key];
+      }
+      const destination = state.builds[completedRoot];
+      // The actual root may have another active or newer queue owner.
+      if (
+        !running.has(completedRoot) &&
+        (!destination || (buildOrders.get(destination) ?? 0) <= order)
+      )
+        builds[completedRoot] = build;
+      return { builds };
+    });
+  } else setBuild(key, build, order);
   if (result.status === "ok" && result.pdf_path) {
     usePdfRevisionStore.getState().bumpPdfRevision(result.pdf_path);
   }
@@ -110,22 +138,78 @@ async function runCompile(
 }
 
 /** Compile the document `source` belongs to. A call during a running compile
- *  of the same root queues one rerun and resolves with the running result. */
-export function compileLatexSource(source: string): Promise<LatexCompileResult> {
+ *  of the same root queues one rerun and resolves with the running result.
+ *  Null means the request was superseded or reset before it could start. */
+export async function compileLatexSource(source: string): Promise<LatexCompileResult | null> {
   const generation = editorGeneration();
-  const key = keyFor(source);
+  let root: string | null | undefined;
+  try {
+    root = await resolveRoot(source, true);
+  } catch (error) {
+    const result = withoutCompile("failed", String(error));
+    if (generation === editorGeneration()) recordLookupFailure(source, result);
+    return result;
+  }
+  if (generation !== editorGeneration() || root === undefined) return null;
+  if (!root) {
+    const result = withoutCompile(
+      "no-root",
+      "No main document found. Add `% !TEX root = main.tex` at the top of this file.",
+    );
+    setBuild(source, {
+      state: "no-root",
+      diagnostics: result.diagnostics,
+      durationMs: 0,
+      pdfPath: null,
+    });
+    return result;
+  }
+  const key = root;
   const inFlight = running.get(key);
   if (inFlight) {
-    rerun.add(key);
+    rerun.set(key, source);
+    // This source owns its fresh lookup. Another chapter's native call may
+    // migrate independently, and its result must not replace that association.
     return inFlight;
   }
   const promise = runCompile(source, key, generation).finally(() => {
     if (generation !== editorGeneration() || running.get(key) !== promise) return;
     running.delete(key);
-    if (rerun.delete(key)) void compileLatexSource(source);
+    const nextSource = rerun.get(key);
+    rerun.delete(key);
+    if (nextSource) void compileLatexSource(nextSource);
   });
   running.set(key, promise);
   return promise;
+}
+
+function withoutCompile(status: "failed" | "no-root", message: string): LatexCompileResult {
+  return {
+    status,
+    root: null,
+    pdf_path: null,
+    diagnostics: [{ file: null, line: null, message, severity: "error" }],
+    duration_ms: 0,
+    log: "",
+  };
+}
+
+function recordLookupFailure(source: string, result: LatexCompileResult) {
+  forgetRoot(source);
+  setBuild(source, {
+    state: "failed",
+    diagnostics: result.diagnostics,
+    durationMs: 0,
+    pdfPath: null,
+  });
+}
+
+function forgetRoot(source: string) {
+  const { roots } = useLatexCompileStore.getState();
+  if (!(source in roots)) return;
+  const next = { ...roots };
+  delete next[source];
+  useLatexCompileStore.setState({ roots: next });
 }
 
 /** The build a source tab reports: its root's, once known. */
@@ -140,14 +224,39 @@ function pdfTabIds(pdfPath: string): string[] {
     .map((tab) => tab.id);
 }
 
-async function resolveRoot(source: string): Promise<string | null> {
+// Tokens live only while lookups are pending. A newer lookup owns publication;
+// deleting its token on completion also prevents older results from publishing.
+const rootLookups = new Map<string, { promise?: Promise<string | null | undefined> }>();
+
+/** Undefined means a request was superseded or its workspace reset. Background
+ * lookups join pending work so autosaves cannot cancel a foreground request. */
+function resolveRoot(source: string, fresh = false): Promise<string | null | undefined> {
+  if (!fresh) {
+    const pending = rootLookups.get(source)?.promise;
+    if (pending) return pending;
+    const known = useLatexCompileStore.getState().roots[source];
+    if (known) return Promise.resolve(known);
+  }
   const generation = editorGeneration();
-  const known = useLatexCompileStore.getState().roots[source];
-  if (known) return known;
-  const root = await tauri.latexRoot(source);
-  if (generation !== editorGeneration()) return null;
-  if (root) rememberRoot(source, root);
-  return root;
+  const token: { promise?: Promise<string | null | undefined> } = {};
+  rootLookups.set(source, token);
+  const current = () => generation === editorGeneration() && rootLookups.get(source) === token;
+  token.promise = (async () => {
+    try {
+      const root = await tauri.latexRoot(source);
+      if (!current()) return undefined;
+      if (root) rememberRoot(source, root);
+      else forgetRoot(source);
+      // Store subscribers run synchronously and may request a newer lookup.
+      return current() ? root : undefined;
+    } catch (error) {
+      if (!current()) return undefined;
+      throw error;
+    } finally {
+      if (rootLookups.get(source) === token) rootLookups.delete(source);
+    }
+  })();
+  return token.promise;
 }
 
 /** Keep focus on the source after the preview opened beside it. */
@@ -163,8 +272,18 @@ function refocusSourcePane(sourceTabId: string) {
  */
 export async function toggleLatexPreview(source: string, sourceTabId: string): Promise<void> {
   const generation = editorGeneration();
-  const root = await resolveRoot(source);
-  if (generation !== editorGeneration()) return;
+  let root: string | null | undefined;
+  try {
+    root = await resolveRoot(source);
+  } catch (error) {
+    if (generation === editorGeneration()) {
+      const failure = withoutCompile("failed", String(error));
+      recordLookupFailure(source, failure);
+      reportFailure(failure, sourceTabId);
+    }
+    return;
+  }
+  if (generation !== editorGeneration() || root === undefined) return;
   if (!root) {
     showEditorNotice(
       "No main document found. Add `% !TEX root = main.tex` at the top of this file.",
@@ -183,7 +302,7 @@ export async function toggleLatexPreview(source: string, sourceTabId: string): P
   await saveNow(source);
   if (generation !== editorGeneration()) return;
   const result = await compileLatexSource(source);
-  if (generation !== editorGeneration()) return;
+  if (generation !== editorGeneration() || result === null) return;
   const exists = result.status === "ok" || (await tauri.fileExists(pdfPath));
   if (generation !== editorGeneration()) return;
   if (!exists) {
@@ -201,7 +320,7 @@ export async function compileLatexNow(source: string, sourceTabId: string): Prom
   await saveNow(source);
   if (generation !== editorGeneration()) return;
   const result = await compileLatexSource(source);
-  if (generation !== editorGeneration()) return;
+  if (generation !== editorGeneration() || result === null) return;
   if (result.status !== "ok") reportFailure(result, sourceTabId);
 }
 
@@ -227,20 +346,25 @@ export function ensureLatexAutoCompile() {
   onFileSaved((path) => {
     if (!isLatexSourcePath(path)) return;
     const generation = editorGeneration();
-    void resolveRoot(path).then((root) => {
-      if (generation !== editorGeneration()) return;
-      if (!root || pdfTabIds(pdfPathForRoot(root)).length === 0) return;
-      const pending = pendingAuto.get(root);
-      if (pending) clearTimeout(pending);
-      pendingAuto.set(
-        root,
-        setTimeout(() => {
-          if (generation !== editorGeneration()) return;
-          pendingAuto.delete(root);
-          void compileLatexSource(path);
-        }, AUTO_COMPILE_DELAY_MS),
-      );
-    });
+    void resolveRoot(path)
+      .then((root) => {
+        if (generation !== editorGeneration()) return;
+        if (!root || pdfTabIds(pdfPathForRoot(root)).length === 0) return;
+        const pending = pendingAuto.get(root);
+        if (pending) clearTimeout(pending);
+        pendingAuto.set(
+          root,
+          setTimeout(() => {
+            if (generation !== editorGeneration()) return;
+            pendingAuto.delete(root);
+            void compileLatexSource(path);
+          }, AUTO_COMPILE_DELAY_MS),
+        );
+      })
+      .catch((error) => {
+        if (generation === editorGeneration())
+          recordLookupFailure(path, withoutCompile("failed", String(error)));
+      });
   });
 }
 
@@ -248,6 +372,9 @@ onEditorReset(() => {
   for (const timer of pendingAuto.values()) clearTimeout(timer);
   pendingAuto.clear();
   running.clear();
+  rootLookups.clear();
   rerun.clear();
+  requestOrder = 0;
+  buildOrders = new WeakMap();
   useLatexCompileStore.setState({ builds: {}, roots: {} });
 });

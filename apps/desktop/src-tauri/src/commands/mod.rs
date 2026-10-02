@@ -5,6 +5,7 @@ pub mod images;
 pub mod latex;
 pub mod latex_compile;
 mod latex_output;
+mod latex_root_lock;
 pub mod mcp;
 pub mod recents;
 pub mod search;

@@ -9,7 +9,9 @@
 
 ## Done
 
-- Review 05: Reset LaTeX records with the editor workspace ([ticket](SPECs/Agent/worksheet-review-05-latex-reset.md)). Reset, save-race and stale-completion regressions pass.
+- Review 06: Serialize LaTeX builds by resolved root ([ticket](SPECs/Agent/worksheet-review-06-compile-root-lock.md)). Canonical-root serialization and async ownership regressions pass.
+
+- Review 05: Reset LaTeX records with the editor workspace ([ticket](SPECs/Agent/worksheet-review-05-latex-reset.md)). `02540fb`. Reset, save-race and stale-completion regressions pass.
 
 - Review 04: Bound image height cache retention ([ticket](SPECs/Agent/worksheet-review-04-image-height-cache.md)). `df95150`. Full 1,409-test frontend suite and browser image checks pass.
 
@@ -121,7 +123,6 @@
 
 ## Up Next
 
-- Review 06: Serialize LaTeX builds by resolved root ([ticket](SPECs/Agent/worksheet-review-06-compile-root-lock.md)).
 - Review 07: Abort LaTeX commands after a failed save ([ticket](SPECs/Agent/worksheet-review-07-compile-save-failure.md)).
 - Review 08: Refresh roots when choosing LaTeX previews ([ticket](SPECs/Agent/worksheet-review-08-preview-root.md)).
 - Review 09: Preserve surrounding source when splitting aligned math ([ticket](SPECs/Agent/worksheet-review-09-math-split.md)).

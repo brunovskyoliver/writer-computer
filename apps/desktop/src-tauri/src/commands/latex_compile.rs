@@ -129,6 +129,10 @@ fn magic_root(path: &Path) -> Option<PathBuf> {
 /// `.tex` with `\documentclass` is its own root; otherwise the single sibling
 /// `.tex` that has one. `None` when the choice is missing or ambiguous.
 pub(crate) fn resolve_root(path: &Path) -> Option<PathBuf> {
+    discover_root(path)?.canonicalize().ok()
+}
+
+fn discover_root(path: &Path) -> Option<PathBuf> {
     if let Some(root) = magic_root(path) {
         return root.is_file().then_some(root);
     }
@@ -323,6 +327,10 @@ pub(crate) fn compile_latex_impl(
     };
 
     let started = Instant::now();
+    let document_lock = super::latex_root_lock::acquire(&root)?;
+    let _guard = document_lock
+        .lock()
+        .map_err(|e| AppError::Io(format!("LaTeX document lock poisoned: {e}")))?;
     let run = run_engine(&engine, &root, COMPILE_TIMEOUT)?;
     let pdf = root.with_extension("pdf");
     let ok = run.success && pdf.is_file();
@@ -358,13 +366,12 @@ pub async fn compile_latex(path: String) -> Result<CompileResult, AppError> {
 
 /// The root a file compiles as part of, for the frontend's preview toggle.
 #[tauri::command]
-pub async fn latex_root(path: String) -> Option<String> {
+pub async fn latex_root(path: String) -> Result<Option<String>, AppError> {
     tauri::async_runtime::spawn_blocking(move || {
         resolve_root(Path::new(&path)).map(|root| root.to_string_lossy().into_owned())
     })
     .await
-    .ok()
-    .flatten()
+    .map_err(|e| AppError::Io(format!("LaTeX root lookup failed: {e}")))
 }
 
 #[cfg(test)]
@@ -389,7 +396,96 @@ mod tests {
     fn a_document_is_its_own_root() {
         let dir = tempfile::tempdir().unwrap();
         let main = write(dir.path(), "main.tex", "\\documentclass{article}\n");
-        assert_eq!(resolve_root(&main), Some(main));
+        assert_eq!(resolve_root(&main), Some(main.canonicalize().unwrap()));
+    }
+
+    #[test]
+    fn root_aliases_have_one_canonical_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = write(dir.path(), "main.tex", "\\documentclass{article}\n");
+        std::fs::create_dir(dir.path().join("chapters")).unwrap();
+        let chapter = write(
+            dir.path(),
+            "chap.tex",
+            "% !TEX root = chapters/../main.tex\n",
+        );
+        assert_eq!(resolve_root(&chapter), Some(root.canonicalize().unwrap()));
+        #[cfg(unix)]
+        {
+            let alias = dir.path().join("alias.tex");
+            std::os::unix::fs::symlink(&root, &alias).unwrap();
+            assert_eq!(resolve_root(&alias), resolve_root(&chapter));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn magic_comments_remain_relative_to_the_requested_source_alias() {
+        let dir = tempfile::tempdir().unwrap();
+        let physical = dir.path().join("physical");
+        let alias_dir = dir.path().join("alias");
+        std::fs::create_dir(&physical).unwrap();
+        std::fs::create_dir(&alias_dir).unwrap();
+        let source = write(&physical, "chapter.tex", "% !TEX root = main.tex\n");
+        write(&physical, "main.tex", "\\documentclass{article}\n");
+        let expected = write(&alias_dir, "main.tex", "\\documentclass{book}\n");
+        let alias = alias_dir.join("chapter.tex");
+        std::os::unix::fs::symlink(&source, &alias).unwrap();
+        assert_eq!(resolve_root(&alias), Some(expected.canonicalize().unwrap()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn engine_start_failure_releases_the_document_lock() {
+        use std::os::unix::fs::PermissionsExt;
+        let (tx, rx) = std::sync::mpsc::channel();
+        let job = std::thread::spawn(move || {
+            let dir = tempfile::tempdir().unwrap();
+            let root = write(dir.path(), "main.tex", "\\documentclass{article}\n");
+            let engine = write(dir.path(), "tectonic", "#!/bin/sh\nexit 0\n");
+            std::fs::set_permissions(&engine, std::fs::Permissions::from_mode(0o644)).unwrap();
+            let bin = dir.path().to_string_lossy();
+            assert!(compile_latex_impl(&root, Some(&bin), None).is_err());
+            std::fs::write(&engine, "#!/bin/sh\nprintf pdf > main.pdf\n").unwrap();
+            std::fs::set_permissions(&engine, std::fs::Permissions::from_mode(0o755)).unwrap();
+            tx.send(compile_latex_impl(&root, Some(&bin), None).unwrap().status)
+                .unwrap();
+        });
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            CompileStatus::Ok
+        );
+        job.join().unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn concurrent_chapters_never_overlap_their_root_engine() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "main.tex", "\\documentclass{article}\n");
+        let a = write(dir.path(), "a.tex", "% !TEX root = ./main.tex\n");
+        let b = write(dir.path(), "b.tex", "% !TEX root = main.tex\n");
+        let engine = write(dir.path(), "tectonic", "#!/bin/sh\nif ! mkdir .engine-active 2>/dev/null; then touch overlap; exit 2; fi\nsleep 0.1\nprintf 'pdf' > main.pdf\nrmdir .engine-active\n");
+        std::fs::set_permissions(&engine, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(4));
+        let jobs: Vec<_> = [a.clone(), b.clone(), a, b]
+            .into_iter()
+            .map(|source| {
+                let barrier = barrier.clone();
+                let bin = dir.path().to_string_lossy().into_owned();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    compile_latex_impl(&source, Some(&bin), None).unwrap()
+                })
+            })
+            .collect();
+        let results: Vec<_> = jobs.into_iter().map(|job| job.join().unwrap()).collect();
+        for result in results {
+            assert_eq!(result.status, CompileStatus::Ok);
+        }
+        assert!(!dir.path().join("overlap").exists());
+        assert!(!dir.path().join(".engine-active").exists());
     }
 
     #[test]
@@ -398,8 +494,8 @@ mod tests {
         let main = write(dir.path(), "main.tex", "\\documentclass{article}\n");
         let chapter = write(dir.path(), "chap.tex", "Some text.\n");
         let bib = write(dir.path(), "refs.bib", "@book{x,}\n");
-        assert_eq!(resolve_root(&chapter), Some(main.clone()));
-        assert_eq!(resolve_root(&bib), Some(main));
+        assert_eq!(resolve_root(&chapter), Some(main.canonicalize().unwrap()));
+        assert_eq!(resolve_root(&bib), Some(main.canonicalize().unwrap()));
     }
 
     #[test]

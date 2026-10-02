@@ -90,18 +90,25 @@ test.each(["ok", "failed"] as const)(
     const current = deferred<LatexCompileResult>();
     mocks.compile.mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise);
     const first = compileLatexSource("/w/main.tex");
+    await vi.waitFor(() => expect(mocks.compile).toHaveBeenCalledTimes(1));
     void compileLatexSource("/w/main.tex");
+    await vi.waitFor(() => expect(mocks.root).toHaveBeenCalledTimes(2));
+    await Promise.resolve();
+    await Promise.resolve();
     useEditorStore.getState().resetEditorState();
     const next = compileLatexSource("/w/main.tex");
+    await vi.waitFor(() => expect(mocks.compile).toHaveBeenCalledTimes(2));
     old.resolve(result(status));
     await first;
     expect(useLatexCompileStore.getState().builds["/w/main.tex"]?.state).toBe("compiling");
     expect(usePdfRevisionStore.getState().revisions).toEqual({});
     expect(mocks.compile).toHaveBeenCalledTimes(2);
-    expect(compileLatexSource("/w/main.tex")).toBe(next);
+    const joined = compileLatexSource("/w/main.tex");
+    await Promise.resolve();
+    await Promise.resolve();
     expect(mocks.compile).toHaveBeenCalledTimes(2);
     current.resolve(result());
-    await next;
+    await Promise.all([next, joined]);
     await vi.waitFor(() => expect(mocks.compile).toHaveBeenCalledTimes(3));
     expect(useLatexCompileStore.getState().builds["/w/main.tex"]?.state).toBe("ok");
     expect(usePdfRevisionStore.getState().revisions["/w/main.pdf"]).toBe(2);
@@ -184,4 +191,44 @@ test("reset during the preview command save prevents compilation and opening", a
   await command;
   expect(mocks.compile).not.toHaveBeenCalled();
   expect(useEditorStore.getState().tabs).toEqual([]);
+});
+
+test("an automatic root lookup joins a pending preview request without canceling it", async () => {
+  const lookup = deferred<string>();
+  mocks.root.mockReturnValueOnce(lookup.promise);
+  const preview = toggleLatexPreview("/w/chapter.tex", "source");
+  expect(mocks.root).toHaveBeenCalledOnce();
+  mocks.saved!("/w/chapter.tex");
+  expect(mocks.root).toHaveBeenCalledOnce();
+  lookup.resolve("/w/main.tex");
+  await preview;
+  expect(mocks.compile).toHaveBeenCalledOnce();
+  expect(mocks.root).toHaveBeenCalledTimes(2);
+  expect(
+    useEditorStore
+      .getState()
+      .tabs.some((tab) => tab.location.kind === "pdf" && tab.location.path === "/w/main.pdf"),
+  ).toBe(true);
+});
+
+test("a preview root lookup failure is reported without rejecting the command", async () => {
+  mocks.root.mockRejectedValueOnce(new Error("lookup unavailable"));
+  await expect(toggleLatexPreview("/w/chapter.tex", "source")).resolves.toBeUndefined();
+  expect(mocks.notice).toHaveBeenCalledWith(
+    expect.stringContaining("lookup unavailable"),
+    "source",
+  );
+  expect(useLatexCompileStore.getState().builds["/w/chapter.tex"]?.state).toBe("failed");
+});
+
+test("an automatic root lookup failure publishes diagnostics without an unhandled rejection", async () => {
+  mocks.root.mockRejectedValueOnce(new Error("auto lookup unavailable"));
+  mocks.saved!("/w/chapter.tex");
+  await vi.waitFor(() =>
+    expect(useLatexCompileStore.getState().builds["/w/chapter.tex"]?.state).toBe("failed"),
+  );
+  expect(
+    useLatexCompileStore.getState().builds["/w/chapter.tex"]?.diagnostics[0]?.message,
+  ).toContain("auto lookup unavailable");
+  expect(mocks.compile).not.toHaveBeenCalled();
 });
