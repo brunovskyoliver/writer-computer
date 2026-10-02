@@ -105,6 +105,19 @@ describe("sameValue / formatComplex", () => {
   });
 });
 
+it.each([
+  [{ re: 300000, im: 0 }, "300000"],
+  [{ re: -300000, im: 0 }, "-300000"],
+  [{ re: 1200000, im: 0 }, "1200000"],
+  [{ re: 0, im: 300000 }, "300000j"],
+  [{ re: 300000, im: -400000 }, "300000 - 400000j"],
+  [{ re: 1e30, im: 0 }, "1e+30"],
+  [{ re: 1.2e30, im: 0 }, "1.2e+30"],
+  [{ re: 1.4e308, im: 1.4e308 }, "1.4e+308 + 1.4e+308j"],
+] as const)("preserves integer/scientific place values: %o", (value, expected) => {
+  expect(formatComplex(value)).toBe(expected);
+});
+
 describe("checkEquivalent", () => {
   it("accepts algebraically equal steps with free variables", () => {
     expect(checkEquivalent("x^2 + 3x", "x(x+3)").kind).toBe("equal");

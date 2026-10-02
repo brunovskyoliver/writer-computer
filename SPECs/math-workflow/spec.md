@@ -100,7 +100,9 @@ environments, `\\`, unknown commands, and any letter that is not a known
 constant mark the formula as _open_ — it is skipped entirely.
 
 Every rendered Math widget whose formula is closed gets a muted ` ≈ value`
-annotation appended; a single top-level `=` with two closed sides gets `✓`
+annotation appended. Formatting trims fractional zeros while preserving
+integer place values and scientific exponents, including complex components.
+A single top-level `=` with two closed sides gets `✓`
 when both sides agree (relative epsilon) and `✗` with both values in the
 tooltip. Results memoize per formula string. Behind `latex.eval-annotations`
 (default on).

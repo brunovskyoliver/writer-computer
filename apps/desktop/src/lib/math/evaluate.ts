@@ -677,9 +677,10 @@ export function formatComplex(c: Complex): string {
   const round = (n: number) => {
     if (n === 0) return "0";
     const digits = Math.max(0, 5 - Math.floor(Math.log10(Math.abs(n))));
-    return n.toFixed(Math.min(digits, 10)).replace(/\.?0+$/, "");
+    const text = n.toFixed(Math.min(digits, 10));
+    return text.includes(".") && !text.includes("e") ? text.replace(/\.?0+$/, "") : text;
   };
-  const tiny = 1e-10 * Math.max(1, abs(c));
+  const tiny = 1e-10 * Math.max(1, Math.abs(c.re), Math.abs(c.im));
   const re = Math.abs(c.re) < tiny ? 0 : c.re;
   const im = Math.abs(c.im) < tiny ? 0 : c.im;
   if (im === 0) return round(re);

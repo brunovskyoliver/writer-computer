@@ -2,6 +2,8 @@
 
 ## 2026-10-02
 
+- Evaluated values preserve integer zeros and scientific exponents. Large complex values no longer format as zero when their combined magnitude overflows.
+
 - Math checks require finite evidence before reporting equality, recover past singular samples and report indeterminate when too few samples work. Large complex comparisons avoid overflow-driven false matches.
 
 - Math step checks compare bare expression values directly. Equation scaling applies only to two single equations; mixed forms and equation chains report unsupported.
