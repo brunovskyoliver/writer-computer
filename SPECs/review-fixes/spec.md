@@ -2,6 +2,8 @@
 
 The user approved fixing the 20 findings from the full desktop code review on 2026-10-02.
 
+Status: Complete, including the two adjacent fixes. See the [completion report](report.md) for commits, validation and remaining runtime coverage gaps.
+
 ## Requirements
 
 - Preserve unsaved text across workspace closure and switching. Failed saves leave the current workspace and buffers intact.

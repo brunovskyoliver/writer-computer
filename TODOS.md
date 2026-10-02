@@ -9,7 +9,7 @@
 
 ## Done
 
-- Review 22: Bound wiki image resolution caching ([ticket](SPECs/Agent/worksheet-review-22-embed-resolution-cache.md)). Bounded reset-aware caching and live widget checks pass; all 1,687 frontend tests pass.
+- Review 22: Bound wiki image resolution caching ([ticket](SPECs/Agent/worksheet-review-22-embed-resolution-cache.md)). `7e91450`. Bounded reset-aware caching and live widget checks pass; all 1,687 frontend tests pass. All 20 review findings and two adjacent fixes are complete: [final report](SPECs/review-fixes/report.md).
 
 - Review 20: Unregister failed MCP handshakes ([ticket](SPECs/Agent/worksheet-review-20-mcp-handshake-cleanup.md)). `a60b60e`. Cleanup and atomic registration verified; 276 Rust tests pass.
 
