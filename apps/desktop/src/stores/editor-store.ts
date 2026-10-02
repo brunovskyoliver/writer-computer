@@ -4,6 +4,7 @@ import {
   discardDrawingSessions,
   reportDrawingSaveError,
 } from "@/lib/drawing-sessions";
+import { notifyEditorReset } from "@/lib/editor-reset";
 import { resetDrawingRevisions } from "@/lib/drawing-embed-sync";
 import { clearTabViewState, rewriteEditorPaths } from "@/lib/editor-views";
 import type { Text } from "@codemirror/state";
@@ -1652,6 +1653,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   resetEditorState: () => {
+    notifyEditorReset();
+    for (const path of get().openFiles.keys()) cancelSave(path);
     for (const tabId of get().tabs) pendingNavigationVersionByTabId.delete(tabId.id);
     pendingDocs.clear();
     for (const timer of pendingFlushTimers.values()) clearTimeout(timer);

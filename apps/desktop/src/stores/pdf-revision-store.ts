@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { onEditorReset } from "@/lib/editor-reset";
 
 /**
  * A counter per PDF path, bumped when something rewrote the file in place —
@@ -23,3 +24,5 @@ export const usePdfRevisionStore = create<PdfRevisionState>((set) => ({
 export function usePdfRevision(path: string): number {
   return usePdfRevisionStore((state) => state.revisions[path] ?? 0);
 }
+
+onEditorReset(() => usePdfRevisionStore.setState({ revisions: {} }));

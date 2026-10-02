@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { editorGeneration, onEditorReset } from "@/lib/editor-reset";
 import { showEditorNotice } from "@/components/editor-area/editor-notice-store";
 import {
   firstError,
@@ -61,7 +62,11 @@ function rememberRoot(source: string, root: string) {
 const running = new Map<string, Promise<LatexCompileResult>>();
 const rerun = new Set<string>();
 
-async function runCompile(source: string, key: string): Promise<LatexCompileResult> {
+async function runCompile(
+  source: string,
+  key: string,
+  generation: number,
+): Promise<LatexCompileResult> {
   const previous = useLatexCompileStore.getState().builds[key];
   setBuild(key, {
     state: "compiling",
@@ -85,6 +90,7 @@ async function runCompile(source: string, key: string): Promise<LatexCompileResu
     };
   }
 
+  if (generation !== editorGeneration()) return result;
   if (result.root) rememberRoot(source, result.root);
   const build: LatexBuild = {
     state: result.status === "ok" ? "ok" : result.status,
@@ -106,13 +112,15 @@ async function runCompile(source: string, key: string): Promise<LatexCompileResu
 /** Compile the document `source` belongs to. A call during a running compile
  *  of the same root queues one rerun and resolves with the running result. */
 export function compileLatexSource(source: string): Promise<LatexCompileResult> {
+  const generation = editorGeneration();
   const key = keyFor(source);
   const inFlight = running.get(key);
   if (inFlight) {
     rerun.add(key);
     return inFlight;
   }
-  const promise = runCompile(source, key).finally(() => {
+  const promise = runCompile(source, key, generation).finally(() => {
+    if (generation !== editorGeneration() || running.get(key) !== promise) return;
     running.delete(key);
     if (rerun.delete(key)) void compileLatexSource(source);
   });
@@ -133,9 +141,11 @@ function pdfTabIds(pdfPath: string): string[] {
 }
 
 async function resolveRoot(source: string): Promise<string | null> {
+  const generation = editorGeneration();
   const known = useLatexCompileStore.getState().roots[source];
   if (known) return known;
   const root = await tauri.latexRoot(source);
+  if (generation !== editorGeneration()) return null;
   if (root) rememberRoot(source, root);
   return root;
 }
@@ -152,7 +162,9 @@ function refocusSourcePane(sourceTabId: string) {
  * PDF is missing or the source was just edited) and open it beside the source.
  */
 export async function toggleLatexPreview(source: string, sourceTabId: string): Promise<void> {
+  const generation = editorGeneration();
   const root = await resolveRoot(source);
+  if (generation !== editorGeneration()) return;
   if (!root) {
     showEditorNotice(
       "No main document found. Add `% !TEX root = main.tex` at the top of this file.",
@@ -169,8 +181,11 @@ export async function toggleLatexPreview(source: string, sourceTabId: string): P
   }
 
   await saveNow(source);
+  if (generation !== editorGeneration()) return;
   const result = await compileLatexSource(source);
+  if (generation !== editorGeneration()) return;
   const exists = result.status === "ok" || (await tauri.fileExists(pdfPath));
+  if (generation !== editorGeneration()) return;
   if (!exists) {
     reportFailure(result, sourceTabId);
     return;
@@ -182,8 +197,11 @@ export async function toggleLatexPreview(source: string, sourceTabId: string): P
 
 /** `Cmd+Enter`: save now and compile, whether or not the preview is open. */
 export async function compileLatexNow(source: string, sourceTabId: string): Promise<void> {
+  const generation = editorGeneration();
   await saveNow(source);
+  if (generation !== editorGeneration()) return;
   const result = await compileLatexSource(source);
+  if (generation !== editorGeneration()) return;
   if (result.status !== "ok") reportFailure(result, sourceTabId);
 }
 
@@ -208,13 +226,16 @@ export function ensureLatexAutoCompile() {
   autoCompileWired = true;
   onFileSaved((path) => {
     if (!isLatexSourcePath(path)) return;
+    const generation = editorGeneration();
     void resolveRoot(path).then((root) => {
+      if (generation !== editorGeneration()) return;
       if (!root || pdfTabIds(pdfPathForRoot(root)).length === 0) return;
       const pending = pendingAuto.get(root);
       if (pending) clearTimeout(pending);
       pendingAuto.set(
         root,
         setTimeout(() => {
+          if (generation !== editorGeneration()) return;
           pendingAuto.delete(root);
           void compileLatexSource(path);
         }, AUTO_COMPILE_DELAY_MS),
@@ -222,3 +243,11 @@ export function ensureLatexAutoCompile() {
     });
   });
 }
+
+onEditorReset(() => {
+  for (const timer of pendingAuto.values()) clearTimeout(timer);
+  pendingAuto.clear();
+  running.clear();
+  rerun.clear();
+  useLatexCompileStore.setState({ builds: {}, roots: {} });
+});

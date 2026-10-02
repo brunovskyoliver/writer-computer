@@ -9,7 +9,9 @@
 
 ## Done
 
-- Review 04: Bound image height cache retention ([ticket](SPECs/Agent/worksheet-review-04-image-height-cache.md)). Full 1,409-test frontend suite and browser image checks pass.
+- Review 05: Reset LaTeX records with the editor workspace ([ticket](SPECs/Agent/worksheet-review-05-latex-reset.md)). Reset, save-race and stale-completion regressions pass.
+
+- Review 04: Bound image height cache retention ([ticket](SPECs/Agent/worksheet-review-04-image-height-cache.md)). `df95150`. Full 1,409-test frontend suite and browser image checks pass.
 
 - Review 03: Bound LaTeX compiler output ([ticket](SPECs/Agent/worksheet-review-03-compiler-output.md)). `94115a7`. Bounded live buffers and process lifecycle regression checks pass.
 
@@ -119,7 +121,6 @@
 
 ## Up Next
 
-- Review 05: Reset LaTeX records with the editor workspace ([ticket](SPECs/Agent/worksheet-review-05-latex-reset.md)).
 - Review 06: Serialize LaTeX builds by resolved root ([ticket](SPECs/Agent/worksheet-review-06-compile-root-lock.md)).
 - Review 07: Abort LaTeX commands after a failed save ([ticket](SPECs/Agent/worksheet-review-07-compile-save-failure.md)).
 - Review 08: Refresh roots when choosing LaTeX previews ([ticket](SPECs/Agent/worksheet-review-08-preview-root.md)).

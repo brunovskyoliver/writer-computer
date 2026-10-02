@@ -112,3 +112,7 @@ updateCursorPos: (path, pos) => {
 ## Settings reloads and local edits
 
 The global config watcher notifies every window, including the window that wrote the setting. `settings-store.loadSettings()` waits for pending writes, retries reads overtaken by a local mutation, and discards responses from older reload requests. Keep those guards when changing settings persistence: a watcher response must never overwrite a newer optimistic edit. Reloads flow through `hydrateFromBackend`, which skips equal values, including equal list contents, before publishing state or applying theme effects.
+
+## Editor workspace reset
+
+Path-owned caches register synchronous cleanup with `lib/editor-reset.ts` instead of importing a store that already depends on them. `editor-store.resetEditorState` advances the shared generation before clearing records or publishing tabs. Async root lookups, builds, commands and file writes capture that generation before awaiting; stale completions must not update new workspace state, notify saved-file listeners, open tabs or clean up a newer operation with the same key. Keep window-lifetime subscriptions registered once across resets.

@@ -2,6 +2,8 @@
 
 ## 2026-10-02
 
+- Closing a workspace clears LaTeX build records and PDF revisions, cancels pending preview compiles, and ignores old build, lookup and save completions.
+
 - Image height hints now use a bounded cache and compact keys for embedded images, keeping scrolling stable without retaining encoded image data in metadata.
 
 - LaTeX compilation now bounds retained logs and diagnostics while draining compiler output. Early errors stay available, and oversized output reports that it was truncated.

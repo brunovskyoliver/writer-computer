@@ -1,3 +1,4 @@
+import { editorGeneration } from "./editor-reset";
 import { useSettingsStore } from "@/stores/settings-store";
 import type { OpenFile } from "@/hooks/editor-api";
 import { serializeDocument } from "@/lib/frontmatter";
@@ -212,6 +213,7 @@ async function performSave(
     return "clean";
   }
 
+  const generation = editorGeneration();
   const full = serializeForSave(file);
   const savedSeq = file.editSeq;
   let shouldReschedule = false;
@@ -220,6 +222,7 @@ async function performSave(
   try {
     await tauri.writeFile(path, full);
 
+    if (generation !== editorGeneration()) return "clean";
     const latestFile = store.getOpenFile(path);
     if (!latestFile) return "clean";
 
@@ -232,7 +235,7 @@ async function performSave(
   } catch (err) {
     console.error(`[save] Failed to save ${path}:`, err);
     const message = err instanceof Error ? err.message : String(err);
-    store.setSaveError(path, message);
+    if (generation === editorGeneration()) store.setSaveError(path, message);
     outcome = "failed";
   } finally {
     controller.inFlight = null;
