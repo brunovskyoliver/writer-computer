@@ -164,7 +164,7 @@ const documents = new Map<string, CacheEntry>();
 
 /**
  * Take a reference to the document at `path`, loading it if this is the first.
- * Every successful `acquirePdf` must be paired with exactly one `releasePdf`.
+ * Every `acquirePdf`, including a failed load, needs exactly one `releasePdf`.
  *
  * The entry holds the in-flight promise, not the resolved document, so two
  * tabs opening the same PDF at once share one parse instead of racing.
@@ -323,8 +323,8 @@ export async function searchPdfText(
   matchThroughCache();
   if (!truncated && !entry.complete && !isCancelled()) {
     const result = await acquirePdf(path);
-    if (!result.ok) return null;
     try {
+      if (!result.ok) return null;
       let release!: () => void;
       const gate = new Promise<void>((resolve) => {
         release = resolve;

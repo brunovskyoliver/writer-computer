@@ -2,7 +2,7 @@
 
 ## In Progress
 
-- Review 02: Release failed PDF search acquisitions ([ticket](SPECs/Agent/worksheet-review-02-pdf-search-release.md)).
+- Review 03: Bound LaTeX compiler output ([ticket](SPECs/Agent/worksheet-review-03-compiler-output.md)).
 
 - PDF viewing, highlighting and quote links: [`SPECs/pdf-quote-links/spec.md`](SPECs/pdf-quote-links/spec.md) — PDFs open from the sidebar in their own tab and split beside a note; selecting text or dragging a region raises a quote button that inserts a Markdown blockquote plus an anchored link, and clicking that link reveals the PDF at the anchored passage, reusing an already-open view. Spec approved: notes are the only store for a quote, so showing every prior highlight on a reopened PDF is a non-goal. Ready for planning.
 - Reveal-in-sidebar + residual external-watcher misses: [`SPECs/reveal-in-sidebar-and-external-watcher-spec.md`](SPECs/reveal-in-sidebar-and-external-watcher-spec.md) — keep the explicit tab-context-menu "Reveal in sidebar" action working, leave ordinary file opens from expanding the Everything tree, and characterize the remaining external-file-watcher miss cases through a logging + manual-repro pass before patching further.
@@ -11,7 +11,9 @@
 
 ## Done
 
-- Native shutdown text saves ([ticket](SPECs/Agent/worksheet-review-21-native-shutdown.md)): the existing drawing-only quit handshake must also drain pending clipboard edits and save dirty text before acknowledging closure. All 1,402 frontend tests pass; final Frontend, Systems and QA review approved.
+- Review 02: Release failed PDF search acquisitions ([ticket](SPECs/Agent/worksheet-review-02-pdf-search-release.md)). Balanced failure-path references; PDF regression checks pass.
+
+- Native shutdown text saves ([ticket](SPECs/Agent/worksheet-review-21-native-shutdown.md)): the existing drawing-only quit handshake must also drain pending clipboard edits and save dirty text before acknowledging closure. `a922fd3`. All 1,402 frontend tests pass; final Frontend, Systems and QA review approved.
 
 - Review 01: Save dirty text before closing or switching a workspace ([ticket](SPECs/Agent/worksheet-review-01-workspace-save.md), [spec](SPECs/review-fixes/spec.md)). `f9966c7`. All 1,394 frontend tests and browser gate/Vim checks pass.
 
@@ -115,7 +117,6 @@
 
 ## Up Next
 
-- Review 03: Bound LaTeX compiler output ([ticket](SPECs/Agent/worksheet-review-03-compiler-output.md)).
 - Review 04: Bound image height cache retention ([ticket](SPECs/Agent/worksheet-review-04-image-height-cache.md)).
 - Review 05: Reset LaTeX records with the editor workspace ([ticket](SPECs/Agent/worksheet-review-05-latex-reset.md)).
 - Review 06: Serialize LaTeX builds by resolved root ([ticket](SPECs/Agent/worksheet-review-06-compile-root-lock.md)).

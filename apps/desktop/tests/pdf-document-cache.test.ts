@@ -1,10 +1,11 @@
-import { beforeEach, expect, test, vi } from "vite-plus/test";
+import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
 
 const fixture = vi.hoisted(() => ({
   destroy: vi.fn(async () => {}),
   loads: 0,
   terminated: 0,
   spawned: 0,
+  loadError: null as Error | null,
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({ convertFileSrc: (path: string) => `asset://${path}` }));
@@ -22,11 +23,23 @@ vi.mock("pdfjs-dist", () => ({
   GlobalWorkerOptions: {} as { workerSrc?: string; workerPort?: { terminate(): void } | null },
   getDocument: () => {
     fixture.loads += 1;
-    return { promise: Promise.resolve({ numPages: 3 }), destroy: fixture.destroy };
+    return {
+      promise: fixture.loadError
+        ? Promise.reject(fixture.loadError)
+        : Promise.resolve({ numPages: 3 }),
+      destroy: fixture.destroy,
+    };
   },
 }));
 
-import { acquirePdf, cachedPdfCount, pdfRetentionSnapshot, releasePdf } from "../src/lib/pdf";
+import {
+  acquirePdf,
+  cachedPdfCount,
+  pdfRetentionSnapshot,
+  releasePdf,
+  searchPdfText,
+  clearPdfTextCache,
+} from "../src/lib/pdf";
 
 const PATH = "/ws/paper.pdf";
 
@@ -36,7 +49,49 @@ beforeEach(async () => {
   fixture.loads = 0;
   fixture.terminated = 0;
   fixture.spawned = 0;
+  fixture.loadError = null;
+  clearPdfTextCache();
   vi.clearAllMocks();
+});
+afterEach(() => vi.restoreAllMocks());
+
+test.each(["InvalidPDFException", "PasswordException", "MissingPDFException"])(
+  "repeated failed %s searches release their document and let the worker idle out",
+  async (name) => {
+    vi.useFakeTimers();
+    fixture.loadError = Object.assign(new Error("unreadable PDF"), { name });
+    try {
+      for (let i = 0; i < 5; i++) {
+        expect(
+          await searchPdfText(PATH, "word", {
+            path: PATH,
+            relativePath: "paper.pdf",
+            modifiedAt: 0,
+          }),
+        ).toBeNull();
+        expect(cachedPdfCount()).toBe(0);
+      }
+      expect(fixture.destroy).toHaveBeenCalledTimes(5);
+      await vi.advanceTimersByTimeAsync(31_000);
+      expect(pdfRetentionSnapshot().workerAlive).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  },
+);
+
+test("a failed search releases only its reference while a tab still holds the failed load", async () => {
+  fixture.loadError = new Error("bad PDF");
+  const tab = await acquirePdf(PATH);
+  expect(tab.ok).toBe(false);
+  expect(
+    await searchPdfText(PATH, "word", { path: PATH, relativePath: "paper.pdf", modifiedAt: 0 }),
+  ).toBeNull();
+  expect(cachedPdfCount()).toBe(1);
+  expect(fixture.destroy).not.toHaveBeenCalled();
+  await releasePdf(PATH);
+  expect(cachedPdfCount()).toBe(0);
+  expect(fixture.destroy).toHaveBeenCalledOnce();
 });
 
 /**
