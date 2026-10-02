@@ -21,6 +21,12 @@ app → bridge:  {"writer_bridge_ready": {"version": "<cargo pkg version>"}}
   same release).
 - On `writer_bridge_error` the bridge prints `message` to stderr and exits 3.
 - On handshake success the bridge stops interpreting bytes entirely.
+- A rejected handshake or disconnected peer releases the app's connection
+  task record. Normal connection exits also fail that connection's pending
+  calls with `window_unavailable`; unrelated connections keep running.
+- Admission and registration share the registry lock with cleanup. A
+  connection finishing immediately cannot leave a completed task registered,
+  and a stream accepted after settings disable is dropped before task spawn.
 
 ## Data phase
 
@@ -36,6 +42,8 @@ framing logic.
 - App side: each accepted connection runs one `rmcp::serve_server` over
   `tokio::io::split(stream)`. Socket EOF or disable → the service is dropped
   and pending tool calls fail with `server_disabled`/`window_unavailable`.
+- Disable and quit drain and abort registered tasks and fail their pending
+  calls; aborted tasks do not need to reach the normal disconnect epilogue.
 
 ## Client configuration snippet
 

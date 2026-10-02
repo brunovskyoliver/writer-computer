@@ -73,17 +73,16 @@ where
 }
 
 /// One accepted connection = one bridge session. Handshake, serve rmcp over
-/// the split stream until EOF or abort, then fail whatever this connection
-/// still had in flight and unregister.
+/// the split stream until EOF. Handshake failure and normal serving exits
+/// both unregister and fail this connection's pending calls; stop owns aborts.
 #[cfg(unix)]
 pub async fn serve_connection(app: tauri::AppHandle, stream: tokio::net::UnixStream, conn_id: u64) {
-    let Ok(buffered) = handshake(stream).await else {
-        return;
-    };
-    let service = WriterMcpServer::new(app.clone(), conn_id);
-    let (reader, writer) = tokio::io::split(buffered);
-    if let Ok(running) = rmcp::serve_server(service, (reader, writer)).await {
-        let _ = running.waiting().await;
+    if let Ok(buffered) = handshake(stream).await {
+        let service = WriterMcpServer::new(app.clone(), conn_id);
+        let (reader, writer) = tokio::io::split(buffered);
+        if let Ok(running) = rmcp::serve_server(service, (reader, writer)).await {
+            let _ = running.waiting().await;
+        }
     }
     crate::mcp::fail_pending_for_conn(app.state::<AppState>().inner(), conn_id);
 }
@@ -154,6 +153,27 @@ mod tests {
             let json: serde_json::Value = serde_json::from_slice(&reply).unwrap();
             assert!(json.get("writer_bridge_error").is_some());
             assert!(task.await.unwrap().is_err());
+        });
+    }
+
+    #[test]
+    fn rejects_a_peer_that_disconnects_before_hello() {
+        block_on(async {
+            let (server, client) = tokio::io::duplex(4096);
+            drop(client);
+            assert!(handshake(server).await.is_err());
+        });
+    }
+
+    #[test]
+    fn rejects_a_peer_that_disconnects_before_acknowledgement() {
+        block_on(async {
+            let (server, mut client) = tokio::io::duplex(4096);
+            let hello =
+                format!("{{\"writer_bridge_hello\":{{\"version\":\"{BRIDGE_VERSION}\"}}}}\n");
+            client.write_all(hello.as_bytes()).await.unwrap();
+            drop(client);
+            assert!(handshake(server).await.is_err());
         });
     }
 }

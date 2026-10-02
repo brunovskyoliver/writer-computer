@@ -298,17 +298,20 @@ async fn accept_loop(app: tauri::AppHandle, listener: tokio::net::UnixListener) 
         match listener.accept().await {
             Ok((stream, _)) => {
                 let app_state = app.state::<AppState>();
-                let conn_id = {
-                    let mut mcp = app_state.mcp.lock();
-                    mcp.next_conn_id += 1;
-                    mcp.next_conn_id
-                };
+                // Register before cleanup can run. Spawn never polls inline;
+                // the connection's cleanup waits for this same mutex.
+                let mut mcp = app_state.mcp.lock();
+                if !mcp.enabled {
+                    return;
+                }
+                mcp.next_conn_id += 1;
+                let conn_id = mcp.next_conn_id;
                 let handle = tauri::async_runtime::spawn(bridge::serve_connection(
                     app.clone(),
                     stream,
                     conn_id,
                 ));
-                app_state.mcp.lock().connections.insert(conn_id, handle);
+                mcp.connections.insert(conn_id, handle);
             }
             Err(_) => return,
         }
@@ -646,6 +649,53 @@ mod tests {
 
     fn canonical(dir: &TempDir) -> PathBuf {
         dir.path().canonicalize().unwrap()
+    }
+
+    #[test]
+    fn connection_cleanup_fails_its_calls_and_preserves_other_connections() {
+        let app_state = AppState::new();
+        let (sender_a, mut receiver_a) = oneshot::channel();
+        let (sender_b, mut receiver_b) = oneshot::channel();
+        let (sender_other, mut receiver_other) = oneshot::channel();
+        {
+            let mut mcp = app_state.mcp.lock();
+            mcp.connections
+                .insert(1, tauri::async_runtime::spawn(async {}));
+            mcp.connections
+                .insert(2, tauri::async_runtime::spawn(async {}));
+            for (id, conn_id, sender) in
+                [(10, 1, sender_a), (11, 1, sender_b), (12, 2, sender_other)]
+            {
+                mcp.pending.insert(
+                    id,
+                    PendingCall {
+                        conn_id,
+                        label: "main".into(),
+                        sender,
+                    },
+                );
+            }
+        }
+
+        fail_pending_for_conn(&app_state, 1);
+
+        for receiver in [&mut receiver_a, &mut receiver_b] {
+            let error = receiver.try_recv().unwrap().unwrap_err();
+            assert_eq!(error.kind, McpErrorKind::WindowUnavailable);
+            assert_eq!(error.detail, "bridge connection closed");
+        }
+        fail_pending_for_conn(&app_state, 1);
+        {
+            let mcp = app_state.mcp.lock();
+            assert_eq!(mcp.connections.len(), 1);
+            assert!(mcp.connections.contains_key(&2));
+            assert_eq!(mcp.pending.len(), 1);
+            assert!(mcp.pending.contains_key(&12));
+        }
+        assert_eq!(
+            receiver_other.try_recv().unwrap_err(),
+            oneshot::error::TryRecvError::Empty
+        );
     }
 
     // --- workspace resolution ------------------------------------------------

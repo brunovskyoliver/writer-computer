@@ -55,6 +55,9 @@ handshake fails. It never hangs and never launches the app.
   this machine; no network port is opened.
 - `writer mcp` performs a versioned handshake on connect; a build mismatch
   between the CLI and the running app is reported, not silently forwarded.
+- Rejected handshakes and disconnected clients release their connection
+  records. Disconnect fails that client's pending calls while other clients
+  keep running; disabling the server drains all connections.
 - Every agent write goes through the same save path as an editor save, so
   the sidebar, search index, recents, and change tracking behave identically.
 - On quit the socket file is removed; on relaunch a stale socket from a
