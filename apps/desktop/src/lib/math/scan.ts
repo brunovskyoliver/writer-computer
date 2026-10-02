@@ -17,6 +17,12 @@ export function matchBrace(text: string, openIndex: number): number | null {
       i += 1;
       continue;
     }
+    if (text[i] === "%") {
+      const newline = text.indexOf("\n", i + 1);
+      if (newline === -1) return null;
+      i = newline;
+      continue;
+    }
     if (text[i] === "{") depth += 1;
     else if (text[i] === "}") {
       depth -= 1;

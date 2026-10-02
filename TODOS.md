@@ -9,7 +9,9 @@
 
 ## Done
 
-- Review 09: Preserve surrounding source when splitting aligned math ([ticket](SPECs/Agent/worksheet-review-09-math-split.md)). Source-preserving command, display validation and undo checks pass; full 1,496-test frontend suite passes.
+- Review 10: Preserve TeX syntax stars during tidy ([ticket](SPECs/Agent/worksheet-review-10-tidy-stars.md)). QA approved; full 1,525-test frontend suite passes.
+
+- Review 09: Preserve surrounding source when splitting aligned math ([ticket](SPECs/Agent/worksheet-review-09-math-split.md)). `4dd2be5`. Source-preserving command, display validation and undo checks pass; full 1,496-test frontend suite passes.
 
 - Review 08: Refresh roots when choosing LaTeX previews ([ticket](SPECs/Agent/worksheet-review-08-preview-root.md)). `2f436ae`. Actual-root preview, queue ownership and reset regressions pass; full 1,481-test frontend suite passes.
 
@@ -129,7 +131,6 @@
 
 ## Up Next
 
-- Review 10: Preserve TeX syntax stars during tidy ([ticket](SPECs/Agent/worksheet-review-10-tidy-stars.md)).
 - Review 11: Deduplicate nested matrix separator edits ([ticket](SPECs/Agent/worksheet-review-11-tidy-nesting.md)).
 - Review 12: Preserve argument and text spacing during tidy ([ticket](SPECs/Agent/worksheet-review-12-tidy-text.md)).
 - Review 13: Compare bare math expressions by value ([ticket](SPECs/Agent/worksheet-review-13-math-expression-check.md)).

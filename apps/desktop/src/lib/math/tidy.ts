@@ -59,33 +59,133 @@ function cellEnvBodies(formula: string): Array<{ from: number; to: number }> {
   return bodies;
 }
 
-/** The `\text{…}` spans — their content is prose and stays literal. */
-function proseGroups(formula: string): Array<{ from: number; to: number }> {
-  const groups: Array<{ from: number; to: number }> = [];
-  let at = 0;
-  for (;;) {
-    const open = formula.indexOf("\\text{", at);
-    if (open === -1) break;
-    const close = matchBrace(formula, open + "\\text".length);
-    if (close === null) break;
-    groups.push({ from: open, to: close + 1 });
-    at = close + 1;
-  }
-  return groups;
+type CommandRole = { operand: boolean; literalArgs?: number };
+const COMMAND_ROLES: Record<string, CommandRole | undefined> = {
+  ...Object.fromEntries(
+    (
+      "alpha beta gamma delta epsilon varepsilon zeta eta theta vartheta iota kappa lambda mu nu xi pi varpi rho varrho sigma varsigma tau upsilon phi varphi chi psi omega " +
+      "Gamma Delta Theta Lambda Xi Pi Sigma Upsilon Phi Psi Omega infty ell imath jmath partial nabla " +
+      "sin cos tan cot sec csc sinh cosh tanh coth arcsin arccos arctan log ln exp lim max min sup inf sum prod int oint"
+    )
+      .split(" ")
+      .map((name) => [name, { operand: true }]),
+  ),
+  ...Object.fromEntries(
+    "text textnormal textrm textsf texttt textbf textit textup textmd textsc mbox operatorname"
+      .split(" ")
+      .map((name) => [name, { operand: true, literalArgs: 1 }]),
+  ),
+  textcolor: { operand: true, literalArgs: 1 },
+  href: { operand: true, literalArgs: 1 },
+  url: { operand: true, literalArgs: 1 },
+  tag: { operand: false, literalArgs: 1 },
+  label: { operand: false, literalArgs: 1 },
+  ref: { operand: true, literalArgs: 1 },
+  eqref: { operand: true, literalArgs: 1 },
+  color: { operand: false, literalArgs: 1 },
+  hspace: { operand: false, literalArgs: 1 },
+  vspace: { operand: false, literalArgs: 1 },
+  rule: { operand: false, literalArgs: 2 },
+  begin: { operand: false, literalArgs: 1 },
+  end: { operand: false, literalArgs: 1 },
+};
+
+const letter = (char: string | undefined) => char !== undefined && /[A-Za-z]/.test(char);
+const operandChar = (char: string | undefined) => char !== undefined && /[\p{L}\p{N}]/u.test(char);
+
+function skipSpace(formula: string, at: number): number {
+  while (at < formula.length && /\s/.test(formula[at]!)) at += 1;
+  return at;
 }
 
-const inSpans = (spans: Array<{ from: number; to: number }>, pos: number) =>
-  spans.some((span) => pos >= span.from && pos < span.to);
+/** TeX ignores comments as well as whitespace between a command and its argument. */
+function skipTrivia(formula: string, at: number, mask: Uint8Array): number {
+  at = skipSpace(formula, at);
+  while (formula[at] === "%") {
+    const newline = formula.indexOf("\n", at + 1);
+    const to = newline === -1 ? formula.length : newline;
+    mask.fill(2, at, to);
+    at = skipSpace(formula, to);
+  }
+  return at;
+}
 
-/** A `*` at `pos` is a conjugate marker, not multiplication, when it follows
- *  `^` directly or opens the `^{…}` group (`^{*}`). */
-function isConjugateStar(formula: string, pos: number): boolean {
-  let prev = pos - 1;
-  while (prev >= 0 && (formula[prev] === " " || formula[prev] === "\t")) prev -= 1;
-  if (prev < 0) return false;
-  if (formula[prev] === "^") return true;
-  if (formula[prev] === "{") return prev > 0 && formula[prev - 1] === "^";
-  return false;
+/** Invocation-local mask: 1 is literal syntax, 2 is comment text. */
+function starMask(formula: string): Uint8Array {
+  const mask = new Uint8Array(formula.length);
+  for (let i = 0; i < formula.length; i += 1) {
+    if (formula[i] === "%") {
+      const newline = formula.indexOf("\n", i + 1);
+      const to = newline === -1 ? formula.length : newline;
+      mask.fill(2, i, to);
+      i = to - 1;
+    } else if (formula[i] === "^") {
+      const at = skipTrivia(formula, i + 1, mask);
+      if (formula[at] === "*") mask[at] = 1;
+      if (formula[at] === "{") {
+        const to = (matchBrace(formula, at) ?? formula.length - 1) + 1;
+        mask.fill(1, i, to);
+        i = to - 1;
+      }
+    } else if (formula[i] === "\\") {
+      let end = i + 1;
+      while (letter(formula[end])) end += 1;
+      if (end === i + 1) {
+        mask.fill(1, i, Math.min(i + 2, formula.length));
+        i += 1;
+        continue;
+      }
+      const name = formula.slice(i + 1, end);
+      const role = COMMAND_ROLES[name];
+      let at = skipTrivia(formula, end, mask);
+      const starred = formula[at] === "*" && !(role?.operand && !role.literalArgs);
+      if (starred) {
+        mask[at] = 1;
+        at = skipTrivia(formula, at + 1, mask);
+      }
+      let args = role?.literalArgs ?? (starred ? Infinity : 0);
+      let consumed = end;
+      for (let arg = 0; arg < args && formula[at] === "{"; arg += 1) {
+        const to = (matchBrace(formula, at) ?? formula.length - 1) + 1;
+        if (arg === 0 && name === "begin" && COLSPEC_ENV.has(formula.slice(at + 1, to - 1)))
+          args += 1;
+        mask.fill(1, at, to);
+        consumed = to;
+        at = skipTrivia(formula, to, mask);
+      }
+      i = consumed - 1;
+    }
+  }
+  return mask;
+}
+
+/** Conservative source-token boundaries. Unknown suffix commands stay literal. */
+function betweenOperands(formula: string, pos: number, mask: Uint8Array): boolean {
+  let left = pos - 1;
+  while (left >= 0 && /\s/.test(formula[left]!)) left -= 1;
+  if (left < 0 || mask[left] === 2) return false;
+  const lhs = formula[left];
+  if (!operandChar(lhs) && !"}])|".includes(lhs!)) return false;
+  if (letter(lhs)) {
+    let start = left;
+    while (letter(formula[start - 1])) start -= 1;
+    let slash = start - 1;
+    while (formula[slash] === "\\") slash -= 1;
+    if ((start - 1 - slash) % 2 === 1) {
+      const role = COMMAND_ROLES[formula.slice(start, left + 1)];
+      if (!role?.operand || role.literalArgs) return false;
+    }
+  }
+  let right = skipSpace(formula, pos + 1);
+  if (formula[right] === "+" || formula[right] === "-") right = skipSpace(formula, right + 1);
+  if (right >= formula.length || mask[right] === 2) return false;
+  const rhs = formula[right];
+  if (operandChar(rhs) || "{([|".includes(rhs!)) return true;
+  if (rhs !== "\\") return false;
+  let end = right + 1;
+  while (letter(formula[end])) end += 1;
+  if (end === right + 1) return formula[end] === "{";
+  return COMMAND_ROLES[formula.slice(right + 1, end)]?.operand !== false;
 }
 
 export interface TidyResult {
@@ -96,7 +196,7 @@ export interface TidyResult {
 
 export function tidyFormula(formula: string): TidyResult {
   const bodies = cellEnvBodies(formula);
-  const prose = proseGroups(formula);
+  const protectedStars = starMask(formula);
 
   // Positions that become `&` / `\cdot` are collected first, then the output
   // is rebuilt once — mid-scan rewrites would shift every later offset.
@@ -115,9 +215,7 @@ export function tidyFormula(formula: string): TidyResult {
 
   for (let i = 0; i < formula.length; i += 1) {
     if (formula[i] !== "*") continue;
-    if (i > 0 && formula[i - 1] === "\\") continue; // \* stays literal
-    if (inSpans(prose, i)) continue;
-    if (isConjugateStar(formula, i)) continue;
+    if (protectedStars[i] || !betweenOperands(formula, i, protectedStars)) continue;
     stars.push(i);
   }
 

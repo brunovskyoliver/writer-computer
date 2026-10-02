@@ -46,17 +46,23 @@ untouched.
 Command on the enclosing Math node (or every Math node intersecting a
 selection):
 
-- inside a delimited matrix environment (`pmatrix`, `bmatrix`, `Bmatrix`,
-  `vmatrix`, `Vmatrix`, `matrix`, `smallmatrix`, `cases`, `dcases`,
-  `rcases`), the spacing commands `\;` `\,` `\:` used between row elements
-  become `&`;
-- a `*` between operands becomes `\cdot` — except the conjugate forms
-  `^*`, `^{*}`, and a `*` directly after `^` or inside a `^{…}` exponent
-  group, which stay.
-
-Nothing else is touched. Zero changes → a notice says so; otherwise the
-notice reports the count. One undo step. Palette entry + Math context
-submenu.
+- inside a matrix cell environment (`pmatrix`, `bmatrix`, `Bmatrix`,
+  `vmatrix`, `Vmatrix`, `matrix`, their starred variants, `smallmatrix`,
+  `array` or `subarray`), the spacing commands `\;` `\,` `\:` used between
+  row elements become `&`. `cases` and aligned environments keep their
+  deliberate spacing;
+- a `*` between plausible operands becomes `\cdot`. Conjugate stars,
+  complete superscript groups, starred command suffixes, environment names,
+  column specifications, text/operator-name arguments and known metadata
+  arguments (including URLs) stay unchanged. Comments between commands or
+  superscripts and their argument groups do not break protection. Unknown starred macros and their immediate
+  argument groups also stay unchanged;
+- unescaped `%` comments keep their stars; commented braces do not affect
+  protected argument boundaries.
+  Escaped percent signs remain literal.
+  Nothing else is touched. Zero changes → a notice says so; otherwise the
+  notice reports the count. One undo step. Palette entry + Math context
+  submenu.
 
 ## FR-5 Math: align steps / split into steps (commands)
 
