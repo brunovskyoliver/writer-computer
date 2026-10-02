@@ -2,6 +2,8 @@
 
 ## 2026-10-02
 
+- Math checks require finite evidence before reporting equality, recover past singular samples and report indeterminate when too few samples work. Large complex comparisons avoid overflow-driven false matches.
+
 - Math step checks compare bare expression values directly. Equation scaling applies only to two single equations; mixed forms and equation chains report unsupported.
 
 - Matrix tidy preserves spacing inside text, fractions, script groups, optional root arguments, column specifications and comments. Nested environments retain their own cell grammar.

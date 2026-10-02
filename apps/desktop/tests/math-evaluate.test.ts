@@ -143,6 +143,42 @@ describe("checkEquivalent", () => {
     expect(checkEquivalent("x=3", "-2x=-6").kind).toBe("equal");
   });
 
+  it.each(["\\ln(0)", "\\frac{1}{0}", "\\frac{1}{x-x}", "\\frac{1}{x-x}=0"])(
+    "requires usable evidence even for identical inputs: %s",
+    (source) => {
+      expect(checkEquivalent(source, source).kind).toBe("open");
+    },
+  );
+
+  it("reports insufficient evidence when only two candidate assignments are finite", () => {
+    const denominator = [1.7, 3.7, -1.1, -2.3, -0.77, 2.9].map((p) => `(x-(${p}))`).join("");
+    const source = `1/(${denominator})`;
+    expect(checkEquivalent(source, source).kind).toBe("open");
+  });
+
+  it("recovers enough evidence past a singular sample", () => {
+    expect(checkEquivalent("1/(x-1.7)", "1/(x-1.7)").kind).toBe("equal");
+    expect(checkEquivalent("x-x", "0").kind).toBe("equal");
+    expect(checkEquivalent("x=x", "2x=2x").kind).toBe("equal");
+  });
+
+  it("finds a counterexample after skipping a singularity", () => {
+    expect(checkEquivalent("1/(x-1.7)", "1/(x-1.7)+(x-3.7)(x+1.1)").kind).toBe("differs");
+  });
+
+  it("does not certify equality when finite complex magnitudes overflow", () => {
+    const source = "1.4*10^{308}(1+j)";
+    expect([val(source).re, val(source).im].every(Number.isFinite)).toBe(true);
+    expect(checkEquivalent(source, `-(${source})`).kind).toBe("differs");
+  });
+
+  it.each([
+    ["10^{308}=0", "0.1=0"],
+    ["1=0", "10^{200}=0"],
+  ])("does not count an invalid ratio between finite residuals: %s versus %s", (a, b) => {
+    expect(checkEquivalent(a, b).kind).toBe("open");
+  });
+
   it("flags a dropped sign", () => {
     expect(checkEquivalent("(x-1)(x+1)", "x^2 - 2x - 1").kind).toBe("differs");
   });

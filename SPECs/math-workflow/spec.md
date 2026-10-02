@@ -113,8 +113,10 @@ within relative epsilon. Two single equations compare `lhs − rhs` residuals
 up to a constant nonzero factor, allowing transformations such as
 `2x = 6` to `x = 3`. Mixed expression/equation inputs and equation chains
 report unsupported rather than a result. Free variables get deterministic
-sample values (three trials); a counterexample reports "differs" with its
-values. Unparseable or open-ended formulas report why. This is a numeric
+sample values. Equality requires three usable finite comparisons (one for
+closed inputs), trying up to eight candidate assignments past singularities.
+Equation scaling ratios must be finite and nonzero. Insufficient evidence
+reports indeterminate; a counterexample reports "differs" with its values. Unparseable or open-ended formulas report why. This is a numeric
 check, not a symbolic proof.
 
 ## FR-8 ` ```plot ` fenced block

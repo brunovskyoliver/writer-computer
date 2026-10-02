@@ -556,8 +556,14 @@ const EPS = 1e-9;
 
 /** Relative comparison tolerant of float noise. */
 export function sameValue(a: Complex, b: Complex): boolean {
-  const scale = Math.max(1, abs(a), abs(b));
-  return abs(sub(a, b)) <= EPS * scale;
+  if (![a.re, a.im, b.re, b.im].every(Number.isFinite)) return false;
+  const scale = Math.max(1, Math.abs(a.re), Math.abs(a.im), Math.abs(b.re), Math.abs(b.im));
+  const ar = a.re / scale,
+    ai = a.im / scale;
+  const br = b.re / scale,
+    bi = b.im / scale;
+  const norm = Math.max(1 / scale, Math.hypot(ar, ai), Math.hypot(br, bi));
+  return Math.hypot(ar - br, ai - bi) <= EPS * norm;
 }
 
 // ---------------------------------------------------------------------------
@@ -614,7 +620,10 @@ export function checkEquivalent(prevSrc: string, nextSrc: string): CheckResult {
   const vars = [...new Set([...freeVariables(prevExpr), ...freeVariables(nextExpr)])].sort();
 
   let ratio: Complex | null = null;
-  for (let trial = 0; trial < 3; trial += 1) {
+  let successfulTrials = 0;
+  const requiredTrials = vars.length > 0 ? 3 : 1;
+  const candidates = vars.length > 0 ? SAMPLES.length : 1;
+  for (let trial = 0; trial < candidates && successfulTrials < requiredTrials; trial += 1) {
     const env = sampleEnv(vars, trial);
     let prev: Complex;
     let next: Complex;
@@ -627,7 +636,10 @@ export function checkEquivalent(prevSrc: string, nextSrc: string): CheckResult {
     if (![prev.re, prev.im, next.re, next.im].every(Number.isFinite)) continue;
 
     if (!proportional) {
-      if (sameValue(prev, next)) continue;
+      if (sameValue(prev, next)) {
+        successfulTrials += 1;
+        continue;
+      }
       const varName = vars[0] ?? "";
       return { kind: "differs", varName, sample: env[varName]?.re ?? 0, prev, next };
     }
@@ -639,17 +651,24 @@ export function checkEquivalent(prevSrc: string, nextSrc: string): CheckResult {
       const varName = vars[0] ?? "";
       return { kind: "differs", varName, sample: env[varName]?.re ?? 0, prev, next };
     }
-    if (prevZero && nextZero) continue; // 0 = 0·0 — consistent, keep looking.
+    if (prevZero && nextZero) {
+      successfulTrials += 1;
+      continue;
+    }
 
     const r = div(prev, next);
+    if (![r.re, r.im].every(Number.isFinite) || (r.re === 0 && r.im === 0)) continue;
     if (ratio === null) {
       ratio = r;
     } else if (!sameValue(r, ratio)) {
       const varName = vars[0] ?? "";
       return { kind: "differs", varName, sample: env[varName]?.re ?? 0, prev, next };
     }
+    successfulTrials += 1;
   }
-  return { kind: "equal" };
+  return successfulTrials >= requiredTrials
+    ? { kind: "equal" }
+    : { kind: "open", reason: "Not enough finite samples to compare these steps" };
 }
 
 /** `a+bj` / `a - bj` in the notes' own `j` convention; ~6 significant

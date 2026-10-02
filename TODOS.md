@@ -9,7 +9,9 @@
 
 ## Done
 
-- Review 13: Compare bare math expressions by value ([ticket](SPECs/Agent/worksheet-review-13-math-expression-check.md)). QA approved; full 1,558-test frontend suite passes.
+- Review 14: Require valid evidence before reporting math equality ([ticket](SPECs/Agent/worksheet-review-14-math-valid-samples.md)). QA approved; full 1,568-test frontend suite passes.
+
+- Review 13: Compare bare math expressions by value ([ticket](SPECs/Agent/worksheet-review-13-math-expression-check.md)). `d590c3d`. QA approved; full 1,558-test frontend suite passes.
 
 - Review 12: Preserve argument and text spacing during tidy ([ticket](SPECs/Agent/worksheet-review-12-tidy-text.md)). `723c9cd`. QA approved; full 1,547-test frontend suite passes.
 
@@ -137,7 +139,6 @@
 
 ## Up Next
 
-- Review 14: Require valid evidence before reporting math equality ([ticket](SPECs/Agent/worksheet-review-14-math-valid-samples.md)).
 - Review 15: Preserve integer zeros in evaluated values ([ticket](SPECs/Agent/worksheet-review-15-math-format.md)).
 - Review 16: Follow TeX token rules for superscripts ([ticket](SPECs/Agent/worksheet-review-16-math-exponents.md)).
 - Review 17: Handle zero in complex powers and roots ([ticket](SPECs/Agent/worksheet-review-17-math-zero.md)).
