@@ -2,6 +2,8 @@
 
 ## 2026-10-02
 
+- Image height hints now use a bounded cache and compact keys for embedded images, keeping scrolling stable without retaining encoded image data in metadata.
+
 - LaTeX compilation now bounds retained logs and diagnostics while draining compiler output. Early errors stay available, and oversized output reports that it was truncated.
 
 - Searches of unreadable PDFs now release their failed document loads and let the PDF worker shut down when idle.

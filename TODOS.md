@@ -2,8 +2,6 @@
 
 ## In Progress
 
-- Review 04: Bound image height cache retention ([ticket](SPECs/Agent/worksheet-review-04-image-height-cache.md)).
-
 - PDF viewing, highlighting and quote links: [`SPECs/pdf-quote-links/spec.md`](SPECs/pdf-quote-links/spec.md) — PDFs open from the sidebar in their own tab and split beside a note; selecting text or dragging a region raises a quote button that inserts a Markdown blockquote plus an anchored link, and clicking that link reveals the PDF at the anchored passage, reusing an already-open view. Spec approved: notes are the only store for a quote, so showing every prior highlight on a reopened PDF is a non-goal. Ready for planning.
 - Reveal-in-sidebar + residual external-watcher misses: [`SPECs/reveal-in-sidebar-and-external-watcher-spec.md`](SPECs/reveal-in-sidebar-and-external-watcher-spec.md) — keep the explicit tab-context-menu "Reveal in sidebar" action working, leave ordinary file opens from expanding the Everything tree, and characterize the remaining external-file-watcher miss cases through a logging + manual-repro pass before patching further.
 - Excalidraw embed + edit: [`SPECs/excalidraw-embed/spec.md`](SPECs/excalidraw-embed/spec.md) + [`plan.md`](SPECs/excalidraw-embed/plan.md) — render drawings inline in notes and double-click to edit them in a tab; a drawing must stay editable on every revisit, not just the first. Approved. Phase 0 is a spike that gates the storage format: if a scene survives repeated export/import round-trips through `.excalidraw.svg` metadata (including image `files` and text fonts), inline embeds cost zero JavaScript; if it does not, fall back to raw `.excalidraw` JSON and a lazy render widget. The spike ran and **Branch A won**: the round-trip holds over three cycles with `elements`, `appState`, and `files` intact, so drawings are `.excalidraw.svg` and inline embeds cost zero JavaScript. Two measured costs accepted: WebKit rejects the subset font Excalidraw inlines into the export, so text in embeds renders in a serif fallback; and a transparent export is hard to read on a dark background. Both are render-path problems, not format problems. Phases 3–6 are done: drawings are `.excalidraw.svg`, they open in their own Excalidraw tab from the sidebar, they render inline in notes as plain images, and double-clicking an inline drawing opens its tab. Phase 7 (the New Drawing command) is done. Three follow-up fixes landed after use: dark-mode embeds keep their colours via a display-time filter, the background drawing tab no longer leaks Excalidraw's zoom controls (its footer islands force `visibility: visible`, so the pane hides with `display: none`), and autosave debounces at 1000 ms rather than 150 ms. Drawings also open in their own tab instead of replacing the note they were opened from (`navigateToFile` owns that rule, so every route in obeys it).
@@ -11,7 +9,9 @@
 
 ## Done
 
-- Review 03: Bound LaTeX compiler output ([ticket](SPECs/Agent/worksheet-review-03-compiler-output.md)). Bounded live buffers and process lifecycle regression checks pass.
+- Review 04: Bound image height cache retention ([ticket](SPECs/Agent/worksheet-review-04-image-height-cache.md)). Full 1,409-test frontend suite and browser image checks pass.
+
+- Review 03: Bound LaTeX compiler output ([ticket](SPECs/Agent/worksheet-review-03-compiler-output.md)). `94115a7`. Bounded live buffers and process lifecycle regression checks pass.
 
 - Review 02: Release failed PDF search acquisitions ([ticket](SPECs/Agent/worksheet-review-02-pdf-search-release.md)). `1400e05`. Balanced failure-path references; PDF regression checks pass.
 

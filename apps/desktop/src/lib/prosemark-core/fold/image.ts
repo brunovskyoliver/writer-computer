@@ -10,6 +10,39 @@ import { resolveImageSrc } from "../imageSrc";
 // heightmap under the viewport (the "jumpy scroll"). The cache survives
 // widget rebuilds and re-opens of the same document.
 const imageHeightCache = new Map<string, number>();
+const IMAGE_HEIGHT_LIMIT = 256;
+
+/** Fingerprints are advisory layout hints. Keep encoded image bytes out of
+ * persistent keys; a collision is corrected when the image decodes. */
+function imageHeightKey(source: string): string {
+  if (source.length <= 512 && !/^data:/i.test(source)) return source;
+  let first = 2166136261;
+  let second = 2246822519;
+  for (let i = 0; i < source.length; i++) {
+    const code = source.charCodeAt(i);
+    first = Math.imul(first ^ code, 16777619);
+    second = Math.imul(second ^ code, 3266489917);
+  }
+  return `\0image:${source.length}:${(first >>> 0).toString(36)}:${(second >>> 0).toString(36)}`;
+}
+
+function measuredHeight(key: string): number | undefined {
+  const height = imageHeightCache.get(key);
+  if (height !== undefined) {
+    imageHeightCache.delete(key);
+    imageHeightCache.set(key, height);
+  }
+  return height;
+}
+
+function rememberHeight(key: string, height: number) {
+  imageHeightCache.delete(key);
+  imageHeightCache.set(key, height);
+  if (imageHeightCache.size > IMAGE_HEIGHT_LIMIT) {
+    const oldest = imageHeightCache.keys().next().value;
+    if (oldest !== undefined) imageHeightCache.delete(oldest);
+  }
+}
 
 /** Shared height-stability wiring for async-loading editor images (markdown
  *  images and wiki embeds): reserve the last measured height for `cacheKey`
@@ -23,7 +56,8 @@ export function attachStableImageHeight(
   cacheKey: string,
   view: EditorView,
 ): void {
-  const cached = imageHeightCache.get(cacheKey);
+  const key = imageHeightKey(cacheKey);
+  const cached = measuredHeight(key);
   if (cached !== undefined) {
     image.style.height = `${cached}px`;
   }
@@ -31,7 +65,7 @@ export function attachStableImageHeight(
     image.style.height = "";
     const height = container.getBoundingClientRect().height;
     if (height > 0) {
-      imageHeightCache.set(cacheKey, height);
+      rememberHeight(key, height);
     }
     view.requestMeasure();
   });
@@ -42,11 +76,13 @@ export function attachStableImageHeight(
 }
 
 class ImageWidget extends WidgetType {
+  private readonly heightKey: string;
   constructor(
     public url: string,
     public block?: boolean,
   ) {
     super();
+    this.heightKey = imageHeightKey(url);
   }
 
   eq(other: ImageWidget): boolean {
@@ -54,7 +90,7 @@ class ImageWidget extends WidgetType {
   }
 
   get estimatedHeight(): number {
-    return imageHeightCache.get(this.url) ?? -1;
+    return measuredHeight(this.heightKey) ?? -1;
   }
 
   toDOM(view: EditorView) {
@@ -64,7 +100,7 @@ class ImageWidget extends WidgetType {
       elem.className += " cm-image-block";
     }
     const image = document.createElement("img");
-    attachStableImageHeight(image, elem, this.url, view);
+    attachStableImageHeight(image, elem, this.heightKey, view);
     image.src = resolveImageSrc(view.state, this.url);
     elem.appendChild(image);
     return elem;
