@@ -50,7 +50,7 @@ selection):
   `vmatrix`, `Vmatrix`, `matrix`, their starred variants, `smallmatrix`,
   `array` or `subarray`), the spacing commands `\;` `\,` `\:` used between
   row elements become `&`. `cases` and aligned environments keep their
-  deliberate spacing;
+  deliberate spacing. Nested matrix bodies rewrite each source separator once;
 - a `*` between plausible operands becomes `\cdot`. Conjugate stars,
   complete superscript groups, starred command suffixes, environment names,
   column specifications, text/operator-name arguments and known metadata

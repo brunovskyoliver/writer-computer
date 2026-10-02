@@ -96,6 +96,14 @@ describe("tidyFormula", () => {
     );
   });
 
+  it("rewrites each separator once across overlapping nested matrix bodies", () => {
+    const formula = "\\begin{bmatrix}a\\;\\begin{pmatrix}b\\;c\\end{pmatrix}\\end{bmatrix}";
+    expect(tidyFormula(formula)).toEqual({
+      text: "\\begin{bmatrix}a & \\begin{pmatrix}b & c\\end{pmatrix}\\end{bmatrix}",
+      changes: 2,
+    });
+  });
+
   it("counts every rewrite", () => {
     expect(tidyFormula("a*b + \\begin{bmatrix} c\\;d \\end{bmatrix}").changes).toBe(2);
   });

@@ -9,7 +9,9 @@
 
 ## Done
 
-- Review 10: Preserve TeX syntax stars during tidy ([ticket](SPECs/Agent/worksheet-review-10-tidy-stars.md)). QA approved; full 1,525-test frontend suite passes.
+- Review 11: Deduplicate nested matrix separator edits ([ticket](SPECs/Agent/worksheet-review-11-tidy-nesting.md)). Nested separator regression and 44 targeted tests pass.
+
+- Review 10: Preserve TeX syntax stars during tidy ([ticket](SPECs/Agent/worksheet-review-10-tidy-stars.md)). `bf26e85`. QA approved; full 1,525-test frontend suite passes.
 
 - Review 09: Preserve surrounding source when splitting aligned math ([ticket](SPECs/Agent/worksheet-review-09-math-split.md)). `4dd2be5`. Source-preserving command, display validation and undo checks pass; full 1,496-test frontend suite passes.
 
@@ -131,7 +133,6 @@
 
 ## Up Next
 
-- Review 11: Deduplicate nested matrix separator edits ([ticket](SPECs/Agent/worksheet-review-11-tidy-nesting.md)).
 - Review 12: Preserve argument and text spacing during tidy ([ticket](SPECs/Agent/worksheet-review-12-tidy-text.md)).
 - Review 13: Compare bare math expressions by value ([ticket](SPECs/Agent/worksheet-review-13-math-expression-check.md)).
 - Review 14: Require valid evidence before reporting math equality ([ticket](SPECs/Agent/worksheet-review-14-math-valid-samples.md)).

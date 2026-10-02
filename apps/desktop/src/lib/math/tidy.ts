@@ -200,7 +200,7 @@ export function tidyFormula(formula: string): TidyResult {
 
   // Positions that become `&` / `\cdot` are collected first, then the output
   // is rebuilt once — mid-scan rewrites would shift every later offset.
-  const separators: number[] = [];
+  const separators = new Set<number>();
   const stars: number[] = [];
 
   for (const body of bodies) {
@@ -209,7 +209,7 @@ export function tidyFormula(formula: string): TidyResult {
       const at = body.from + match.index;
       // `\\;` is a row break plus a stray `;` — the second `\` is the escape.
       if (at > body.from && formula[at - 1] === "\\") continue;
-      separators.push(at);
+      separators.add(at);
     }
   }
 
@@ -219,7 +219,7 @@ export function tidyFormula(formula: string): TidyResult {
     stars.push(i);
   }
 
-  if (separators.length === 0 && stars.length === 0) return { text: formula, changes: 0 };
+  if (separators.size === 0 && stars.length === 0) return { text: formula, changes: 0 };
 
   let out = "";
   let cursor = 0;
@@ -234,7 +234,7 @@ export function tidyFormula(formula: string): TidyResult {
   };
 
   const events = [
-    ...separators.map((pos) => ({ pos, width: 2, text: " & " })),
+    ...[...separators].map((pos) => ({ pos, width: 2, text: " & " })),
     ...stars.map((pos) => ({ pos, width: 1, text: " \\cdot " })),
   ].sort((a, b) => a.pos - b.pos);
 

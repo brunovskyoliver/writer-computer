@@ -2,6 +2,8 @@
 
 ## 2026-10-02
 
+- Tidying nested matrices rewrites each separator once, avoiding extra columns.
+
 - Tidying math preserves starred LaTeX commands, exponent groups, text, metadata and comments while converting multiplication between operands.
 
 - Splitting aligned math preserves surrounding expressions and nested rows. The command refuses partial environments and invalid output, with one undo for a successful split.
