@@ -14,30 +14,16 @@ use std::time::{Duration, Instant};
 
 /// First compiles fetch packages; a stuck engine must still end.
 const COMPILE_TIMEOUT: Duration = Duration::from_secs(180);
-/// Only the tail of the log is useful and it can run to megabytes.
-const LOG_TAIL_LINES: usize = 200;
 /// How far into a file a `% !TEX root = …` comment is honoured.
 const MAGIC_COMMENT_LINES: usize = 20;
 
 /// Where a GUI-launched app finds Tectonic when `PATH` is the bare launchd one.
 const ENGINE_DIRS: &[&str] = &["/opt/homebrew/bin", "/usr/local/bin"];
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum Severity {
-    Error,
-    Warning,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct Diagnostic {
-    /// Absolute path of the file the message is about, when the log names one.
-    pub file: Option<String>,
-    /// 1-based line, when the log gives one.
-    pub line: Option<u32>,
-    pub message: String,
-    pub severity: Severity,
-}
+#[cfg(test)]
+use super::latex_output::parse_diagnostics;
+use super::latex_output::{combine_streams, read_output, CompilerOutput};
+pub use super::latex_output::{Diagnostic, Severity};
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -183,94 +169,35 @@ pub(crate) fn find_engine(path_var: Option<&str>, home: Option<&Path>) -> Option
         .find(|candidate| candidate.is_file())
 }
 
-/// Resolve a log's file reference (`chap`, `./chap.tex`) against the root's
-/// folder, trying `.tex` when the log dropped the extension.
-fn resolve_log_file(dir: &Path, name: &str) -> String {
-    // `./main.tex` must come out as the same string the editor has for the
-    // file, or the frontend cannot match the diagnostic to its tab.
-    let direct: PathBuf = dir
-        .join(name)
-        .components()
-        .filter(|part| !matches!(part, std::path::Component::CurDir))
-        .collect();
-    if direct.is_file() || direct.extension().is_some() {
-        return direct.to_string_lossy().into_owned();
-    }
-    direct.with_extension("tex").to_string_lossy().into_owned()
-}
-
-/// Tectonic's own summaries (`error: chap:2: Undefined control sequence`) and
-/// LaTeX warnings that carry `on input line N`. Engine boilerplate that only
-/// says "it failed" is dropped when a located error exists.
-pub(crate) fn parse_diagnostics(output: &str, root: &Path) -> Vec<Diagnostic> {
-    let dir = root.parent().unwrap_or(Path::new("."));
-    let root_str = root.to_string_lossy().into_owned();
-    let mut located = Vec::new();
-    let mut general = Vec::new();
-
-    for line in output.lines() {
-        if let Some(rest) = line.strip_prefix("error: ") {
-            // `file:line: message` — the file part may itself not contain `:`.
-            let mut parts = rest.splitn(3, ':');
-            let (file, number, message) = (parts.next(), parts.next(), parts.next());
-            if let (Some(file), Some(number), Some(message)) = (file, number, message) {
-                if let Ok(number) = number.trim().parse::<u32>() {
-                    located.push(Diagnostic {
-                        file: Some(resolve_log_file(dir, file.trim())),
-                        line: Some(number),
-                        message: message.trim().to_string(),
-                        severity: Severity::Error,
-                    });
-                    continue;
-                }
-            }
-            general.push(Diagnostic {
-                file: None,
-                line: None,
-                message: rest.trim().to_string(),
-                severity: Severity::Error,
-            });
-            continue;
-        }
-        if let Some(at) = line.find("Warning: ") {
-            let is_latex_warning = line.starts_with("LaTeX ") || line.starts_with("Package ");
-            let marker = " on input line ";
-            if let (true, Some(pos)) = (is_latex_warning, line.rfind(marker)) {
-                let number: String = line[pos + marker.len()..]
-                    .chars()
-                    .take_while(|c| c.is_ascii_digit())
-                    .collect();
-                if let Ok(number) = number.parse::<u32>() {
-                    located.push(Diagnostic {
-                        file: Some(root_str.clone()),
-                        line: Some(number),
-                        message: line[at + "Warning: ".len()..pos].trim().to_string(),
-                        severity: Severity::Warning,
-                    });
-                }
-            }
-        }
-    }
-
-    let has_located_error = located.iter().any(|d| d.severity == Severity::Error);
-    if has_located_error {
-        located
-    } else {
-        general.extend(located);
-        general
-    }
-}
-
-fn log_tail(output: &str) -> String {
-    let lines: Vec<&str> = output.lines().collect();
-    let from = lines.len().saturating_sub(LOG_TAIL_LINES);
-    lines[from..].join("\n")
-}
-
 /// Run Tectonic on `root` and wait, killing it past the timeout. Both streams
 /// are drained on their own threads so a chatty engine never blocks on a full
 /// pipe.
-fn run_engine(engine: &Path, root: &Path) -> Result<(bool, String), AppError> {
+struct EngineRun {
+    success: bool,
+    output: CompilerOutput,
+    timeout_seconds: Option<u64>,
+}
+
+fn stop_child(child: &mut std::process::Child) -> Result<(), String> {
+    let killed = child.kill();
+    let waited = child.wait();
+    let mut errors = Vec::new();
+    if let Err(error) = killed {
+        if error.kind() != std::io::ErrorKind::InvalidInput {
+            errors.push(format!("kill: {error}"));
+        }
+    }
+    if let Err(error) = waited {
+        errors.push(format!("reap: {error}"));
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("; "))
+    }
+}
+
+fn run_engine(engine: &Path, root: &Path, timeout: Duration) -> Result<EngineRun, AppError> {
     let dir = root.parent().unwrap_or(Path::new("."));
     let mut child = Command::new(engine)
         .arg(root.file_name().unwrap_or(root.as_os_str()))
@@ -281,55 +208,96 @@ fn run_engine(engine: &Path, root: &Path) -> Result<(bool, String), AppError> {
         .spawn()
         .map_err(|e| AppError::Io(format!("could not start Tectonic: {e}")))?;
 
-    let drain = |stream: Option<Box<dyn Read + Send>>| {
-        std::thread::spawn(move || {
-            let mut text = String::new();
-            if let Some(mut stream) = stream {
-                let mut bytes = Vec::new();
-                let _ = stream.read_to_end(&mut bytes);
-                text = String::from_utf8_lossy(&bytes).into_owned();
-            }
-            text
-        })
+    let drain = |name: &str, stream: Option<Box<dyn Read + Send>>| {
+        let root = root.to_owned();
+        std::thread::Builder::new()
+            .name(format!("tectonic-{name}"))
+            .spawn(move || {
+                let stream =
+                    stream.ok_or_else(|| std::io::Error::other("compiler pipe missing"))?;
+                read_output(stream, &root)
+            })
     };
-    let stdout = drain(
+    let stdout = match drain(
+        "stdout",
         child
             .stdout
             .take()
             .map(|s| Box::new(s) as Box<dyn Read + Send>),
-    );
-    let stderr = drain(
+    ) {
+        Ok(reader) => reader,
+        Err(error) => {
+            let cleanup = stop_child(&mut child);
+            return Err(AppError::Io(format!(
+                "could not start stdout reader: {error}; cleanup: {cleanup:?}"
+            )));
+        }
+    };
+    let stderr = match drain(
+        "stderr",
         child
             .stderr
             .take()
             .map(|s| Box::new(s) as Box<dyn Read + Send>),
-    );
+    ) {
+        Ok(reader) => reader,
+        Err(error) => {
+            let cleanup = stop_child(&mut child);
+            let reader = stdout.join();
+            return Err(AppError::Io(format!("could not start stderr reader: {error}; cleanup: {cleanup:?}; stdout completed: {}", matches!(reader, Ok(Ok(_))))));
+        }
+    };
 
     let started = Instant::now();
     let status = loop {
-        if let Some(status) = child.try_wait()? {
-            break Some(status);
+        match child.try_wait() {
+            Ok(Some(status)) => break Ok(Some(status)),
+            Ok(None) => {}
+            Err(error) => {
+                let cleanup = stop_child(&mut child);
+                break Err(format!(
+                    "could not wait for Tectonic: {error}; cleanup: {cleanup:?}"
+                ));
+            }
         }
-        if started.elapsed() > COMPILE_TIMEOUT {
-            let _ = child.kill();
-            let _ = child.wait();
-            break None;
+        if started.elapsed() > timeout {
+            break stop_child(&mut child).map(|()| None);
         }
         std::thread::sleep(Duration::from_millis(50));
     };
+    finish_readers(stdout, stderr, status, timeout)
+}
 
-    let mut output = stdout.join().unwrap_or_default();
-    output.push('\n');
-    output.push_str(&stderr.join().unwrap_or_default());
-    match status {
-        Some(status) => Ok((status.success(), output)),
-        None => {
-            output.push_str(&format!(
-                "\nerror: compilation stopped after {} s",
-                COMPILE_TIMEOUT.as_secs()
-            ));
-            Ok((false, output))
-        }
+fn finish_readers(
+    stdout: std::thread::JoinHandle<std::io::Result<super::latex_output::StreamOutput>>,
+    stderr: std::thread::JoinHandle<std::io::Result<super::latex_output::StreamOutput>>,
+    status: Result<Option<std::process::ExitStatus>, String>,
+    timeout: Duration,
+) -> Result<EngineRun, AppError> {
+    // Always join both readers before any wait/read/panic error is returned.
+    let stdout = stdout.join();
+    let stderr = stderr.join();
+    let decode = |result: std::thread::Result<
+        std::io::Result<super::latex_output::StreamOutput>,
+    >,
+                  name: &str| {
+        result
+            .map_err(|_| format!("Tectonic {name} reader panicked"))
+            .and_then(|result| result.map_err(|e| format!("could not read Tectonic {name}: {e}")))
+    };
+    match (decode(stdout, "stdout"), decode(stderr, "stderr"), status) {
+        (Ok(stdout), Ok(stderr), Ok(status)) => Ok(EngineRun {
+            success: status.is_some_and(|s| s.success()),
+            output: combine_streams(stdout, stderr),
+            timeout_seconds: status.is_none().then_some(timeout.as_secs()),
+        }),
+        (stdout, stderr, status) => Err(AppError::Io(
+            [stdout.err(), stderr.err(), status.err()]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join("; "),
+        )),
     }
 }
 
@@ -355,21 +323,10 @@ pub(crate) fn compile_latex_impl(
     };
 
     let started = Instant::now();
-    let (success, output) = run_engine(&engine, &root)?;
+    let run = run_engine(&engine, &root, COMPILE_TIMEOUT)?;
     let pdf = root.with_extension("pdf");
-    let ok = success && pdf.is_file();
-    let mut diagnostics = parse_diagnostics(&output, &root);
-    if !ok && !diagnostics.iter().any(|d| d.severity == Severity::Error) {
-        diagnostics.insert(
-            0,
-            Diagnostic {
-                file: None,
-                line: None,
-                message: "Tectonic failed without naming an error — see the log.".to_string(),
-                severity: Severity::Error,
-            },
-        );
-    }
+    let ok = run.success && pdf.is_file();
+    let (log, diagnostics) = run.output.finish(!ok, run.timeout_seconds);
 
     Ok(CompileResult {
         status: if ok {
@@ -381,13 +338,13 @@ pub(crate) fn compile_latex_impl(
         pdf_path: ok.then(|| pdf.to_string_lossy().into_owned()),
         diagnostics,
         duration_ms: started.elapsed().as_millis() as u64,
-        log: log_tail(&output),
+        log,
     })
 }
 
 /// Compile the document `path` belongs to. Never errors for a failed compile —
-/// that is a `failed` status with diagnostics; `Err` means the engine could
-/// not even be started.
+/// that is a `failed` status with diagnostics. `Err` reports engine startup,
+/// output-reader or process-management failures.
 #[tauri::command]
 pub async fn compile_latex(path: String) -> Result<CompileResult, AppError> {
     let path_var = std::env::var("PATH").ok();
@@ -547,6 +504,81 @@ mod tests {
         if find_engine(Some("/nonexistent"), Some(dir.path())).is_none() {
             assert_eq!(result.status, CompileStatus::EngineMissing);
         }
+    }
+
+    #[test]
+    fn a_reader_panic_still_joins_the_other_reader_before_returning() {
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        };
+        let completed = Arc::new(AtomicBool::new(false));
+        let signal = completed.clone();
+        let stdout = std::thread::spawn(|| panic!("reader panic"));
+        let stderr = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(20));
+            signal.store(true, Ordering::SeqCst);
+            read_output(&b""[..], Path::new("/w/main.tex"))
+        });
+        let result = finish_readers(stdout, stderr, Ok(None), Duration::from_secs(1));
+        assert!(completed.load(Ordering::SeqCst));
+        assert!(
+            matches!(result, Err(AppError::Io(message)) if message.contains("stdout reader panicked"))
+        );
+    }
+
+    #[cfg(unix)]
+    fn fake_engine(dir: &Path, script: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let engine = write(dir, "engine", &format!("#!/bin/sh\n{script}"));
+        std::fs::set_permissions(&engine, std::fs::Permissions::from_mode(0o755)).unwrap();
+        engine
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn noisy_process_drains_both_pipes_and_retains_early_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = write(dir.path(), "main.tex", "");
+        let engine = fake_engine(
+            dir.path(),
+            r#"printf 'error: main:7: early error\n' >&2
+n=0
+while [ "$n" -lt 4096 ]; do
+    printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n'
+    printf 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n' >&2
+    n=$((n+1))
+done
+exit 1
+"#,
+        );
+        let run = run_engine(&engine, &root, Duration::from_secs(10)).unwrap();
+        assert!(!run.success);
+        assert!(
+            run.timeout_seconds.is_none(),
+            "noisy engine must reach its own exit"
+        );
+        let (log, diagnostics) = run.output.finish(true, run.timeout_seconds);
+        assert!(log.len() <= 128 * 1024);
+        assert!(log.lines().count() <= 200);
+        assert!(diagnostics
+            .iter()
+            .any(|d| d.line == Some(7) && d.message == "early error"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn timeout_kills_reaps_and_joins_the_process_readers() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = write(dir.path(), "main.tex", "");
+        let engine = fake_engine(dir.path(), "exec /bin/sleep 3\n");
+        let started = Instant::now();
+        let run = run_engine(&engine, &root, Duration::from_millis(20)).unwrap();
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(!run.success);
+        let (log, diagnostics) = run.output.finish(true, run.timeout_seconds);
+        assert!(log.contains("stopped after"));
+        assert!(diagnostics[0].message.contains("stopped after"));
     }
 
     /// End-to-end against the installed engine; skipped where there is none.

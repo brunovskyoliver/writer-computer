@@ -4,6 +4,7 @@ pub mod fs;
 pub mod images;
 pub mod latex;
 pub mod latex_compile;
+mod latex_output;
 pub mod mcp;
 pub mod recents;
 pub mod search;

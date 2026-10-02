@@ -2,6 +2,8 @@
 
 ## 2026-10-02
 
+- LaTeX compilation now bounds retained logs and diagnostics while draining compiler output. Early errors stay available, and oversized output reports that it was truncated.
+
 - Searches of unreadable PDFs now release their failed document loads and let the PDF worker shut down when idle.
 
 - Closing or switching workspaces now saves the latest text edits before clearing the editor, including edits waiting for autosave or an older write. Failed saves keep the workspace open and report the failure.
