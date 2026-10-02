@@ -2,6 +2,8 @@
 
 ## 2026-10-02
 
+- Explicit LaTeX compilation and preview commands stop when saving the source fails, preserving the save error instead of compiling older disk content.
+
 - Chapters and root path aliases now share LaTeX build status and one compile queue. Builds in different windows serialize writes to the same document PDF.
 
 - Closing a workspace clears LaTeX build records and PDF revisions, cancels pending preview compiles, and ignores old build, lookup and save completions.

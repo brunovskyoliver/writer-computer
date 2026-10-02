@@ -299,8 +299,8 @@ export async function toggleLatexPreview(source: string, sourceTabId: string): P
     return;
   }
 
-  await saveNow(source);
-  if (generation !== editorGeneration()) return;
+  const saved = await saveNow(source);
+  if (!saved || generation !== editorGeneration()) return;
   const result = await compileLatexSource(source);
   if (generation !== editorGeneration() || result === null) return;
   const exists = result.status === "ok" || (await tauri.fileExists(pdfPath));
@@ -317,8 +317,8 @@ export async function toggleLatexPreview(source: string, sourceTabId: string): P
 /** `Cmd+Enter`: save now and compile, whether or not the preview is open. */
 export async function compileLatexNow(source: string, sourceTabId: string): Promise<void> {
   const generation = editorGeneration();
-  await saveNow(source);
-  if (generation !== editorGeneration()) return;
+  const saved = await saveNow(source);
+  if (!saved || generation !== editorGeneration()) return;
   const result = await compileLatexSource(source);
   if (generation !== editorGeneration() || result === null) return;
   if (result.status !== "ok") reportFailure(result, sourceTabId);

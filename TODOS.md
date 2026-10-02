@@ -9,7 +9,9 @@
 
 ## Done
 
-- Review 06: Serialize LaTeX builds by resolved root ([ticket](SPECs/Agent/worksheet-review-06-compile-root-lock.md)). Canonical-root serialization and async ownership regressions pass.
+- Review 07: Abort LaTeX commands after a failed save ([ticket](SPECs/Agent/worksheet-review-07-compile-save-failure.md)). Failed-save command regressions pass.
+
+- Review 06: Serialize LaTeX builds by resolved root ([ticket](SPECs/Agent/worksheet-review-06-compile-root-lock.md)). `01e01a8`. Canonical-root serialization and async ownership regressions pass.
 
 - Review 05: Reset LaTeX records with the editor workspace ([ticket](SPECs/Agent/worksheet-review-05-latex-reset.md)). `02540fb`. Reset, save-race and stale-completion regressions pass.
 
@@ -123,7 +125,6 @@
 
 ## Up Next
 
-- Review 07: Abort LaTeX commands after a failed save ([ticket](SPECs/Agent/worksheet-review-07-compile-save-failure.md)).
 - Review 08: Refresh roots when choosing LaTeX previews ([ticket](SPECs/Agent/worksheet-review-08-preview-root.md)).
 - Review 09: Preserve surrounding source when splitting aligned math ([ticket](SPECs/Agent/worksheet-review-09-math-split.md)).
 - Review 10: Preserve TeX syntax stars during tidy ([ticket](SPECs/Agent/worksheet-review-10-tidy-stars.md)).

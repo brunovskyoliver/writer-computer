@@ -193,6 +193,22 @@ test("reset during the preview command save prevents compilation and opening", a
   expect(useEditorStore.getState().tabs).toEqual([]);
 });
 
+test.each([
+  ["compile", compileLatexNow],
+  ["preview", toggleLatexPreview],
+] as const)(
+  "%s stops after a failed save without compiling or opening a PDF",
+  async (_name, command) => {
+    mocks.save.mockResolvedValueOnce(false);
+    await command("/w/main.tex", "source");
+    expect(mocks.save).toHaveBeenCalledWith("/w/main.tex");
+    expect(mocks.compile).not.toHaveBeenCalled();
+    expect(mocks.exists).not.toHaveBeenCalled();
+    expect(useEditorStore.getState().tabs).toEqual([]);
+    expect(usePdfRevisionStore.getState().revisions).toEqual({});
+  },
+);
+
 test("an automatic root lookup joins a pending preview request without canceling it", async () => {
   const lookup = deferred<string>();
   mocks.root.mockReturnValueOnce(lookup.promise);
