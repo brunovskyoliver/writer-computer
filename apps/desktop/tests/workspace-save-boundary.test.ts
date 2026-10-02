@@ -119,6 +119,47 @@ test("switching cannot open another workspace after a save failure", async () =>
   expect(useWorkspaceStore.getState().root).toBe("/review");
 });
 
+test("a failed text save waits for another pending file before releasing input", async () => {
+  const other = "/review/other.md";
+  await useEditorStore.getState().openFile(other);
+  let finish!: () => void;
+  const pendingWrite = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  mockedInvoke.mockImplementation(async (command, payload) => {
+    if (command === "write_file") {
+      if ((payload as { path: string }).path === path) throw new Error("EACCES");
+      await pendingWrite;
+      return { path: other, modified_at: 1 };
+    }
+    if (command === "close_workspace") diskAtClose = disk;
+    return null;
+  });
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  useEditorStore.getState().noteContentChanged(path, Text.of(["failed text"]));
+  useEditorStore.getState().noteContentChanged(other, Text.of(["pending text"]));
+  let settled = false;
+  const closing = useWorkspaceStore
+    .getState()
+    .closeWorkspace()
+    .catch((error: Error) => {
+      settled = true;
+      return error;
+    });
+  await vi.advanceTimersByTimeAsync(5);
+  const settledBeforeOtherWrite = settled;
+  const frozenBeforeOtherWrite = body.inert;
+  finish();
+  const error = await closing;
+  expect(settledBeforeOtherWrite).toBe(false);
+  expect(frozenBeforeOtherWrite).toBe(true);
+  expect(error).toBeInstanceOf(Error);
+  expect(diskAtClose).toBeNull();
+  expect(useEditorStore.getState().openFiles.get(path)?.isDirty).toBe(true);
+  expect(useEditorStore.getState().openFiles.get(other)?.isDirty).toBe(false);
+  expect(body.inert).toBe(false);
+});
+
 test("text-only closure freezes input until backend closure and reset finish", async () => {
   let finishClose!: () => void;
   const gate = new Promise<void>((resolve) => {

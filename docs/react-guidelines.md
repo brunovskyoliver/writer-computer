@@ -76,6 +76,7 @@ Perform side effects at the action or event level, not by watching for state cha
 - **Prefer CSS over JS listeners.** `@media` queries, `:has()`, attribute selectors handle what would otherwise be JS event subscriptions.
 - **Ref callbacks over `useRef` + `useEffect`.** For imperative DOM setup/teardown, callback refs are idiomatic and don't require effects.
 - **External event listeners register once.** Keyboard shortcuts, Tauri events, and other external listeners register on mount with `[]` deps and read current state at event time.
+- **Window-targeted Tauri events need a window listener.** Use `getCurrentWindow().listen()` for `emit_to` requests. Global `listen()` registers `EventTarget::Any` and receives requests sent to other windows too. Keep global listeners for broadcasts, and release asynchronous subscriptions during effect cleanup.
 
 ## Persistence — Use Tauri Store, Not localStorage
 

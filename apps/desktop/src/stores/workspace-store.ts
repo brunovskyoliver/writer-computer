@@ -1,6 +1,6 @@
 import { withDrawingSaveBoundary, hasDrawingSession } from "@/lib/drawing-sessions";
 import { freezeEditorInput, settleEditorInput } from "@/lib/editor-input";
-import { saveNow } from "@/lib/save";
+import { saveAllNow } from "@/lib/save";
 import { create } from "zustand";
 import type { DirEntry } from "@/types/fs";
 import type { RestoreWorkspaceResponse } from "@/lib/tauri";
@@ -193,14 +193,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       // Clipboard reads and image exports started before the gate can still
       // dispatch. Let them finish before taking the final text snapshot.
       await settleEditorInput();
-      const saved = await Promise.all(
-        [...useEditorStore.getState().openFiles.keys()].map(async (path) => ({
-          path,
-          saved: await saveNow(path),
-        })),
-      );
-      const failed = saved.find((file) => !file.saved);
-      if (failed) throw new Error(`Failed to save ${failed.path}. The workspace is still open.`);
+      await saveAllNow();
       if (get().root !== root) return;
 
       scheduleSessionSave(root);

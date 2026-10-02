@@ -1,11 +1,17 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import {
-  reportDrawingSaveError,
-  saveDrawingSessions,
-  freezeDrawingInput,
-} from "@/lib/drawing-sessions";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { saveDrawingSessions } from "@/lib/drawing-sessions";
+import { freezeEditorInput, settleEditorInput } from "@/lib/editor-input";
+import { saveAllNow } from "@/lib/save";
+
+function reportSaveError(error: unknown) {
+  console.error("Shutdown save failed", error);
+  window.alert(
+    `Your changes could not be saved. They are still in memory. Try saving again.\n\n${String(error)}`,
+  );
+}
 
 export function useDrawingShutdown() {
   const [ready, setReady] = useState(false);
@@ -14,12 +20,17 @@ export function useDrawingShutdown() {
     let request: number | null = null;
     let release: (() => void) | undefined;
     const subscriptions = [
-      listen<number>("drawing:prepare-close", async ({ payload: id }) => {
+      getCurrentWindow().listen<number>("drawing:prepare-close", async ({ payload: id }) => {
+        if (disposed) return;
         request = id;
         release?.();
-        const releaseThisRequest = freezeDrawingInput();
+        const releaseThisRequest = freezeEditorInput();
         release = releaseThisRequest;
         try {
+          await settleEditorInput();
+          if (request !== id || disposed) return;
+          await saveAllNow();
+          if (request !== id || disposed) return;
           await saveDrawingSessions();
           if (request !== id || disposed) return;
           await invoke("drawing_shutdown_complete", { id, success: true });
@@ -30,7 +41,7 @@ export function useDrawingShutdown() {
           try {
             await invoke("drawing_shutdown_complete", { id, success: false });
           } finally {
-            reportDrawingSaveError(error);
+            reportSaveError(error);
           }
         }
       }),
@@ -48,7 +59,7 @@ export function useDrawingShutdown() {
         await invoke("drawing_shutdown_ready");
         if (!disposed) setReady(true);
       })
-      .catch(reportDrawingSaveError);
+      .catch(reportSaveError);
     return () => {
       disposed = true;
       release?.();

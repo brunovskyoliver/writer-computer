@@ -12,6 +12,7 @@ const THROTTLE_MS = 1000;
  * and form an import cycle (the store already imports the save engine).
  */
 export interface SaveStoreAccess {
+  getOpenPaths: () => Iterable<string>;
   getOpenFile: (path: string) => OpenFile | undefined;
   markSaved: (path: string, diskContent: string, hasNewerChanges: boolean) => void;
   setSaveError: (path: string, error: string) => void;
@@ -120,6 +121,18 @@ export async function saveNow(path: string): Promise<boolean> {
     const outcome = await performSave(path, controller);
     if (outcome === "superseded" || outcome === "busy") continue;
     return outcome !== "failed";
+  }
+}
+
+/** Flush every open buffer, including edits not yet reflected in isDirty.
+ * All writes settle before a failure returns, so closing callers may safely
+ * release their input gate after catching the error. */
+export async function saveAllNow(): Promise<void> {
+  const paths = [...requireStore().getOpenPaths()];
+  const results = await Promise.allSettled(paths.map((path) => saveNow(path)));
+  const failed = results.findIndex((result) => result.status === "rejected" || !result.value);
+  if (failed !== -1) {
+    throw new Error(`Failed to save ${paths[failed]}. Your changes are still in memory.`);
   }
 }
 

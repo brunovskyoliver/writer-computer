@@ -3,6 +3,7 @@
 ## 2026-10-02
 
 - Closing or switching workspaces now saves the latest text edits before clearing the editor, including edits waiting for autosave or an older write. Failed saves keep the workspace open and report the failure.
+- Closing a window or quitting Writer now waits for text and drawing saves, including clipboard edits already in progress. A failed save keeps the window open with its changes intact.
 
 ## 2026-10-01
 

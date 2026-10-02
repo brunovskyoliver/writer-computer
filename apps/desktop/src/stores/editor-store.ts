@@ -1826,6 +1826,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 // not import `stores/`, so it reads/writes the store through this injected
 // accessor instead (see `registerSaveStore`).
 registerSaveStore({
+  getOpenPaths: () => useEditorStore.getState().openFiles.keys(),
   getOpenFile: (path) => useEditorStore.getState().openFiles.get(path),
   markSaved: (path, diskContent, hasNewerChanges) =>
     useEditorStore.getState().markSaved(path, diskContent, hasNewerChanges),
