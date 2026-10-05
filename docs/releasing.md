@@ -86,8 +86,18 @@ Click **Publish release**. Until you do, the in-app updater won't see the new ve
 - **You decide not to publish the draft.** Delete the draft on GitHub, then drop the tag: `git tag -d v<version> && git push origin :refs/tags/v<version>`.
 - **You realize mid-release that the version was wrong.** Stop. Revert is risky once the GH release exists. Ask the user before taking any destructive action.
 
+## Local builds (no signing, no publishing)
+
+From `apps/desktop/`:
+
+```sh
+vp exec tauri build --bundles app,dmg
+```
+
+This fork has no in-app updater: `tauri-plugin-updater`, the "Check for Updates…" menu item, and the launch/daily checks are gone, and `tauri.conf.json` no longer builds updater artifacts. `distribute.sh` below still expects them and still publishes to the upstream repo, so it needs reworking before it can cut a release of this fork.
+
 ## What this doc deliberately does not cover
 
-- Cross-platform releases (Windows, Linux, x86_64 macOS). The script and config are arm64-only today.
+- Cross-platform releases (Windows, Linux, x86_64 macOS). Only arm64 macOS is supported.
 - CI-driven releases. There is no GitHub Actions workflow for this — everything runs on the maintainer's machine because of the Apple signing requirement.
 - Rolling back a published release. There is no documented rollback procedure; if you need one, escalate to the user.

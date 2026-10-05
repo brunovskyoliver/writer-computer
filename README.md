@@ -10,7 +10,7 @@ It is built with Tauri v2, React, Zustand, CodeMirror, and Rust. The app keeps d
 
 - `apps/desktop/` — Tauri desktop app.
 - `apps/desktop/src/` — React frontend.
-- `apps/desktop/src-tauri/src/` — Rust commands, workspace state, watcher, updater, and CLI integration.
+- `apps/desktop/src-tauri/src/` — Rust commands, workspace state, watcher, and CLI integration.
 - `apps/website/` — landing page.
 - `docs/` — project and agent workflow docs.
 - `SPECs/` — feature specs and design notes.

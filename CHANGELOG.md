@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-05
+
+- Removed the in-app updater. Writer no longer checks the upstream release feed on launch or daily, and the "Check for Updates…" menu item is gone.
+
 ## 2026-10-02
 
 - Wiki image and drawing lookup caching now keeps only recent, bounded entries, clears on workspace reset and ignores older lookup completions. Missing images remain retryable.
