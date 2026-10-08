@@ -15,13 +15,8 @@ Frontend: `apps/desktop/src/` — React, Zustand stores, CodeMirror/Prosemark ed
 Backend: `apps/desktop/src-tauri/src/` — Rust IPC commands, file watcher, workspace state
 Toolchain: Vite+ (`vp`) — see [docs/vite-plus.md](./docs/vite-plus.md)
 
-Rust source structure:
-
-- `lib.rs` — app setup, plugin registration, command registration
-- `state.rs` — global app state (workspace root, file index, watcher handle)
-- `error.rs` — error types serialized over IPC
-- `watcher.rs` — file system watcher with debounce and self-write detection
-- `commands/` — Tauri IPC handlers: `fs.rs`, `workspace.rs`, `search.rs`, `images.rs`
+Rust: `lib.rs` registers plugins and commands; IPC handlers live in `commands/`, the MCP
+server in `mcp/`. List the directory for the current set.
 
 ## Docs Index
 
@@ -65,19 +60,12 @@ All docs except CLAUDE.md, AGENTS.md, TODOS.md, and CHANGELOG.md live in `./docs
 - Load only docs relevant to the current task and scope.
 - If a behavior or rule changes in practice, update the owning doc in the same task.
 - In autonomous/loop mode, complete exactly one task at a time and commit immediately. Do not batch unless the user explicitly asks.
-- When coding or reviewing, follow the Engineering Guardrails below and the guidelines in linked docs.
+- When coding or reviewing, follow the guardrails below and the linked guideline docs.
 
 ## Engineering Guardrails
 
-- Prefer the smallest change that is correct, robust, and easy to reason about.
-- Avoid fragile logic, hidden coupling, edge-case traps, and assumptions about incidental execution order.
-- Keep async flows and shared state race-safe. Use explicit sequencing, cancellation, idempotency, or clear ownership where needed.
-- Do not introduce unnecessary performance regressions. Avoid extra renders, allocations, subscriptions, scans, blocking work, or I/O unless clearly justified.
-- Fail explicitly. Surface invalid states and unexpected errors clearly instead of silently swallowing them or masking them with fallback behavior.
-- Preserve testability. Keep side effects at the boundaries, make dependencies explicit, and structure logic so it can be exercised in isolation when practical.
-- Maintain clear boundaries, but prefer minimal designs. Split functions, hooks, or modules when responsibilities meaningfully diverge, not as a reflex.
-- If a tradeoff is unavoidable, call it out explicitly and choose the option with the lowest long-term correctness and maintenance risk.
-- When a fix doesn't work after one iteration, add a debug log before changing the approach again. Don't iterate on guesses — let the runtime tell you which term in the math is wrong.
+- Fail explicitly. Surface invalid states and unexpected errors instead of swallowing them or masking them with fallback behavior.
+- When a fix doesn't work after one iteration, add a debug log before changing the approach again. Let the runtime tell you which term is wrong instead of iterating on guesses.
 
 ## Validation
 
