@@ -10,7 +10,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Channel } from "@tauri-apps/api/core";
 import * as tauri from "@/lib/tauri";
-import { searchPdfText } from "@/lib/pdf";
+import { extractPdfText, searchPdfText } from "@/lib/pdf";
 import { ContentScan, createSeqGuard, type ContentScanState } from "@/lib/content-search";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import type { ContentSearchEvent, PdfCandidate, SearchMatch } from "@/types/fs";
@@ -19,6 +19,28 @@ const DEBOUNCE_MS = 150;
 /** pdf.js extractions in flight at once — enough to keep results flowing
  *  without stampeding the worker on a PDF-heavy workspace. */
 const PDF_CONCURRENCY = 2;
+
+/** One PDF at a time finishes extracting and goes to the disk cache, so the
+ *  pdf.js worker isn't saturated in the background. Runs past the query that
+ *  queued it: the point is that the *next* scan finds the text on disk. */
+let saveChain = Promise.resolve();
+const savesQueued = new Set<string>();
+
+function saveForNextScan(candidate: PdfCandidate): void {
+  const key = `${candidate.path}\u0000${candidate.modified_at}`;
+  if (savesQueued.has(key)) return;
+  savesQueued.add(key);
+  saveChain = saveChain.then(async () => {
+    try {
+      const pages = await extractPdfText(candidate.path, candidate.modified_at);
+      if (pages) await tauri.savePdfText(candidate.path, candidate.modified_at, pages);
+    } catch (error) {
+      console.error("[content-search] saving PDF text failed", candidate.path, error);
+    } finally {
+      savesQueued.delete(key);
+    }
+  });
+}
 
 const IDLE: ContentScanState = { state: "idle", matches: [], truncated: false };
 
@@ -75,6 +97,7 @@ export function useContentSearch(query: string): ContentScanState {
                 found = result.matches;
                 overflowed = result.truncated;
               }
+              saveForNextScan(candidate);
             } finally {
               pdfInFlight--;
               if (guard.isCurrent(seq)) {

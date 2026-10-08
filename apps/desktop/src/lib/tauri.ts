@@ -234,6 +234,12 @@ export function contentSearch(query: string, onEvent: Channel<ContentSearchEvent
   return invoke("content_search", { query, onEvent });
 }
 
+/** Save a PDF's extracted page lines so `content_search` matches it in Rust
+ *  from then on, without pdf.js. */
+export function savePdfText(path: string, modifiedAt: number, pages: string[][]): Promise<void> {
+  return invoke("save_pdf_text", { path, modifiedAt, pages });
+}
+
 // Font commands
 export function listSystemFonts(): Promise<string[]> {
   return invoke("list_system_fonts");

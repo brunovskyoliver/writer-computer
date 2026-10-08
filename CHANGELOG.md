@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-08
+
+- Content search now saves a PDF's extracted text to the app cache after its first pdf.js pass. Later searches match it in Rust like a text file, so large PDFs no longer get re-extracted page by page on each query. A PDF that changes on disk is extracted again.
+
+- Quick-open forgives one typo in queries of five or more characters (`gudie` finds `guide.md`). Typo hits rank just below correctly spelled ones.
+
 ## 2026-10-05
 
 - Removed the in-app updater. Writer no longer checks the upstream release feed on launch or daily, and the "Check for Updates…" menu item is gone.

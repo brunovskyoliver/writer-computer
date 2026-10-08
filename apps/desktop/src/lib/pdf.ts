@@ -285,6 +285,52 @@ function cachedTextEntry(path: string, modifiedAt: number): PdfTextEntry {
 }
 
 /**
+ * Extract pages into `entry` until `stop()` says enough or the document runs
+ * out (`entry.complete`). Serialized per path through `extractionChains`, so
+ * concurrent callers share one pass. False when the document won't load.
+ */
+async function extractInto(
+  path: string,
+  entry: PdfTextEntry,
+  stop: () => boolean,
+): Promise<boolean> {
+  const result = await acquirePdf(path);
+  try {
+    if (!result.ok) return false;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const predecessor = extractionChains.get(path) ?? Promise.resolve();
+    const tail = predecessor.then(() => gate);
+    extractionChains.set(path, tail);
+    try {
+      // A predecessor's failure must not starve this turn — the cache
+      // state is re-checked on entry either way.
+      await predecessor.catch(() => {});
+      while (!stop()) {
+        const nextPage = entry.pages.length + 1;
+        if (nextPage > result.doc.pageCount) {
+          entry.complete = true;
+          break;
+        }
+        const page = await result.doc.proxy.getPage(nextPage);
+        const content = await page.getTextContent();
+        // `TextMarkedContent` items carry no `str`; the splitter skips
+        // them. The cast bridges pdf.js's union to the structural shape.
+        entry.pages.push(pdfTextItemsToLines(content.items as readonly PdfTextItemLike[]));
+      }
+      return true;
+    } finally {
+      release();
+      if (extractionChains.get(path) === tail) extractionChains.delete(path);
+    }
+  } finally {
+    await releasePdf(path);
+  }
+}
+
+/**
  * Match `query` inside `path`'s text, extracting pages lazily and stopping
  * once `MAX_MATCHES_PER_FILE` is reached — a superseded or satisfied search
  * leaves the partial extraction cached for the next query to resume.
@@ -322,42 +368,24 @@ export async function searchPdfText(
 
   matchThroughCache();
   if (!truncated && !entry.complete && !isCancelled()) {
-    const result = await acquirePdf(path);
-    try {
-      if (!result.ok) return null;
-      let release!: () => void;
-      const gate = new Promise<void>((resolve) => {
-        release = resolve;
-      });
-      const predecessor = extractionChains.get(path) ?? Promise.resolve();
-      const tail = predecessor.then(() => gate);
-      extractionChains.set(path, tail);
-      try {
-        // A predecessor's failure must not starve this turn — the cache
-        // state is re-checked on entry either way.
-        await predecessor.catch(() => {});
-        while (!truncated && !isCancelled()) {
-          matchThroughCache();
-          if (truncated) break;
-          const nextPage = entry.pages.length + 1;
-          if (nextPage > result.doc.pageCount) {
-            entry.complete = true;
-            break;
-          }
-          const page = await result.doc.proxy.getPage(nextPage);
-          const content = await page.getTextContent();
-          // `TextMarkedContent` items carry no `str`; the splitter skips
-          // them. The cast bridges pdf.js's union to the structural shape.
-          entry.pages.push(pdfTextItemsToLines(content.items as readonly PdfTextItemLike[]));
-        }
-      } finally {
-        release();
-        if (extractionChains.get(path) === tail) extractionChains.delete(path);
-      }
-    } finally {
-      await releasePdf(path);
-    }
+    const loaded = await extractInto(path, entry, () => {
+      matchThroughCache();
+      return truncated || isCancelled();
+    });
+    if (!loaded) return null;
   }
 
   return { matches, truncated };
+}
+
+/**
+ * Every page's lines for `path` at `modifiedAt`, finishing whatever a search
+ * left unextracted — the input for the on-disk text cache (`save_pdf_text`),
+ * after which the Rust scan matches this PDF without pdf.js. `null` when the
+ * document won't load.
+ */
+export async function extractPdfText(path: string, modifiedAt: number): Promise<string[][] | null> {
+  const entry = cachedTextEntry(path, modifiedAt);
+  if (!entry.complete && !(await extractInto(path, entry, () => false))) return null;
+  return entry.pages;
 }

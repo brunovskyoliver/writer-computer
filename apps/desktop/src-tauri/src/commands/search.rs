@@ -2,7 +2,7 @@ use crate::error::AppError;
 use crate::state::{self, AppState, IndexedFile};
 use ignore::WalkBuilder;
 use parking_lot::Mutex;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -40,10 +40,8 @@ pub struct ContextLine {
 #[serde(rename_all = "lowercase")]
 pub enum SearchMatchKind {
     Text,
-    /// PDF `SearchMatch`es are built on the frontend (`lib/pdf-search.ts`) —
-    /// the Rust walk emits `PdfCandidate`s instead, so this variant exists for
-    /// wire parity and is never constructed here.
-    #[allow(dead_code)]
+    /// Built here for PDFs whose text the frontend already saved
+    /// (`save_pdf_text`), and by `lib/pdf-search.ts` for the rest.
     Pdf,
 }
 
@@ -63,9 +61,9 @@ pub struct SearchMatch {
     pub context: Vec<ContextLine>,
 }
 
-/// A `.pdf` in the corpus, emitted by the walk so the frontend can extract
-/// and match its page text through pdf.js (research R3 — pdf.js cannot run
-/// in Rust).
+/// A `.pdf` in the corpus with no saved text, emitted by the walk so the
+/// frontend can extract and match its page text through pdf.js (research R3 —
+/// pdf.js cannot run in Rust) and then save it for the next scan.
 #[derive(Debug, Clone, Serialize)]
 pub struct PdfCandidate {
     pub path: String,
@@ -201,6 +199,35 @@ fn subsequence_score(
     (n == needle.len()).then_some((score.max(0), indices))
 }
 
+/// Queries at least this long forgive one typo (fsearch's rule: short
+/// queries stay strict, or every 3-letter typo matches half the vault).
+const TYPO_MIN_CHARS: usize = 5;
+/// What a forgiven typo costs — one well-placed char's worth, so a typo hit
+/// in the filename still beats a scattered hit across parent folders.
+const TYPO_PENALTY: i64 = FUZZY_CHAR_SCORE + FUZZY_CONSECUTIVE_BONUS + FUZZY_BOUNDARY_BONUS;
+
+/// One-typo fallback for a needle that is not a subsequence: retry with each
+/// single char dropped. Dropping covers a stray, a wrong, or a swapped char
+/// (`mian` → `man` ⊂ `main`); a missing char already passes the subsequence
+/// test. Best surviving variant wins, minus `TYPO_PENALTY`.
+fn typo_score(needles: &[Vec<char>], hay: &[char], boundaries: &[bool]) -> Option<(i64, Vec<u32>)> {
+    needles
+        .iter()
+        .filter(|needle| needle.len() >= TYPO_MIN_CHARS)
+        .flat_map(|needle| {
+            (0..needle.len()).filter_map(move |skip| {
+                let shorter: Vec<char> = needle
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, &c)| (i != skip).then_some(c))
+                    .collect();
+                subsequence_score(&shorter, hay, boundaries)
+            })
+        })
+        .max_by_key(|(score, _)| *score)
+        .map(|(score, indices)| ((score - TYPO_PENALTY).max(0), indices))
+}
+
 /// Per-position boundary flags over `path`, aligned to the chars of its
 /// lowercase form: a position is a boundary at the start, after a
 /// separator, or at a camelCase hump. Built alongside the lowercase chars
@@ -284,7 +311,8 @@ pub(crate) fn fuzzy_search_from(
                     let (raw, indices) = needle_chars
                         .iter()
                         .filter_map(|needle| subsequence_score(needle, &hay_chars, &boundaries))
-                        .max_by_key(|(score, _)| *score)?;
+                        .max_by_key(|(score, _)| *score)
+                        .or_else(|| typo_score(&needle_chars, &hay_chars, &boundaries))?;
                     let mut score = raw as u32;
                     if indices.first().is_some_and(|&i| i >= filename_start_chars) {
                         score += FUZZY_FILENAME_BONUS;
@@ -517,6 +545,95 @@ fn context_around(lines: &[&str], index: usize) -> Vec<ContextLine> {
         .collect()
 }
 
+/// Smart-case matches over `lines` appended to `batch` until it holds
+/// `MAX_MATCHES_PER_FILE`; `make` builds the hit from (line index, ranges).
+/// True once the cap stopped it — the caller marks the scan truncated.
+fn collect_line_matches(
+    lines: &[&str],
+    needle: &[char],
+    case_sensitive: bool,
+    batch: &mut Vec<SearchMatch>,
+    make: impl Fn(usize, Vec<(u32, u32)>) -> SearchMatch,
+) -> bool {
+    for (index, line) in lines.iter().enumerate() {
+        if batch.len() >= MAX_MATCHES_PER_FILE {
+            return true;
+        }
+        let ranges = find_match_ranges_chars(line, needle, case_sensitive);
+        if !ranges.is_empty() {
+            batch.push(make(index, ranges));
+        }
+    }
+    false
+}
+
+/// A PDF's extracted page lines, saved by the frontend after its one pdf.js
+/// pass so later scans match it in Rust like a text file instead of
+/// re-extracting a thousand pages per query. `path` guards hash collisions;
+/// `modified_at` is the staleness check.
+#[derive(Serialize, Deserialize)]
+struct PdfText {
+    path: String,
+    modified_at: u64,
+    pages: Vec<Vec<String>>,
+}
+
+// ponytail: entries for deleted/renamed PDFs are never pruned, and
+// DefaultHasher may change across Rust releases (one re-extraction each).
+// Add a sweep if the cache folder ever gets big.
+fn pdf_text_file(cache_dir: &Path, pdf: &Path) -> PathBuf {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    pdf.hash(&mut hasher);
+    cache_dir.join(format!("{:016x}.json", hasher.finish()))
+}
+
+fn load_pdf_text(cache_dir: &Path, pdf: &Path, modified_at: u64) -> Option<Vec<Vec<String>>> {
+    let bytes = std::fs::read(pdf_text_file(cache_dir, pdf)).ok()?;
+    let saved: PdfText = serde_json::from_slice(&bytes).ok()?;
+    (saved.modified_at == modified_at && Path::new(&saved.path) == pdf).then_some(saved.pages)
+}
+
+fn save_pdf_text_impl(cache_dir: &Path, text: &PdfText) -> Result<(), AppError> {
+    std::fs::create_dir_all(cache_dir).map_err(|e| AppError::Io(e.to_string()))?;
+    let file = pdf_text_file(cache_dir, Path::new(&text.path));
+    // Write-then-rename so a concurrent scan never reads a half-written file.
+    let tmp = file.with_extension("tmp");
+    let json = serde_json::to_vec(text).map_err(|e| AppError::Io(e.to_string()))?;
+    std::fs::write(&tmp, json).map_err(|e| AppError::Io(e.to_string()))?;
+    std::fs::rename(&tmp, &file).map_err(|e| AppError::Io(e.to_string()))
+}
+
+fn pdf_text_dir(app: &tauri::AppHandle) -> Result<PathBuf, AppError> {
+    app.path()
+        .app_cache_dir()
+        .map(|dir| dir.join("pdf-text"))
+        .map_err(|e| AppError::Io(e.to_string()))
+}
+
+/// Persist a fully extracted PDF's page lines for `content_search`.
+#[tauri::command]
+pub async fn save_pdf_text(
+    path: String,
+    modified_at: u64,
+    pages: Vec<Vec<String>>,
+    app: tauri::AppHandle,
+) -> Result<(), AppError> {
+    let dir = pdf_text_dir(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        save_pdf_text_impl(
+            &dir,
+            &PdfText {
+                path,
+                modified_at,
+                pages,
+            },
+        )
+    })
+    .await
+    .map_err(|e| AppError::Io(e.to_string()))?
+}
+
 /// `.pdf` suffix, case-insensitive, on a filename with a real stem — the same
 /// predicate as `isPdfPath` in `lib/pdf.ts` (a file named exactly `.pdf` has
 /// no stem and is not a document).
@@ -532,8 +649,9 @@ fn is_pdf_path(path: &Path) -> bool {
 
 /// The workspace scan behind `content_search`. Walks `root` with the exact
 /// filters `index_workspace_impl` uses and streams results through `emit`:
-/// a `matches` batch per matching text file (≤ `MAX_MATCHES_PER_FILE`),
-/// a `pdf` event per `.pdf` file, and a terminal `done` when the walk
+/// a `matches` batch per matching text file or cached PDF (≤
+/// `MAX_MATCHES_PER_FILE`), a `pdf` event per `.pdf` with no saved text in
+/// `pdf_cache`, and a terminal `done` when the walk
 /// finishes. A cancelled walk emits nothing further — the frontend's seq
 /// guard has already superseded it.
 ///
@@ -542,6 +660,7 @@ fn is_pdf_path(path: &Path) -> bool {
 pub(crate) fn content_search_impl(
     root: &Path,
     query: &str,
+    pdf_cache: Option<&Path>,
     cancel: Arc<AtomicBool>,
     emit: &(dyn Fn(ContentSearchEvent) + Sync),
 ) {
@@ -590,18 +709,27 @@ pub(crate) fn content_search_impl(
                     return ignore::WalkState::Continue;
                 }
                 let path = entry.path();
-                if is_pdf_path(path) {
-                    // PDFs enumerate only — extraction is the frontend's job.
-                    // Candidates keep arriving after the text cap; they carry
-                    // no truncation implication of their own.
-                    emit_ref(ContentSearchEvent::Pdf {
-                        candidate: PdfCandidate {
-                            path: path.to_string_lossy().to_string(),
-                            modified_at: crate::commands::fs::modified_time(path),
-                        },
-                    });
-                    return ignore::WalkState::Continue;
-                }
+                let cached_pdf = if is_pdf_path(path) {
+                    let modified_at = crate::commands::fs::modified_time(path);
+                    match pdf_cache.and_then(|dir| load_pdf_text(dir, path, modified_at)) {
+                        Some(pages) => Some((pages, modified_at)),
+                        None => {
+                            // Not extracted yet — the frontend runs pdf.js
+                            // and saves the text for the next scan. Candidates
+                            // keep arriving after the text cap; they carry no
+                            // truncation implication of their own.
+                            emit_ref(ContentSearchEvent::Pdf {
+                                candidate: PdfCandidate {
+                                    path: path.to_string_lossy().to_string(),
+                                    modified_at,
+                                },
+                            });
+                            return ignore::WalkState::Continue;
+                        }
+                    }
+                } else {
+                    None
+                };
                 // The text cap has engaged: no more text matches can display,
                 // but the walk continues so PDF candidates still enumerate.
                 // Skipping a file here drops matches — that is truncation.
@@ -609,20 +737,6 @@ pub(crate) fn content_search_impl(
                     truncated_ref.store(true, Ordering::Relaxed);
                     return ignore::WalkState::Continue;
                 }
-                let Some(metadata) = entry.metadata().ok() else {
-                    return ignore::WalkState::Continue;
-                };
-                if metadata.len() > MAX_FILE_BYTES {
-                    return ignore::WalkState::Continue;
-                }
-                let Ok(bytes) = std::fs::read(path) else {
-                    return ignore::WalkState::Continue;
-                };
-                let Ok(text) = std::str::from_utf8(&bytes) else {
-                    return ignore::WalkState::Continue;
-                };
-
-                let lines: Vec<&str> = text.lines().collect();
                 let rel = path
                     .strip_prefix(&root)
                     .unwrap_or(path)
@@ -630,33 +744,73 @@ pub(crate) fn content_search_impl(
                     .to_string();
                 let path_str = path.to_string_lossy().to_string();
                 let mut batch: Vec<SearchMatch> = Vec::new();
-                for (index, line) in lines.iter().enumerate() {
-                    if batch.len() >= MAX_MATCHES_PER_FILE {
-                        truncated_ref.store(true, Ordering::Relaxed);
-                        break;
-                    }
-                    let ranges = find_match_ranges_chars(line, needle_ref, case_sensitive);
-                    if ranges.is_empty() {
-                        continue;
-                    }
-                    batch.push(SearchMatch {
-                        path: path_str.clone(),
-                        relative_path: rel.clone(),
-                        modified_at: metadata
-                            .modified()
-                            .ok()
-                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                            .map(|d| d.as_secs())
-                            .unwrap_or_else(|| crate::commands::fs::modified_time(path)),
-                        kind: SearchMatchKind::Text,
-                        line_number: Some((index + 1) as u32),
-                        page: None,
-                        line_text: (*line).to_string(),
-                        match_ranges: ranges,
-                        context: context_around(&lines, index),
-                    });
-                }
 
+                if let Some((pages, modified_at)) = cached_pdf {
+                    for (page_index, page) in pages.iter().enumerate() {
+                        let lines: Vec<&str> = page.iter().map(String::as_str).collect();
+                        let capped = collect_line_matches(
+                            &lines,
+                            needle_ref,
+                            case_sensitive,
+                            &mut batch,
+                            |index, ranges| SearchMatch {
+                                path: path_str.clone(),
+                                relative_path: rel.clone(),
+                                modified_at,
+                                kind: SearchMatchKind::Pdf,
+                                line_number: None,
+                                page: Some((page_index + 1) as u32),
+                                line_text: lines[index].to_string(),
+                                match_ranges: ranges,
+                                context: context_around(&lines, index),
+                            },
+                        );
+                        if capped {
+                            truncated_ref.store(true, Ordering::Relaxed);
+                            break;
+                        }
+                    }
+                } else {
+                    let Some(metadata) = entry.metadata().ok() else {
+                        return ignore::WalkState::Continue;
+                    };
+                    if metadata.len() > MAX_FILE_BYTES {
+                        return ignore::WalkState::Continue;
+                    }
+                    let Ok(bytes) = std::fs::read(path) else {
+                        return ignore::WalkState::Continue;
+                    };
+                    let Ok(text) = std::str::from_utf8(&bytes) else {
+                        return ignore::WalkState::Continue;
+                    };
+                    let modified_at = metadata
+                        .modified()
+                        .ok()
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs())
+                        .unwrap_or_else(|| crate::commands::fs::modified_time(path));
+                    let lines: Vec<&str> = text.lines().collect();
+                    let capped = collect_line_matches(
+                        &lines,
+                        needle_ref,
+                        case_sensitive,
+                        &mut batch,
+                        |index, ranges| SearchMatch {
+                            path: path_str.clone(),
+                            relative_path: rel.clone(),
+                            modified_at,
+                            kind: SearchMatchKind::Text,
+                            line_number: Some((index + 1) as u32),
+                            page: None,
+                            line_text: lines[index].to_string(),
+                            match_ranges: ranges,
+                            context: context_around(&lines, index),
+                        },
+                    );
+                    if capped {
+                        truncated_ref.store(true, Ordering::Relaxed);
+                    }
+                }
                 if !batch.is_empty() {
                     let prev = total_ref.fetch_add(batch.len(), Ordering::SeqCst);
                     if prev >= MAX_TOTAL_MATCHES {
@@ -707,8 +861,9 @@ pub async fn content_search(
         fresh
     };
 
+    let pdf_cache = pdf_text_dir(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
-        content_search_impl(&root, &query, cancel, &|event| {
+        content_search_impl(&root, &query, Some(&pdf_cache), cancel, &|event| {
             let _ = on_event.send(event);
         });
     })
@@ -886,6 +1041,17 @@ mod tests {
     }
 
     #[test]
+    fn test_fuzzy_search_forgives_one_typo_in_long_queries() {
+        let dir = setup_workspace();
+        let (index, _dirs) = index_workspace_test(dir.path());
+        // Swapped letters: `gudie` is not a subsequence of `guide`.
+        let results = fuzzy_search_impl("gudie", &index, 50);
+        assert_eq!(results[0].filename, "guide.md");
+        // Under five chars stays strict.
+        assert!(fuzzy_search_impl("gudi", &index, 50).is_empty());
+    }
+
+    #[test]
     fn test_fuzzy_search_exact_substring_beats_subsequence() {
         // "draft" is a literal substring of the `drafts` directory name but
         // only a scattered subsequence inside `d-r-a-f-t.md`. The exact tier
@@ -1024,9 +1190,13 @@ mod tests {
 
     fn search_events(root: &Path, query: &str) -> Vec<ContentSearchEvent> {
         let events = Mutex::new(Vec::new());
-        content_search_impl(root, query, Arc::new(AtomicBool::new(false)), &|event| {
-            events.lock().push(event)
-        });
+        content_search_impl(
+            root,
+            query,
+            None,
+            Arc::new(AtomicBool::new(false)),
+            &|event| events.lock().push(event),
+        );
         events.into_inner()
     }
 
@@ -1168,6 +1338,66 @@ mod tests {
     }
 
     #[test]
+    fn test_content_search_matches_saved_pdf_text_in_rust() {
+        let dir = TempDir::new().unwrap();
+        let cache = TempDir::new().unwrap();
+        let pdf = dir.path().join("book.pdf");
+        fs::write(&pdf, b"%PDF").unwrap();
+        let modified_at = crate::commands::fs::modified_time(&pdf);
+        let pages = vec![
+            vec!["intro".to_string()],
+            vec!["a".into(), "the ferry".into()],
+        ];
+        save_pdf_text_impl(
+            cache.path(),
+            &PdfText {
+                path: pdf.to_string_lossy().to_string(),
+                modified_at,
+                pages,
+            },
+        )
+        .unwrap();
+
+        let events = Mutex::new(Vec::new());
+        let run = |cache_dir: Option<&Path>| {
+            content_search_impl(
+                dir.path(),
+                "ferry",
+                cache_dir,
+                Arc::new(AtomicBool::new(false)),
+                &|event| events.lock().push(event),
+            )
+        };
+        run(Some(cache.path()));
+        let found = events.lock().drain(..).collect::<Vec<_>>();
+        let matches = text_matches(&found);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].kind, SearchMatchKind::Pdf);
+        assert_eq!(matches[0].page, Some(2));
+        assert_eq!(matches[0].context[1].line_number, 2);
+        assert!(!found
+            .iter()
+            .any(|e| matches!(e, ContentSearchEvent::Pdf { .. })));
+
+        // A stale entry (different mtime) falls back to a pdf.js candidate.
+        save_pdf_text_impl(
+            cache.path(),
+            &PdfText {
+                path: pdf.to_string_lossy().to_string(),
+                modified_at: modified_at + 1,
+                pages: vec![vec!["ferry".into()]],
+            },
+        )
+        .unwrap();
+        run(Some(cache.path()));
+        let found = events.into_inner();
+        assert!(text_matches(&found).is_empty());
+        assert!(found
+            .iter()
+            .any(|e| matches!(e, ContentSearchEvent::Pdf { .. })));
+    }
+
+    #[test]
     fn test_content_search_cancelled_walk_sends_no_done() {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("notes.md"), "ferry\n").unwrap();
@@ -1176,6 +1406,7 @@ mod tests {
         content_search_impl(
             dir.path(),
             "ferry",
+            None,
             Arc::new(AtomicBool::new(true)),
             &|event| events.lock().push(event),
         );
