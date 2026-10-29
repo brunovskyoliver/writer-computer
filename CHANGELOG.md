@@ -2,6 +2,8 @@
 
 ## 2026-10-29
 
+- The active tab stays visible when the window or split pane narrows, or the sidebar expands. Manual tab-strip scrolling remains available.
+
 - Saving preserves a note's existing file permissions and updates symlink targets without replacing the links. Read-only and non-file destinations fail explicitly; failed atomic replacements clean up temporary output.
 
 ## 2026-10-08

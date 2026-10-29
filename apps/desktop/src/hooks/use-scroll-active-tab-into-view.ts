@@ -3,7 +3,7 @@ import { usePaneActiveTabId } from "./use-editor-layout";
 
 /**
  * Scrolls a pane's active tab (tagged with `data-tab-id={tabId}`) into view
- * inside that pane's strip whenever the pane's active tab changes.
+ * inside that pane's strip whenever the pane's active tab or strip size changes.
  *
  * - Uses instant scrolling (no animation).
  * - Skips the scroll if the tab is already fully visible.
@@ -37,8 +37,15 @@ export function useScrollActiveTabIntoView(
       });
     };
     scroll();
-    if (!settleMs) return;
-    const timer = setTimeout(scroll, settleMs);
-    return () => clearTimeout(timer);
+    // Pane splits and sidebar expansion can clip the active tab without a
+    // window resize or an activation change. Observe only geometry so manual
+    // horizontal scrolling never snaps back to the active tab.
+    const observer = new ResizeObserver(scroll);
+    if (stripRef.current) observer.observe(stripRef.current);
+    const timer = settleMs ? setTimeout(scroll, settleMs) : null;
+    return () => {
+      observer.disconnect();
+      if (timer !== null) clearTimeout(timer);
+    };
   }, [activeTabId, stripRef, tabCount, settleMs]);
 }

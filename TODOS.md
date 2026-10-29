@@ -11,7 +11,9 @@
 
 ## Done
 
-- AUD-02: Preserve permissions and symlinks on atomic text saves ([ticket](SPECs/Agent/worksheet-audit-atomic-save.md)). Eight regressions added; 286 Rust tests pass; isolated release-app IPC confirms private modes, symlink identity, read-only rejection and no temporary-file leaks. Rust and QA reviews approved.
+- AUD-04: Keep the active tab visible when its pane shrinks ([ticket](SPECs/Agent/worksheet-audit-tab-resize.md)). 1,696 frontend tests pass; native window, sidebar and split-pane checks pass; manual scrolling preserved. Frontend, UX and QA reviews approved.
+
+- AUD-02: Preserve permissions and symlinks on atomic text saves ([ticket](SPECs/Agent/worksheet-audit-atomic-save.md)). `3aef86f`. Eight regressions added; 286 Rust tests pass; isolated release-app IPC confirms private modes, symlink identity, read-only rejection and no temporary-file leaks. Rust and QA reviews approved.
 
 - Review 22: Bound wiki image resolution caching ([ticket](SPECs/Agent/worksheet-review-22-embed-resolution-cache.md)). `7e91450`. Bounded reset-aware caching and live widget checks pass; all 1,687 frontend tests pass. All 20 review findings and two adjacent fixes are complete: [final report](SPECs/review-fixes/report.md).
 
