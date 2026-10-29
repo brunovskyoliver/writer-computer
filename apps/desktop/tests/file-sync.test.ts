@@ -219,6 +219,47 @@ test("external deletion preserves text until explicit recreation", async () => {
   expect(disk).toBe("baseline");
 });
 
+test("a publication collision keeps the recreation draft dirty and reports the failure", async () => {
+  await store().openFile(path);
+  disk = null;
+  await refresh();
+  const ordinaryWrite = write;
+  let publicationAttempt = true;
+  write = async (content, expected) => {
+    if (!publicationAttempt) return ordinaryWrite(content, expected);
+    publicationAttempt = false;
+    expect(expected).toBeNull();
+    disk = "created by another process";
+    throw `Already exists: ${path}`;
+  };
+  const errors: string[] = [];
+  const unsubscribe = useEditorStore.subscribe((state) => {
+    const error = state.openFiles.get(path)?.saveError;
+    if (error) errors.push(error);
+  });
+  let saved: boolean;
+  try {
+    saved = await keepLocalFileChanges(path);
+  } finally {
+    unsubscribe();
+  }
+  expect(saved).toBe(false);
+  expect(errors).toContain(`Already exists: ${path}`);
+  expect(disk).toBe("created by another process");
+  expect(file().content).toBe("baseline");
+  expect(file().isDirty).toBe(true);
+  expect(file().diskContent).toBeNull();
+  // saveNow retries after the in-flight publication failure. The existing
+  // destination is then rejected at its precondition, restoring conflict choices.
+  expect(file().conflict?.diskContent).toBe("created by another process");
+  expect(file().content).toBe("baseline");
+  expect(file().isDirty).toBe(true);
+  expect(disk).toBe("created by another process");
+  const attempts = writes.length;
+  await vi.advanceTimersByTimeAsync(10000);
+  expect(writes).toHaveLength(attempts);
+});
+
 test("use disk rereads rather than loading the version cached in the notice", async () => {
   await conflict();
   disk = "newer external";

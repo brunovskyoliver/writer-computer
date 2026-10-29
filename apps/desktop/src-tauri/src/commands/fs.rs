@@ -412,8 +412,9 @@ fn write_file_checked_impl(
         }
     }
 
-    atomic_replace_file(&file_path, content, permissions, |from, to| {
-        fs::rename(from, to)
+    let create_only = expected.is_some_and(|value| value.content.is_none());
+    atomic_write_file(&file_path, content, permissions, |from, to| {
+        publish_temporary_file(from, to, create_only)
     })?;
 
     Ok(WriteResult {
@@ -436,13 +437,67 @@ fn file_write_lock(path: &Path) -> Arc<parking_lot::Mutex<()>> {
     lock
 }
 
-fn atomic_replace_file(
+enum Publication {
+    Renamed,
+    #[cfg(any(not(target_os = "macos"), test))]
+    Linked,
+}
+
+/// A missing-file precondition must remain true at the publication boundary,
+/// including against writers outside this process.
+fn publish_temporary_file(
+    temporary: &Path,
+    destination: &Path,
+    create_only: bool,
+) -> Result<Publication, AppError> {
+    if create_only {
+        publish_new_file(temporary, destination).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::AlreadyExists {
+                AppError::AlreadyExists(destination.to_string_lossy().into_owned())
+            } else {
+                AppError::from(error)
+            }
+        })
+    } else {
+        fs::rename(temporary, destination)?;
+        Ok(Publication::Renamed)
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn publish_new_file(temporary: &Path, destination: &Path) -> std::io::Result<Publication> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    let temporary = CString::new(temporary.as_os_str().as_bytes())?;
+    let destination = CString::new(destination.as_os_str().as_bytes())?;
+    // Hard-link publication followed by unlinking the temp can hide subsequent
+    // destination deletions from FSEvents. Exclusive rename preserves normal
+    // file events while atomically refusing an occupied destination.
+    // SAFETY: both pointers refer to live, NUL-terminated strings. renamex_np
+    // does not retain them. RENAME_EXCL is the platform's no-replace flag.
+    let result =
+        unsafe { libc::renamex_np(temporary.as_ptr(), destination.as_ptr(), libc::RENAME_EXCL) };
+    if result == 0 {
+        Ok(Publication::Renamed)
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn publish_new_file(temporary: &Path, destination: &Path) -> std::io::Result<Publication> {
+    fs::hard_link(temporary, destination)?;
+    Ok(Publication::Linked)
+}
+
+fn atomic_write_file(
     file_path: &Path,
     content: &str,
     permissions: Option<fs::Permissions>,
-    replace: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
+    publish: impl FnOnce(&Path, &Path) -> Result<Publication, AppError>,
 ) -> Result<(), AppError> {
-    // Adjacent to the resolved target so the rename stays on one filesystem.
+    // Adjacent to the resolved target so publication stays on one filesystem.
     let dir = file_path
         .parent()
         .ok_or_else(|| AppError::Io("No parent directory".into()))?;
@@ -456,25 +511,35 @@ fn atomic_replace_file(
         options.mode(0o600);
     }
     let mut temporary = options.open(&temp_path)?;
-    let result = (|| -> std::io::Result<()> {
+    let result = (|| -> Result<Publication, AppError> {
         temporary.write_all(content.as_bytes())?;
         if let Some(permissions) = permissions {
             temporary.set_permissions(permissions)?;
         }
         drop(temporary);
-        replace(&temp_path, file_path)
+        publish(&temp_path, file_path)
     })();
-    if let Err(error) = result {
-        if let Err(cleanup) = fs::remove_file(&temp_path) {
-            return Err(AppError::Io(format!(
-                "{error}; could not remove temporary save file {}: {cleanup}",
-                temp_path.display()
-            )));
-        }
-        return Err(error.into());
+    let failure = match result {
+        // Rename consumed the temporary name; no cleanup syscall is needed.
+        Ok(Publication::Renamed) => return Ok(()),
+        #[cfg(any(not(target_os = "macos"), test))]
+        Ok(Publication::Linked) => None,
+        Err(error) => Some(error),
+    };
+    if let Err(cleanup) = fs::remove_file(&temp_path) {
+        let outcome = failure.as_ref().map_or_else(
+            || "Destination was published successfully".to_owned(),
+            ToString::to_string,
+        );
+        return Err(AppError::Io(format!(
+            "{outcome}; could not remove temporary save file {}: {cleanup}",
+            temp_path.display()
+        )));
     }
-
-    Ok(())
+    match failure {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
 }
 
 #[tauri::command]
@@ -1363,15 +1428,163 @@ mod tests {
     }
 
     #[test]
+    fn test_missing_file_publication_does_not_replace_external_create() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("copy.md");
+        assert!(!path.exists());
+        let result = atomic_write_file(&path, "Writer copy", None, |temporary, destination| {
+            // Another process creates the destination after the missing-file check.
+            fs::write(destination, "external bytes")?;
+            publish_temporary_file(temporary, destination, true)
+        });
+        assert!(matches!(result, Err(AppError::AlreadyExists(_))));
+        assert_eq!(fs::read_to_string(&path).unwrap(), "external bytes");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn conditional_creation_removes_its_temporary_name() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("new.md");
+        write_file_checked_impl(
+            path.to_str().unwrap(),
+            "complete bytes",
+            Some(&ExpectedContent { content: None }),
+        )
+        .unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "complete bytes");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            assert_eq!(fs::metadata(&path).unwrap().nlink(), 1);
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn exclusive_publication_consumes_temp_with_unicode_paths() {
+        let dir = TempDir::new().unwrap();
+        let temporary = dir.path().join(".~kladden-π");
+        let destination = dir.path().join("Noter til øvelser π.md");
+        fs::write(&temporary, "complete bytes").unwrap();
+        assert!(matches!(
+            publish_temporary_file(&temporary, &destination, true).unwrap(),
+            Publication::Renamed
+        ));
+        assert!(!temporary.exists());
+        assert_eq!(fs::read_to_string(destination).unwrap(), "complete bytes");
+    }
+
+    #[test]
+    fn concurrent_creation_has_one_winner_at_publication_without_writer_locks() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("copy.md");
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let workers: Vec<_> = ["first", "second"]
+            .into_iter()
+            .map(|content| {
+                let path = path.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    let result =
+                        atomic_write_file(&path, content, None, |temporary, destination| {
+                            barrier.wait();
+                            publish_temporary_file(temporary, destination, true)
+                        });
+                    (content, result)
+                })
+            })
+            .collect();
+        let outcomes: Vec<_> = workers
+            .into_iter()
+            .map(|worker| worker.join().unwrap())
+            .collect();
+        let winners: Vec<_> = outcomes
+            .iter()
+            .filter(|(_, result)| result.is_ok())
+            .collect();
+        assert_eq!(winners.len(), 1);
+        assert_eq!(fs::read_to_string(&path).unwrap(), winners[0].0);
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter(|(_, result)| matches!(result, Err(AppError::AlreadyExists(_))))
+                .count(),
+            1
+        );
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn creation_preserves_a_dangling_link_created_at_publication() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("copy.md");
+        let result = atomic_write_file(&path, "Writer copy", None, |temporary, destination| {
+            std::os::unix::fs::symlink("absent.md", destination)?;
+            publish_temporary_file(temporary, destination, true)
+        });
+        assert!(matches!(result, Err(AppError::AlreadyExists(_))));
+        assert_eq!(fs::read_link(&path).unwrap(), Path::new("absent.md"));
+        assert!(!dir.path().join("absent.md").exists());
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn link_cleanup_failure_reports_whether_publication_succeeded() {
+        for competing_file in [false, true] {
+            let dir = TempDir::new().unwrap();
+            let path = dir.path().join("copy.md");
+            let result = atomic_write_file(&path, "Writer copy", None, |temporary, destination| {
+                if competing_file {
+                    fs::write(destination, "external bytes")?;
+                }
+                // Exercise retained-temp cleanup on every platform, including
+                // macOS where production publication consumes the temp name.
+                let published = fs::hard_link(temporary, destination)
+                    .map(|()| Publication::Linked)
+                    .map_err(|error| {
+                        AppError::Io(format!("injected publication failure: {error}"))
+                    });
+                // Force the cleanup operation to fail without platform-specific ACLs.
+                fs::remove_file(temporary)?;
+                fs::create_dir(temporary)?;
+                published
+            });
+            let error = result.unwrap_err();
+            // A cleanup error must not masquerade as a retryable name collision.
+            assert!(matches!(error, AppError::Io(_)));
+            let message = error.to_string();
+            assert!(message.contains("could not remove temporary save file"));
+            assert_eq!(
+                message.contains("Destination was published successfully"),
+                !competing_file
+            );
+            if competing_file {
+                assert!(message.contains("injected publication failure:"));
+            }
+            assert_eq!(
+                fs::read_to_string(&path).unwrap(),
+                if competing_file {
+                    "external bytes"
+                } else {
+                    "Writer copy"
+                }
+            );
+        }
+    }
+
+    #[test]
     fn test_write_file_cleans_up_after_failed_replace() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("note.md");
         fs::write(&path, "old").unwrap();
-        let result = atomic_replace_file(&path, "new", None, |temporary, destination| {
+        let result = atomic_write_file(&path, "new", None, |temporary, destination| {
             assert_eq!(temporary.parent(), destination.parent());
             assert_eq!(fs::read_to_string(temporary).unwrap(), "new");
             assert_eq!(fs::read_to_string(destination).unwrap(), "old");
-            Err(std::io::Error::other("injected rename failure"))
+            Err(std::io::Error::other("injected rename failure").into())
         });
         assert!(result
             .unwrap_err()

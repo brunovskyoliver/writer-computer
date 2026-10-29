@@ -2,6 +2,8 @@
 
 ## In Progress
 
+- AUD-03: Preview and import Obsidian drawings ([ticket](SPECs/Agent/worksheet-audit-obsidian-drawings.md)). Plan reviewed; AUD-10 prerequisite verified. Implementation next. Full migration remains part of the broader audit.
+
 - Comprehensive Writer audit and improvement: [worksheet](SPECs/Agent/worksheet-comprehensive-audit.md). SDU workflow reference; native UI, reliability and performance baselines, followed by individually reviewed and verified fixes. Preserve pre-existing uncommitted math/Mermaid work and original vault data.
 
 - PDF viewing, highlighting and quote links: [`SPECs/pdf-quote-links/spec.md`](SPECs/pdf-quote-links/spec.md) — PDFs open from the sidebar in their own tab and split beside a note; selecting text or dragging a region raises a quote button that inserts a Markdown blockquote plus an anchored link, and clicking that link reveals the PDF at the anchored passage, reusing an already-open view. Spec approved: notes are the only store for a quote, so showing every prior highlight on a reopened PDF is a non-goal. Ready for planning.
@@ -11,7 +13,9 @@
 
 ## Done
 
-- AUD-07: Usable small split panes ([report](SPECs/Agent/worksheet-audit-small-panes.md)). Responsive tab chrome, readable properties/text, compact conflict review, Find placement and Vim scroll/focus fixes. 1,726 frontend tests; native geometry, editing, recovery, undo, light/dark and AeroSpace checks pass.
+- AUD-10: Publish new files without replacing competing files ([report](SPECs/Agent/worksheet-audit-create-publication.md)). macOS exclusive rename preserves watcher behavior; deterministic collision tests, 298 Rust tests, 1,727 frontend tests and three native recreation cycles pass.
+
+- AUD-07 (`ba29d11`): Usable small split panes ([report](SPECs/Agent/worksheet-audit-small-panes.md)). Responsive tab chrome, readable properties/text, compact conflict review, Find placement and Vim scroll/focus fixes. 1,726 frontend tests; native geometry, editing, recovery, undo, light/dark and AeroSpace checks pass.
 
 - AUD-01 (`2a71ac0`): Preserve local edits during external changes ([report](SPECs/Agent/worksheet-audit-file-conflicts.md)). Conditional saves, guarded reads/load completion, reachable conflict tabs, explicit recovery and text watcher echo reconciliation. 1,720 frontend + 292 Rust tests pass; native conflict/recreation/focus checks pass. Minimum-pane layout remains AUD-07.
 

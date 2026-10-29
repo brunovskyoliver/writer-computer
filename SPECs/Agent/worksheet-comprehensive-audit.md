@@ -45,17 +45,21 @@ Do not run the source vault's synchronization or modify its files during audit.
 | ------ | --------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
 | AUD-01 | P1        | External reload overwrites newer edits or completed saves; dirty conflicts silently discard local text | Fixed in `2a71ac0`; 1,720 frontend / 292 Rust tests and native recovery verified                 |
 | AUD-02 | P2        | Atomic text save replaces permissions and symlink identity                                             | Fixed in `3aef86f`; 286 Rust tests and native IPC verified                                       |
-| AUD-03 | P2        | Eight SDU Obsidian Excalidraw Markdown drawings/embeds unsupported                                     | Source and vault inventory confirmed; import/preview pending                                     |
+| AUD-03 | P2        | SDU Obsidian Excalidraw Markdown drawings/embeds unsupported                                           | Current scan: seven files; native baseline confirmed; preview/import task in progress            |
 | AUD-04 | P2        | Active tab clipped after window/pane resize                                                            | Fixed in `7ae7721`; 1,696 frontend tests and native layout checks pass                           |
 | AUD-05 | P2        | Existing course plugin persistence queue stays rejected after one IO failure                           | Static finding; source plugin not modified                                                       |
 | AUD-06 | P2        | Calendar refresh interval, course-folder mapping and dedup map drift                                   | Static findings plus stored-data mismatch; synthetic reproduction pending                        |
-| AUD-07 | P2        | Minimum split pane clips tab chrome; conflict notice leaves zero editor height                         | Fixed locally; 1,726 frontend tests and native layout/conflict/Vim checks pass                   |
+| AUD-07 | P2        | Minimum split pane clips tab chrome; conflict notice leaves zero editor height                         | Fixed in `ba29d11`; 1,726 frontend tests and native layout/conflict/Vim checks pass              |
 | AUD-08 | P2        | Wiki note fragment not passed to navigation; moves do not rewrite note links                           | Static inspection; runtime reproduction pending                                                  |
 | AUD-09 | Untriaged | PDF rectangle encoding compatibility                                                                   | Inspect actual grammar before claiming compatibility; no PDF++ selection anchors observed in SDU |
 
+AUD-10 (P1): expected-missing saves can replace an external file created between
+check and rename. Fixed and verified with exclusive publication; 298 Rust / 1,727
+frontend tests and repeated native recreation pass. Report: [atomic new-file publication](worksheet-audit-create-publication.md).
+
 ## Verification and remaining work
 
-Audit remains in progress. Four fixes implemented, reviewed and tested. No production
+Audit remains in progress. Five fixes implemented, reviewed and tested. No production
 installation, deployment or vault migration. No original notes changed.
 
 - Evidence reports: `academic-workflow.md`, `reliability.md` under the evidence directory.

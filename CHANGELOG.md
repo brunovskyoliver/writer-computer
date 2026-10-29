@@ -2,6 +2,8 @@
 
 ## 2026-10-29
 
+- Recreating a deleted note no longer replaces a file another process creates between the missing-file check and publication. The competing file is preserved and the draft remains unsaved.
+
 - Small split panes keep tabs, writing and conflict recovery usable. Narrow properties stack; short panes collapse Properties and move conflict choices into a review dialog. Find stays outside short panes, Vim commands fit their footer, and rapid Vim scrolling keeps the cursor visible.
 
 - External edits and deletions preserve open drafts. Conflicts pause saving and offer explicit local/disk choices or recreation; stale reads and saves cannot replace reopened buffers. Conditional text saves no longer hide quick external changes behind self-write suppression.

@@ -288,3 +288,13 @@ the guarded disk read for a conflicted file before closing its view, so another
 view cannot inherit a stale baseline as clean text. A missing file or newer typing
 keeps the conflict open. Ordinary non-conflict `:q!` retains its existing discard
 behavior. Conflict notices sit outside editor masks; their editor has no top fade.
+
+When a write expects a missing destination, publication uses macOS exclusive
+rename (`renamex_np`, `RENAME_EXCL`), or an atomic hard link on other platforms,
+from the completed adjacent temporary file. A destination created after the
+precondition check is preserved and the save reports AlreadyExists; the earlier
+precondition mismatch still reports FileConflict. There is no replacing-rename
+fallback when the filesystem lacks support for that operation. Successful creation
+removes its temporary name. A cleanup failure reports whether publication succeeded and
+is not a retryable filename collision. Existing-file replacement remains an
+optimistic check followed by rename, not an OS-wide compare-and-swap operation.
