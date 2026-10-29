@@ -45,7 +45,7 @@ Do not run the source vault's synchronization or modify its files during audit.
 | ------ | --------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
 | AUD-01 | P1        | External reload overwrites newer edits or completed saves; dirty conflicts silently discard local text | Fixed in `2a71ac0`; 1,720 frontend / 292 Rust tests and native recovery verified                 |
 | AUD-02 | P2        | Atomic text save replaces permissions and symlink identity                                             | Fixed in `3aef86f`; 286 Rust tests and native IPC verified                                       |
-| AUD-03 | P2        | SDU Obsidian Excalidraw Markdown drawings/embeds unsupported                                           | Preview/copy verified; 1,801 frontend / 305 Rust tests; full migration remains open              |
+| AUD-03 | P2        | SDU Obsidian Excalidraw Markdown drawings/embeds unsupported                                           | Preview/copy in `96e835d`; 1,801 frontend / 305 Rust tests; full migration remains open          |
 | AUD-04 | P2        | Active tab clipped after window/pane resize                                                            | Fixed in `7ae7721`; 1,696 frontend tests and native layout checks pass                           |
 | AUD-05 | P2        | Existing course plugin persistence queue stays rejected after one IO failure                           | Static finding; source plugin not modified                                                       |
 | AUD-06 | P2        | Calendar refresh interval, course-folder mapping and dedup map drift                                   | Static findings plus stored-data mismatch; synthetic reproduction pending                        |
@@ -59,7 +59,7 @@ frontend tests and repeated native recreation pass. Report: [atomic new-file pub
 
 ## Verification and remaining work
 
-Audit remains in progress. Six improvements implemented, reviewed and tested. No production
+Audit remains in progress. Seven improvements implemented and tested; AUD-12 uses the documented trivial-review exception. No production
 installation, deployment or vault migration. No original notes changed.
 
 - Evidence reports: `academic-workflow.md`, `reliability.md` under the evidence directory.
@@ -108,3 +108,11 @@ Next: resolve drawing export stalls, fragment links and course navigation. Full 
 preservation, save concurrency with external processes, performance profiling,
 accessibility and remaining UI states are still open. AUD-01 report has final native
 and automated evidence; no broad completion claim is made.
+
+AUD-12 (P2): deleted drawing elements inflated SVG export bounds, reducing visible
+content to a tiny area. Reproduced natively with a mixed fixture containing a
+far-away deleted rectangle. Shared-export filter verified with 1,802 frontend tests, native bounds/path comparison
+and copy/reload/source preservation ([report](worksheet-audit-deleted-drawing-bounds.md)).
+
+Audit paused at Oliver's request after AUD-12, pending review. AUD-11 research and
+controlled baseline are recorded; no performance patch has been implemented.

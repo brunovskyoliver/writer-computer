@@ -2,6 +2,8 @@
 
 ## 2026-10-29
 
+- Deleted drawing shapes no longer enlarge preview or exported SVG bounds. Visible shapes keep their size and placement; original files and live undo state remain intact.
+
 - Obsidian Excalidraw Markdown drawings open as previews and render in wiki embeds. Create editable copy writes a separate SVG; the original drawing and existing note links stay intact. Unsupported drawing content reports an error.
 
 - Recreating a deleted note no longer replaces a file another process creates between the missing-file check and publication. The competing file is preserved and the draft remains unsaved.

@@ -135,7 +135,7 @@ export async function exportDrawing(
 ): Promise<string> {
   const { exportToSvg } = await loadDrawingRuntime();
   const svg = await exportToSvg({
-    elements: scene.elements,
+    elements: scene.elements.filter((element) => !element.isDeleted),
     appState: { ...scene.appState, exportEmbedScene: embedScene, exportBackground: false },
     files: scene.files,
   });

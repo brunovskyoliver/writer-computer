@@ -11,7 +11,9 @@
 
 ## Done
 
-- AUD-03: Obsidian drawing previews and explicit editable copies ([report](SPECs/Agent/worksheet-audit-obsidian-drawings.md)). 1,801 frontend / 305 Rust tests, native copy/save/reopen, source preservation, compact watcher recovery, small-pane and tiling checks pass. Full migration remains in the broader audit.
+- AUD-12: Deleted drawing elements no longer inflate export bounds ([report](SPECs/Agent/worksheet-audit-deleted-drawing-bounds.md)). 1,802 frontend tests, native SVG geometry comparison and copy/reload/source-preservation checks pass.
+
+- AUD-03 (`96e835d`): Obsidian drawing previews and explicit editable copies ([report](SPECs/Agent/worksheet-audit-obsidian-drawings.md)). 1,801 frontend / 305 Rust tests, native copy/save/reopen, source preservation, compact watcher recovery, small-pane and tiling checks pass. Full migration remains in the broader audit.
 
 - AUD-10 (`430e347`): Publish new files without replacing competing files ([report](SPECs/Agent/worksheet-audit-create-publication.md)). macOS exclusive rename preserves watcher behavior; deterministic collision tests, 298 Rust tests, 1,727 frontend tests and three native recreation cycles pass.
 
@@ -167,7 +169,7 @@
 
 ## Up Next
 
-- AUD-11: Reduce synchronous SVG export stalls for large drawings. Native profiling found about 100ms of stroke rendering after off-thread decode; comparable foreground measurements and export architecture investigation remain ([findings](SPECs/Agent/worksheet-comprehensive-audit.md)).
+- AUD-11: Reduce synchronous export stalls for large drawings ([worksheet](SPECs/Agent/worksheet-audit-drawing-performance.md)). Native profiling is recorded; investigate a rendering change that preserves scene fidelity, then review and measure it.
 
 - WebContent retention caveat: [`SPECs/Agent/worksheet-webcontent-retention.md`](SPECs/Agent/worksheet-webcontent-retention.md) — post-close WebContent RSS is ~790 MB while `footprint` shows ~264 MB live + ~544 MB reclaimable. Split live-JS vs allocator pools via a heap-snapshot diff and fix anything still reachable.
 
