@@ -150,13 +150,16 @@ export function EditorSearchOverlay() {
   return (
     // The overlay lives in the body of the pane whose editor it searches, so
     // with several panes it is unambiguous which document "find" means.
-    <PaneSurface tabId={editorApi.getTabIdForView(view)}>
+    <PaneSurface tabId={editorApi.getTabIdForView(view)} avoidSmallPane>
       <SurfaceCard
         role="dialog"
         aria-label="Find in document"
         data-search-overlay
         className="pointer-events-auto absolute bottom-2 right-3 z-40 w-[min(560px,calc(100%-1.5rem))] overflow-hidden p-2"
       >
+        <div className="pane-search-context">
+          Find in {editorApi.getEditorRegistrationForView(view)?.path.split(/[\\/]/).pop()}
+        </div>
         <div className="flex items-center gap-1.5">
           <div className="relative min-w-0 flex-1">
             <span

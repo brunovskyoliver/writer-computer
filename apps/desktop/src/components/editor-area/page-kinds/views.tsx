@@ -34,12 +34,22 @@ const FileTabBody = ({
   tabId,
   isVisible,
   isFocused,
+  compactHeight = false,
 }: {
   location: FileLocation;
   tabId: string;
   isVisible: boolean;
   isFocused: boolean;
-}) => <EditorPane tabId={tabId} path={location.path} isVisible={isVisible} isFocused={isFocused} />;
+  compactHeight?: boolean;
+}) => (
+  <EditorPane
+    tabId={tabId}
+    path={location.path}
+    isVisible={isVisible}
+    isFocused={isFocused}
+    compactHeight={compactHeight}
+  />
+);
 
 const views = {
   // No footer: a drawing has no word count, frontmatter or document date.

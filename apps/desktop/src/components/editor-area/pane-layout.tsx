@@ -13,6 +13,8 @@ import { useEditorStore } from "@/stores/editor-store";
 import { pageKindView } from "./page-kinds/views";
 import { EditorTabs } from "./editor-tabs";
 import { registerPaneBody, usePaneRect } from "./pane-bounds";
+import { paneChrome } from "./pane-chrome";
+import "./pane-chrome.css";
 
 /**
  * The pane tree's chrome and geometry. It renders *slots*, not tab bodies:
@@ -59,6 +61,7 @@ function PaneSlot({ paneId }: { paneId: string }) {
 
   return (
     <div
+      {...paneChrome(rect)}
       data-pane-id={paneId}
       data-pane-focused={isFocused || undefined}
       className="relative min-h-0 min-w-0 flex-1"

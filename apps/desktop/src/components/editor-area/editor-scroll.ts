@@ -1,5 +1,5 @@
 import { EditorView } from "@codemirror/view";
-import { EDITOR_SAFE_SCROLL_MARGIN } from "./editor-scroll-container";
+import { editorScrollInsets } from "./editor-scroll-geometry";
 
 /** The nearest ancestor of `root` that actually scrolls. Writer's `.cm-scroller`
  *  is `overflow: visible`; the real scroller is `EditorScrollContainer`. */
@@ -25,7 +25,7 @@ export function scrollPosToSafeTop(
   const block = view.lineBlockAt(Math.min(pos, view.state.doc.length));
   const screenY = view.documentTop + block.top;
   const scrollerRect = scroller.getBoundingClientRect();
-  const delta = screenY - scrollerRect.top - EDITOR_SAFE_SCROLL_MARGIN;
+  const delta = screenY - scrollerRect.top - scroller.clientTop - editorScrollInsets(scroller).top;
   const max = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
   const next = Math.max(0, Math.min(scroller.scrollTop + delta, max));
   scroller.scrollTo({ top: next, behavior });
@@ -50,9 +50,9 @@ export const editorScrollHandler = EditorView.scrollHandler.of((view, range, opt
       const top = caret ? caret.top : view.documentTop + block!.top;
       const bottom = caret ? caret.bottom : view.documentTop + block!.bottom;
       const contentTop = scroller.getBoundingClientRect().top + scroller.clientTop;
-      const margin = Math.min(EDITOR_SAFE_SCROLL_MARGIN, scroller.clientHeight / 3);
-      const safeTop = contentTop + margin;
-      const safeBottom = contentTop + scroller.clientHeight - margin;
+      const insets = editorScrollInsets(scroller);
+      const safeTop = contentTop + insets.top;
+      const safeBottom = contentTop + scroller.clientHeight - insets.bottom;
       let delta = 0;
       if (top < safeTop) delta = top - safeTop;
       else if (bottom > safeBottom) {

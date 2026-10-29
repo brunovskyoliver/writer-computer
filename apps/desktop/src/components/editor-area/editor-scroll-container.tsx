@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode, Ref } from "react";
+import { EDITOR_SAFE_SCROLL_MARGIN } from "./editor-scroll-geometry";
 
 const FADE_DISTANCE = 120;
 const SCROLLBAR_GUTTER = "18px";
@@ -8,7 +9,6 @@ const FADE_MASK = `${FADE_MASK_VERTICAL}, ${FADE_MASK_GUTTER}`;
 
 // Vertical inset to keep the caret and active search match clear of both
 // the FADE_MASK_VERTICAL gradient and the ProgressiveBlur overlay.
-export const EDITOR_SAFE_SCROLL_MARGIN = FADE_DISTANCE + 20;
 export const EDITOR_SCROLLBAR_GUTTER = SCROLLBAR_GUTTER;
 
 function ProgressiveBlur({ position }: { position: "top" | "bottom" }) {
@@ -22,7 +22,7 @@ function ProgressiveBlur({ position }: { position: "top" | "bottom" }) {
   // edge smears whatever sits beyond it — a pane divider — into a glow.
   return (
     <div
-      className="pointer-events-none absolute z-10 left-[18px] right-[18px] [backdrop-filter:blur(3px)] [-webkit-backdrop-filter:blur(3px)]"
+      className="editor-progressive-blur pointer-events-none absolute z-10 left-[18px] right-[18px] [backdrop-filter:blur(3px)] [-webkit-backdrop-filter:blur(3px)]"
       style={{
         [isTop ? "top" : "bottom"]: 3,
         height: `min(${FADE_DISTANCE}px, 30%)`,
@@ -50,18 +50,22 @@ export function EditorScrollContainer({
   return (
     <div
       className="relative h-full"
-      style={{ "--writer-editor-bottom-space": `${EDITOR_SAFE_SCROLL_MARGIN}px` } as CSSProperties}
+      style={
+        {
+          "--writer-editor-bottom-space": `var(--editor-safe-bottom, ${EDITOR_SAFE_SCROLL_MARGIN}px)`,
+        } as CSSProperties
+      }
     >
       <div
         ref={ref}
         className="relative h-full overflow-y-auto [scrollbar-gutter:stable_both-edges]"
         style={{
-          maskImage: mask,
-          WebkitMaskImage: mask,
+          maskImage: `var(--editor-scroll-mask, ${mask})`,
+          WebkitMaskImage: `var(--editor-scroll-mask, ${mask})`,
           maskComposite: "add",
           WebkitMaskComposite: "source-over",
-          borderTop: "12px solid transparent",
-          borderBottom: "12px solid transparent",
+          borderTop: "var(--editor-scroll-border, 12px) solid transparent",
+          borderBottom: "var(--editor-scroll-border, 12px) solid transparent",
           boxSizing: "border-box",
         }}
       >

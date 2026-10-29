@@ -97,6 +97,7 @@ export interface PageKindView<L extends { kind: string } = { kind: string }> {
     tabId: string;
     isVisible: boolean;
     isFocused: boolean;
+    compactHeight?: boolean;
   }>;
   /** Optional chrome rendered below the pane's active tab body. `tabId` keys
    *  per-tab chrome state — the Vim mode mirror and dialog host are per tab,

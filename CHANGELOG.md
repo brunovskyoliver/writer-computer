@@ -2,6 +2,8 @@
 
 ## 2026-10-29
 
+- Small split panes keep tabs, writing and conflict recovery usable. Narrow properties stack; short panes collapse Properties and move conflict choices into a review dialog. Find stays outside short panes, Vim commands fit their footer, and rapid Vim scrolling keeps the cursor visible.
+
 - External edits and deletions preserve open drafts. Conflicts pause saving and offer explicit local/disk choices or recreation; stale reads and saves cannot replace reopened buffers. Conditional text saves no longer hide quick external changes behind self-write suppression.
 
 - The active tab stays visible when the window or split pane narrows, or the sidebar expands. Manual tab-strip scrolling remains available.

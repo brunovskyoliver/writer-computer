@@ -43,19 +43,19 @@ Do not run the source vault's synchronization or modify its files during audit.
 
 | ID     | Priority  | Finding                                                                                                | Status                                                                                           |
 | ------ | --------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
-| AUD-01 | P1        | External reload overwrites newer edits or completed saves; dirty conflicts silently discard local text | Implemented; 1,720 frontend / 292 Rust tests and native recovery verified                        |
+| AUD-01 | P1        | External reload overwrites newer edits or completed saves; dirty conflicts silently discard local text | Fixed in `2a71ac0`; 1,720 frontend / 292 Rust tests and native recovery verified                 |
 | AUD-02 | P2        | Atomic text save replaces permissions and symlink identity                                             | Fixed in `3aef86f`; 286 Rust tests and native IPC verified                                       |
 | AUD-03 | P2        | Eight SDU Obsidian Excalidraw Markdown drawings/embeds unsupported                                     | Source and vault inventory confirmed; import/preview pending                                     |
 | AUD-04 | P2        | Active tab clipped after window/pane resize                                                            | Fixed in `7ae7721`; 1,696 frontend tests and native layout checks pass                           |
 | AUD-05 | P2        | Existing course plugin persistence queue stays rejected after one IO failure                           | Static finding; source plugin not modified                                                       |
 | AUD-06 | P2        | Calendar refresh interval, course-folder mapping and dedup map drift                                   | Static findings plus stored-data mismatch; synthetic reproduction pending                        |
-| AUD-07 | P2        | Minimum split pane clips tab chrome; conflict notice leaves zero editor height                         | Native observed and 240×160 conflict probe confirmed; next layout task                           |
+| AUD-07 | P2        | Minimum split pane clips tab chrome; conflict notice leaves zero editor height                         | Fixed locally; 1,726 frontend tests and native layout/conflict/Vim checks pass                   |
 | AUD-08 | P2        | Wiki note fragment not passed to navigation; moves do not rewrite note links                           | Static inspection; runtime reproduction pending                                                  |
 | AUD-09 | Untriaged | PDF rectangle encoding compatibility                                                                   | Inspect actual grammar before claiming compatibility; no PDF++ selection anchors observed in SDU |
 
 ## Verification and remaining work
 
-Audit remains in progress. Three fixes implemented, reviewed and tested. No production
+Audit remains in progress. Four fixes implemented, reviewed and tested. No production
 installation, deployment or vault migration. No original notes changed.
 
 - Evidence reports: `academic-workflow.md`, `reliability.md` under the evidence directory.
@@ -84,8 +84,11 @@ installation, deployment or vault migration. No original notes changed.
   calendar ingestion only, not a resource/assignment sync API. Preserve semantic
   frontmatter and stable lesson identities when adding Writer support.
 
-Next: resolve AUD-07 minimum-pane layout, including conflict notice/editor space,
-then evaluate drawing import, fragment links and course navigation. Full metadata
+AUD-07 report: [usable small split panes](worksheet-audit-small-panes.md). Native
+800/1200 light/dark checks, properties, conflicts, Find, Vim, undo and synthetic
+tab moves pass. The final app also fixes a measured Vim coordinate race.
+
+Next: evaluate SDU drawing import, fragment links and course navigation. Full metadata
 preservation, save concurrency with external processes, performance profiling,
 accessibility and remaining UI states are still open. AUD-01 report has final native
 and automated evidence; no broad completion claim is made.

@@ -32,7 +32,11 @@ function VimStatus({ model, tabId }: { model: VimFooterModel; tabId: string }) {
   );
   return (
     <>
-      <span data-vim-mode={model.label} className="shrink-0 whitespace-pre">
+      <span
+        data-vim-mode={model.label}
+        title={`${model.label} ${model.pending}${model.recording ? ` recording @${model.recording}` : ""}`}
+        className="shrink-0 whitespace-pre"
+      >
         {model.label}
         {model.pending ? ` ${model.pending}` : null}
         {model.recording ? ` recording @${model.recording}` : null}
@@ -75,6 +79,7 @@ export function DocumentFooter({ filePath, tabId }: { filePath: string; tabId: s
   return (
     <div
       data-document-footer
+      data-footer-essential={Boolean(vim || isLatex) || undefined}
       onContextMenu={handleContextMenu}
       // z-40 like the pane strip: the scroll container's bottom ProgressiveBlur
       // is z-10 inside the later-painted body subtree, and a backdrop filter
@@ -85,13 +90,15 @@ export function DocumentFooter({ filePath, tabId }: { filePath: string; tabId: s
     >
       {vim ? <VimStatus model={vim} tabId={tabId} /> : null}
       {isLatex ? <LatexStatus filePath={filePath} tabId={tabId} /> : null}
-      {visibleMetrics.map((metric) => (
-        <FooterMetric
-          key={metric.settingKey}
-          label={metric.footerLabel}
-          value={stats[metric.statKey]}
-        />
-      ))}
+      <div className="editor-footer-metrics">
+        {visibleMetrics.map((metric) => (
+          <FooterMetric
+            key={metric.settingKey}
+            label={metric.footerLabel}
+            value={stats[metric.statKey]}
+          />
+        ))}
+      </div>
     </div>
   );
 }

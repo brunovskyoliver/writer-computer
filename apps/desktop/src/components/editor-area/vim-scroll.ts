@@ -1,7 +1,7 @@
 import { EditorSelection } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 import type { CodeMirror } from "@replit/codemirror-vim";
-import { EDITOR_SAFE_SCROLL_MARGIN } from "./editor-scroll-container";
+import { editorScrollInsets } from "./editor-scroll-geometry";
 import { findOuterScroller } from "./editor-scroll";
 
 /**
@@ -11,8 +11,8 @@ import { findOuterScroller } from "./editor-scroll";
  * `.cm-scroller` is `overflow: visible` and `EditorScrollContainer` is the
  * real scroller (docs/editor.md), so out of the box `Ctrl+D` reads the whole
  * document as one screen and `Ctrl+E` / `zz` / `zt` / `zb` / `H` / `M` / `L`
- * scroll nothing. The three adapter methods every scroll motion and action go
- * through are replaced on the instance; `y` stays in the adapter's own
+ * scroll nothing. The scroll and coordinate adapter methods are
+ * replaced on the instance; `y` stays in the adapter's own
  * content-local space (what `charCoords(pos, "local")` returns), and the
  * visible window is inset by the safe margin so lines land clear of the fade.
  */
@@ -21,13 +21,26 @@ export function redirectVimScrollToOuterScroller(cm: CodeMirror, view: EditorVie
   const getScrollInfo = cm.getScrollInfo.bind(cm);
   const scrollTo = cm.scrollTo.bind(cm);
 
+  cm.charCoords = (pos) => {
+    // coordsAtPos can flush a pending CodeMirror scroll (for example G, then
+    // zz). Read the content origin afterwards so both coordinates describe
+    // the same layout. The adapter exposes content-local coords in both modes.
+    const coords = view.coordsAtPos(cm.indexFromPos(pos));
+    const origin = view.contentDOM.getBoundingClientRect();
+    return {
+      left: (coords?.left ?? 0) - origin.left,
+      top: (coords?.top ?? 0) - origin.top,
+      bottom: (coords?.bottom ?? 0) - origin.top,
+    };
+  };
+
   cm.getScrollInfo = () => {
     const geometry = measure(view);
     if (!geometry) return getScrollInfo();
-    const { scroller, contentTop, clientHeight } = geometry;
+    const { scroller, contentTop, clientHeight, topInset } = geometry;
     return {
       left: scroller.scrollLeft,
-      top: scroller.scrollTop + EDITOR_SAFE_SCROLL_MARGIN - contentTop,
+      top: scroller.scrollTop + topInset - contentTop,
       height: scroller.scrollHeight - contentTop,
       width: scroller.scrollWidth,
       clientHeight,
@@ -39,8 +52,8 @@ export function redirectVimScrollToOuterScroller(cm: CodeMirror, view: EditorVie
     const geometry = measure(view);
     if (!geometry) return scrollTo(x, y);
     if (y == null) return;
-    const { scroller, contentTop } = geometry;
-    scroller.scrollTo({ top: y - EDITOR_SAFE_SCROLL_MARGIN + contentTop, behavior: "auto" });
+    const { scroller, contentTop, topInset } = geometry;
+    scroller.scrollTo({ top: y - topInset + contentTop, behavior: "auto" });
   };
 
   cm.findPosV = (start, amount, unit, goalColumn) => {
@@ -62,9 +75,10 @@ function measure(view: EditorView) {
   const scrollerRect = scroller.getBoundingClientRect();
   const contentRect = view.contentDOM.getBoundingClientRect();
   const contentTop = contentRect.top - scrollerRect.top - scroller.clientTop + scroller.scrollTop;
+  const insets = editorScrollInsets(scroller);
   const clientHeight = Math.max(
     view.defaultLineHeight,
-    scroller.clientHeight - 2 * EDITOR_SAFE_SCROLL_MARGIN,
+    scroller.clientHeight - insets.top - insets.bottom,
   );
-  return { scroller, contentTop, clientHeight };
+  return { scroller, contentTop, clientHeight, topInset: insets.top };
 }

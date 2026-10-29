@@ -4,6 +4,7 @@ import {
   useState,
   useTransition,
   type MouseEvent,
+  type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { createPortal } from "react-dom";
@@ -21,14 +22,19 @@ import {
   useSetActiveTab,
   type Tab,
 } from "@/hooks/use-tabs";
-import { usePaneActiveTabId } from "@/hooks/use-editor-layout";
+import { usePaneActiveTabId, useSetFocusedPane } from "@/hooks/use-editor-layout";
 import { ScrollFade } from "@/components/scroll-fade";
 import { useScrollActiveTabIntoView } from "@/hooks/use-scroll-active-tab-into-view";
 import { editorDrag } from "@/hooks/use-editor-drag";
 import { getFileExtension, getFileStem, getRelativePath } from "@/lib/paths";
 import { pageKind } from "./page-kinds";
-import { buildTabMenuItemsSpec, showNativeContextMenu } from "./editor-context-menu";
+import {
+  buildTabMenuItemsSpec,
+  showNativeContextMenu,
+  type MenuItemSpec,
+} from "./editor-context-menu";
 import { registerPaneStrip } from "./pane-bounds";
+import { getOpenFile } from "@/hooks/editor-api";
 import { TAB_MOTION_MS, useTabStripPresentation } from "./use-tab-strip-presentation";
 import "./editor-tabs.css";
 import { FileIcon } from "@/components/sidebar/file-tree-icons";
@@ -129,14 +135,11 @@ function EditorTabButton({
         />
       ) : null}
       <span
-        className={`truncate group-hover:[mask-image:linear-gradient(to_right,black,black_calc(100%_-_28px),transparent)] group-hover:[-webkit-mask-image:linear-gradient(to_right,black,black_calc(100%_-_32px),transparent_calc(100%_-_8px))] ${isLoading ? "animate-pulse opacity-60" : ""}`}
+        className={`editor-tab-title truncate group-hover:[mask-image:linear-gradient(to_right,black,black_calc(100%_-_28px),transparent)] group-hover:[-webkit-mask-image:linear-gradient(to_right,black,black_calc(100%_-_32px),transparent_calc(100%_-_8px))] ${isLoading ? "animate-pulse opacity-60" : ""}`}
       >
         {title}
       </span>
-      <div
-        className="pointer-events-none absolute inset-y-0 right-0 flex translate-x-full items-center justify-end pr-1 opacity-0 group-hover:translate-x-0 group-hover:opacity-100 group-focus-within:translate-x-0 group-focus-within:opacity-100"
-        style={{ width: 40 }}
-      >
+      <div className="editor-tab-close pointer-events-none absolute inset-y-0 right-0 flex w-10 translate-x-full items-center justify-end pr-1 opacity-0 group-hover:translate-x-0 group-hover:opacity-100 group-focus-within:translate-x-0 group-focus-within:opacity-100">
         <button
           type="button"
           onClick={(event) => {
@@ -149,7 +152,9 @@ function EditorTabButton({
               const neighbor = liveSlots[index + 1] ?? liveSlots[index - 1];
               const target =
                 neighbor?.querySelector<HTMLElement>('[role="button"]') ??
-                area.querySelector<HTMLElement>('[aria-label="New tab"]');
+                [...area.querySelectorAll<HTMLElement>("[data-new-tab-control]")].find(
+                  (e) => e.getClientRects().length > 0,
+                );
               target?.focus({ preventScroll: true });
             }
             onClose(tab.id);
@@ -183,6 +188,7 @@ export function EditorTabs({
   clearTrafficLights: boolean;
 }) {
   const tabs = usePaneTabs(paneId);
+  const focusPane = useSetFocusedPane();
   const activeTabId = usePaneActiveTabId(paneId);
   const presentedTabs = useTabStripPresentation(tabs);
   const setActiveTab = useSetActiveTab();
@@ -304,21 +310,67 @@ export function EditorTabs({
     [closeTab, setActiveTab, tabs, workspaceRoot],
   );
 
+  const showOverflow = (button: HTMLButtonElement) => {
+    const inPane = (action: () => void) => () => {
+      focusPane(paneId);
+      action();
+    };
+    const items: MenuItemSpec[] = [
+      { kind: "item", id: "pane-new", text: "New tab", action: inPane(() => openNewTab()) },
+    ];
+    if (canNavigateBack)
+      items.push({
+        kind: "item",
+        id: "pane-back",
+        text: "Back",
+        action: inPane(() => {
+          void navigateBack();
+        }),
+      });
+    if (canNavigateForward)
+      items.push({
+        kind: "item",
+        id: "pane-forward",
+        text: "Forward",
+        action: inPane(() => {
+          void navigateForward();
+        }),
+      });
+    items.push({ kind: "separator" });
+    for (const tab of tabs) {
+      const kind = pageKind(tab.location);
+      const path = kind.primaryPath(tab.location);
+      const title = (path && getOpenFile(path)?.title) || kind.title(tab.location);
+      items.push({
+        kind: "check",
+        id: `pane-${tab.id}`,
+        text: path ? `${title} (${getRelativePath(path, workspaceRoot ?? "")})` : title,
+        checked: tab.id === activeTabId,
+        action: () => setActiveTab(tab.id),
+      });
+    }
+    const rect = button.getBoundingClientRect();
+    void showNativeContextMenu(items, { x: rect.left, y: rect.bottom });
+  };
+
   return (
     <>
       <div
         data-tauri-drag-region
         className="editor-tab-header group/tabs flex min-w-0 items-center gap-3"
-        style={{
-          height: "calc(var(--chrome-control-height) + var(--chrome-control-padding) * 2)",
-          paddingBlock: "var(--chrome-control-padding)",
-          // The top-left strip sits behind the macOS traffic lights and the
-          // sidebar toggle when the sidebar is collapsed; leave them room.
-          paddingLeft: clearTrafficLights ? 132 : 12,
-          paddingRight: 12,
-        }}
+        style={
+          {
+            "--pane-tab-left-inset": `${clearTrafficLights ? 132 : 12}px`,
+            height: "calc(var(--chrome-control-height) + var(--chrome-control-padding) * 2)",
+            paddingBlock: "var(--chrome-control-padding)",
+            // The top-left strip sits behind the macOS traffic lights and the
+            // sidebar toggle when the sidebar is collapsed; leave them room.
+            paddingLeft: clearTrafficLights ? 132 : 12,
+            paddingRight: 12,
+          } as CSSProperties
+        }
       >
-        <div className="flex shrink-0 items-center gap-0.5">
+        <div className="pane-tab-history flex shrink-0 items-center gap-0.5">
           <button
             type="button"
             onMouseDown={(event) => event.preventDefault()}
@@ -383,11 +435,30 @@ export function EditorTabs({
           <button
             type="button"
             onClick={openNewTab}
-            className="relative ml-1 flex h-[var(--chrome-control-height)] w-9 shrink-0 items-center justify-center rounded-lg text-base text-[var(--text-icon-muted)] transition-colors hover:bg-[var(--surface-subtle)] hover:text-[var(--text-secondary)]"
+            data-new-tab-control
+            className="pane-new-tab relative ml-1 flex h-[var(--chrome-control-height)] w-9 shrink-0 items-center justify-center rounded-lg text-base text-[var(--text-icon-muted)] transition-colors hover:bg-[var(--surface-subtle)] hover:text-[var(--text-secondary)]"
             title="New tab"
             aria-label="New tab"
           >
             +
+          </button>
+          <button
+            type="button"
+            data-new-tab-control
+            aria-label="Pane tabs and navigation"
+            aria-haspopup="menu"
+            onClick={(event) => showOverflow(event.currentTarget)}
+            className="pane-tab-overflow ml-1 h-[var(--chrome-control-height)] w-7 shrink-0 items-center justify-center rounded-lg text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)] focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path
+                d="m4 6 4 4 4-4"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
           </button>
         </div>
         {dragGhost &&

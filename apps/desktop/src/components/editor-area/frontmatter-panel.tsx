@@ -1,9 +1,10 @@
-import { useCallback, useRef, type FocusEvent, type KeyboardEvent } from "react";
+import { useCallback, useRef, useState, type FocusEvent, type KeyboardEvent } from "react";
 import { useFrontmatterEntries } from "./use-frontmatter-entries";
 import type { YamlEntry } from "@/lib/yaml-entries";
 
 interface FrontmatterPanelProps {
   filePath: string;
+  compact?: boolean;
 }
 
 // Stable module-scope ref callback. A stable ref runs only on mount/unmount
@@ -53,7 +54,7 @@ function FrontmatterRow({
   return (
     <div
       ref={rowRef}
-      className="group -mx-3 flex items-center gap-4 rounded-lg px-3 py-1.5 focus-within:bg-[var(--surface-subtle)]"
+      className="editor-property-row group -mx-3 flex items-center gap-4 rounded-lg px-3 py-1.5 focus-within:bg-[var(--surface-subtle)]"
     >
       <input
         data-field="key"
@@ -102,10 +103,10 @@ function FrontmatterRow({
   );
 }
 
-export function FrontmatterPanel({ filePath }: FrontmatterPanelProps) {
+export function FrontmatterPanel({ filePath, compact = false }: FrontmatterPanelProps) {
   const { entries, updateEntry, removeEntry, addEntry, blurEntry, hasFrontmatter } =
     useFrontmatterEntries(filePath);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const [expanded, setExpanded] = useState(false);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLInputElement>, index: number, field: "key" | "value") => {
@@ -126,7 +127,17 @@ export function FrontmatterPanel({ filePath }: FrontmatterPanelProps) {
   if (!hasFrontmatter) return null;
 
   return (
-    <div ref={containerRef} data-frontmatter className="space-y-2 pb-6">
+    <details
+      data-frontmatter
+      className="editor-frontmatter-panel space-y-2 pb-6"
+      open={!compact || expanded}
+      onToggle={(event) => {
+        if (compact) setExpanded(event.currentTarget.open);
+      }}
+    >
+      <summary className="editor-frontmatter-summary cursor-pointer rounded text-[12px] text-[var(--text-muted)] focus-visible:outline-2 focus-visible:outline-[var(--accent)]">
+        Properties
+      </summary>
       <div className="flex flex-col gap-1.5">
         {entries.map((entry, index) => (
           <FrontmatterRow
@@ -153,6 +164,6 @@ export function FrontmatterPanel({ filePath }: FrontmatterPanelProps) {
           Add property
         </button>
       </div>
-    </div>
+    </details>
   );
 }

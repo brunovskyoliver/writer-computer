@@ -30,6 +30,7 @@ const strips = new Map<string, HTMLElement>();
 const listeners = new Set<() => void>();
 
 let container: HTMLElement | null = null;
+let areaSize: { width: number; height: number } | null = null;
 let observer: ResizeObserver | null = null;
 
 function sameRect(a: PaneRect | undefined, b: PaneRect) {
@@ -46,6 +47,10 @@ function measureAll() {
   if (!container) return;
   const base = container.getBoundingClientRect();
   let changed = false;
+  if (!areaSize || areaSize.width !== base.width || areaSize.height !== base.height) {
+    areaSize = { width: base.width, height: base.height };
+    changed = true;
+  }
   for (const [paneId, element] of slots) {
     const box = element.getBoundingClientRect();
     const next: PaneRect = {
@@ -70,7 +75,10 @@ function ensureObserver() {
 export function setPaneContainer(element: HTMLElement | null) {
   if (container && observer) observer.unobserve(container);
   container = element;
-  if (!element) return;
+  if (!element) {
+    areaSize = null;
+    return;
+  }
   ensureObserver();
   observer?.observe(element);
   measureAll();
@@ -163,6 +171,15 @@ export function usePaneRect(paneId: string): PaneRect | null {
   return useSyncExternalStore(
     subscribe,
     () => rects.get(paneId) ?? null,
+    () => null,
+  );
+}
+
+/** Cached by the same measurement pass as pane rectangles; safe to read in render. */
+export function useEditorAreaSize() {
+  return useSyncExternalStore(
+    subscribe,
+    () => areaSize,
     () => null,
   );
 }

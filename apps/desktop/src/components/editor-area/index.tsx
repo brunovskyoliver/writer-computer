@@ -1,3 +1,4 @@
+import { paneChrome } from "./pane-chrome";
 import { useCallback } from "react";
 import { useOpenTabs } from "@/hooks/use-tabs";
 import {
@@ -51,10 +52,12 @@ function TabHost({ tab }: { tab: Tab }) {
     tabId: string;
     isVisible: boolean;
     isFocused: boolean;
+    compactHeight?: boolean;
   }>;
 
   return (
     <div
+      {...paneChrome(rect)}
       data-tab-host={tab.id}
       // Filling the container is the correct geometry for a single pane, so
       // it is the right thing to draw before the first measurement lands and
@@ -62,6 +65,7 @@ function TabHost({ tab }: { tab: Tab }) {
       // editor area can never come up blank waiting on a ResizeObserver.
       className={rect ? "absolute" : "absolute inset-0"}
       style={{
+        ...paneChrome(rect).style,
         ...(rect
           ? { left: rect.left, top: rect.top, width: rect.width, height: rect.height }
           : null),
@@ -79,6 +83,7 @@ function TabHost({ tab }: { tab: Tab }) {
         tabId={tab.id}
         isVisible={isVisible}
         isFocused={isFocused}
+        compactHeight={Boolean(paneChrome(rect)["data-pane-short"])}
       />
     </div>
   );

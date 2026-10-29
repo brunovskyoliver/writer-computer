@@ -16,7 +16,7 @@ import {
   saveDrawingSessions,
 } from "@/lib/drawing-sessions";
 import { refreshDrawingEmbeds } from "@/lib/drawing-embed-sync";
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -36,6 +36,7 @@ interface EditorPaneProps {
   isVisible: boolean;
   /** This is the one tab global commands and keyboard focus act on. */
   isFocused: boolean;
+  compactHeight?: boolean;
 }
 
 export const EditorPane = memo(function EditorPane({
@@ -43,6 +44,7 @@ export const EditorPane = memo(function EditorPane({
   path,
   isVisible,
   isFocused,
+  compactHeight = false,
 }: EditorPaneProps) {
   const isLoading = useIsFileLoading(path);
   const conflict = useFileConflict(path);
@@ -83,7 +85,13 @@ export const EditorPane = memo(function EditorPane({
   }, []);
 
   const getScrollContainer = useCallback(() => scrollContainerRef.current, []);
-  const focusEditor = useCallback(() => editorView?.focus(), [editorView]);
+  const canFocus = useRef(isFocused);
+  useLayoutEffect(() => {
+    canFocus.current = isFocused;
+  }, [isFocused]);
+  const focusEditor = useCallback(() => {
+    if (canFocus.current) editorView?.focus();
+  }, [editorView]);
 
   if (isLoading) {
     return (
@@ -91,7 +99,7 @@ export const EditorPane = memo(function EditorPane({
         className={
           isVisible
             ? "relative z-10 h-full"
-            : "absolute inset-0 invisible pointer-events-none flex h-full flex-col"
+            : "editor-text-pane absolute inset-0 invisible pointer-events-none flex h-full flex-col"
         }
       >
         <div className="flex h-full items-center justify-center text-[13px] text-[var(--text-muted)]">
@@ -106,15 +114,20 @@ export const EditorPane = memo(function EditorPane({
       data-pane
       className={
         isVisible
-          ? "relative z-10 flex h-full flex-col"
-          : "absolute inset-0 invisible pointer-events-none flex h-full flex-col"
+          ? "editor-text-pane relative z-10 flex h-full flex-col"
+          : "editor-text-pane absolute inset-0 invisible pointer-events-none flex h-full flex-col"
       }
     >
-      <FileConflictNotice path={path} focusEditor={focusEditor} />
+      <FileConflictNotice
+        path={path}
+        focusEditor={focusEditor}
+        compact={compactHeight}
+        isVisible={isVisible}
+      />
       <div className="relative min-h-0 flex-1">
         <EditorScrollContainer ref={scrollContainerRef} fadeTop={!conflict}>
           <div
-            className={`mx-auto w-full pb-6 ${conflict ? "pt-4" : "pt-32 md:pt-[9rem]"}`}
+            className={`editor-frontmatter-space mx-auto w-full pb-6 ${conflict ? "pt-4" : "pt-32 md:pt-[9rem]"}`}
             style={{
               maxWidth: "var(--writer-editor-outer-width)",
               boxSizing: "border-box",
@@ -122,7 +135,7 @@ export const EditorPane = memo(function EditorPane({
               paddingRight: "var(--writer-editor-side-padding)",
             }}
           >
-            <FrontmatterPanel filePath={path} />
+            <FrontmatterPanel filePath={path} compact={compactHeight} />
           </div>
           <ProseMarkEditor
             // Markdown and code tabs are built from different extension sets, so

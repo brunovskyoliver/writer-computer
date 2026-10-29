@@ -247,6 +247,29 @@ Math source rewrites must prove the resulting formulas render before dispatch. F
 
 Inline and display math keep a rendered preview above its opening source line while selected, using `keepDecorationOnUnfold` and a block widget with `side: -1`. Preview widgets use a separate class from clickable folded formulas, so clicking a preview does not reset the source selection. Standalone root-level `$$` blocks parse across blank lines; nested containers retain the inline parser. An unclosed root math block stays visible as source through the end of the document.
 
+## Small pane presentation
+
+`pane-chrome.ts` derives short (below 360px) and narrow (below 480px) modes from
+the existing full-pane measurement. Chrome slots and stable tab hosts share those
+attributes; resizing must not remount editor bodies or create another observer.
+`pane-chrome.css` owns their presentation.
+
+Narrow panes fit tabs to the available strip, including the native window-control
+inset. The overflow menu exposes new tab, history and complete tab names. Property
+fields stack and wide tables scroll within their own block. Short panes hide the
+path and secondary statistics, collapse Properties initially, and keep essential
+Vim/LaTeX status in a 24px footer. Their conflict row opens a modal review; leaving
+the tab or short mode dismisses it without resolving the conflict.
+
+Caret, heading and Vim navigation share `editorScrollInsets`, which reads current
+CSS safe insets and caps each at one third of the visible scroller height. Never
+cache hidden-pane geometry or restore a fixed 140px margin in these paths. Short
+panes use 4px safe insets without fades. Vim cursor coordinates measure the cursor
+before the content origin: CodeMirror can flush a pending scroll during
+`coordsAtPos`, so reading the origin first makes rapid `G` / `zz` use stale geometry.
+Find expands over the editor area when needed and sits outside a short pane,
+labelled with the searched document.
+
 ## External file changes
 
 Text autosaves compare the last observed disk content before replacement. A

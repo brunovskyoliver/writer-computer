@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import type { EditorView } from "@codemirror/view";
 import type { DocumentHeading } from "@/hooks/use-document-headings";
-import { EDITOR_SAFE_SCROLL_MARGIN } from "./editor-scroll-container";
+import { useLayoutRevision } from "@/hooks/use-editor-layout";
+import { editorScrollInsets } from "./editor-scroll-geometry";
 
 // Match the scroll-to-heading landing y so clicking a tick / row immediately
 // activates the destination heading instead of keeping the previous one
 // active. A small fudge protects against measurement jitter at the boundary.
-const ACTIVE_OFFSET_PX = EDITOR_SAFE_SCROLL_MARGIN + 4;
 
 export interface ActiveHeadings {
   activeIndex: number | null;
@@ -22,7 +22,7 @@ function computeActive(
   if (headings.length === 0) return EMPTY;
   const docLen = view.state.doc.length;
   const scrollerRect = scroller.getBoundingClientRect();
-  const threshold = scrollerRect.top + ACTIVE_OFFSET_PX;
+  const threshold = scrollerRect.top + scroller.clientTop + editorScrollInsets(scroller).top + 4;
 
   let activeIndex: number | null = null;
   for (let i = 0; i < headings.length; i++) {
@@ -45,6 +45,7 @@ export function useActiveHeadings(
   scrollContainerRef: React.RefObject<HTMLElement | null>,
   headings: DocumentHeading[],
 ): ActiveHeadings {
+  const layoutRevision = useLayoutRevision();
   const [state, setState] = useState<ActiveHeadings>(EMPTY);
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -70,7 +71,7 @@ export function useActiveHeadings(
       scroller.removeEventListener("scroll", schedule);
       window.removeEventListener("resize", schedule);
     };
-  }, [view, scrollContainerRef, headings]);
+  }, [view, scrollContainerRef, headings, layoutRevision]);
 
   // Without a live editor there is no active heading. Resolve this during
   // render instead of via an effect so the rail never paints a stale tick
