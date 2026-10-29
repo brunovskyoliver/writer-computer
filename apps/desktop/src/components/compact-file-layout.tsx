@@ -12,7 +12,7 @@ import { EditorArea } from "./editor-area";
 import { CompactRecentsList } from "./compact-recents-list";
 import { ScrollFade } from "@/components/scroll-fade";
 import {
-  useActiveFilePath,
+  useActiveDocumentPath,
   useCanNavigateBack,
   useCanNavigateForward,
   useNavigateBack,
@@ -20,6 +20,7 @@ import {
   useOpenFiles,
 } from "@/hooks/use-tabs";
 import { openStandaloneFile } from "@/hooks/use-open-drop";
+import { drawingName, isDrawingPath } from "@/lib/drawings";
 import { getFileName } from "@/lib/paths";
 
 const PICKER_POPUP_ID = "compact-file-picker-popup";
@@ -52,7 +53,7 @@ interface PickerFrameGeometry {
 // hover, focus, metrics) with a functional-updater bail-out; a reducer would not collapse renders.
 // eslint-disable-next-line react-doctor/no-giant-component, react-doctor/prefer-useReducer
 export function CompactFileLayout() {
-  const activeFilePath = useActiveFilePath();
+  const activeDocumentPath = useActiveDocumentPath();
   const openFiles = useOpenFiles();
   const [isNavigatorOpen, setIsNavigatorOpen] = useState(false);
   const [isPickerMounted, setIsPickerMounted] = useState(false);
@@ -69,8 +70,13 @@ export function CompactFileLayout() {
   const openFrameRef = useRef<number | null>(null);
   const pickerAnimationFrameRef = useRef<number | null>(null);
   const currentPickerGeometryRef = useRef<PickerFrameGeometry | null>(null);
-  const activeFile = activeFilePath ? openFiles.get(activeFilePath) : null;
-  const title = activeFilePath ? activeFile?.title || getFileName(activeFilePath) : "Choose file";
+  const activeFile = activeDocumentPath ? openFiles.get(activeDocumentPath) : null;
+  const title = activeDocumentPath
+    ? activeFile?.title ||
+      (isDrawingPath(activeDocumentPath)
+        ? drawingName(activeDocumentPath)
+        : getFileName(activeDocumentPath))
+    : "Choose file";
 
   const measurePickerMetrics = useCallback(() => {
     const triggerRect = triggerRef.current?.getBoundingClientRect();

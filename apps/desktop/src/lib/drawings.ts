@@ -1,27 +1,43 @@
 import type { AppState, BinaryFiles } from "@excalidraw/excalidraw/types";
 import type { NonDeletedExcalidrawElement } from "@excalidraw/excalidraw/element/types";
+import { loadDrawingRuntime } from "./drawing-runtime";
 import { getFileName } from "./paths";
 import { readFile, writeFile } from "./tauri";
 
 /**
- * Drawings are `.excalidraw.svg` files: the rendered picture and the editable
+ * Editable drawings are `.excalidraw.svg` files: the rendered picture and the editable
  * scene in one file, the scene riding in the SVG's metadata. See
  * SPECs/excalidraw-embed/spec.md.
  *
  * Everything Excalidraw is behind `await import()` on purpose — `isDrawingPath`
  * is called from the editor store, which is in the main module graph, and the
- * bundle is ~1.13 MB. Only opening a drawing tab may pay for it.
+ * bundle is ~1.13 MB. Drawing tabs and generated Obsidian previews load it lazily.
  */
 export const DRAWING_EXTENSION = ".excalidraw.svg";
+export const OBSIDIAN_DRAWING_EXTENSION = ".excalidraw.md";
+
+export function drawingFormat(path: string): "svg" | "obsidian" | null {
+  const name = path.slice(Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) + 1);
+  for (const [suffix, format] of [
+    [DRAWING_EXTENSION, "svg"],
+    [OBSIDIAN_DRAWING_EXTENSION, "obsidian"],
+  ] as const) {
+    if (name.length > suffix.length && name.toLowerCase().endsWith(suffix)) return format;
+  }
+  return null;
+}
+
+export function isObsidianDrawingPath(path: string): boolean {
+  return drawingFormat(path) === "obsidian";
+}
 
 /**
- * True for the compound `.excalidraw.svg` extension only. A plain `.svg` is an
+ * True for supported `.excalidraw.svg` and `.excalidraw.md` sources. A plain `.svg` is an
  * image, not a drawing, and must keep opening as one. A file whose whole name
  * is the extension has no stem and is not treated as a drawing.
  */
 export function isDrawingPath(path: string): boolean {
-  const name = path.slice(Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) + 1);
-  return name.length > DRAWING_EXTENSION.length && name.toLowerCase().endsWith(DRAWING_EXTENSION);
+  return drawingFormat(path) !== null;
 }
 
 /**
@@ -72,8 +88,9 @@ export type DrawingLoadResult = { ok: true; scene: DrawingScene } | { ok: false;
  */
 export async function loadDrawing(path: string): Promise<DrawingLoadResult> {
   try {
+    if (isObsidianDrawingPath(path)) throw new Error("Obsidian drawings open as previews.");
     const { content } = await readFile(path);
-    const { loadFromBlob } = await import("@excalidraw/excalidraw");
+    const { loadFromBlob } = await loadDrawingRuntime();
     const restored = await loadFromBlob(new Blob([content], { type: "image/svg+xml" }), null, null);
     return {
       ok: true,
@@ -98,22 +115,9 @@ const writeQueue = new Map<string, Promise<unknown>>();
  */
 export async function saveDrawing(path: string, scene: DrawingScene): Promise<void> {
   const run = async () => {
-    const { exportToSvg } = await import("@excalidraw/excalidraw");
-    const svg = await exportToSvg(
-      {
-        elements: scene.elements,
-        appState: { ...scene.appState, exportEmbedScene: true, exportBackground: false },
-        files: scene.files,
-      },
-      {
-        // WebKit rejects the subset woff2 font Excalidraw attempts to inline into
-        // exported SVGs ("Excalifont: error"), falling back to serif. Skipping font
-        // inlining saves significant CPU time spent parsing, subsetting, and base64-
-        // encoding fonts on every save.
-        skipInliningFonts: true,
-      },
-    );
-    await writeFile(path, new XMLSerializer().serializeToString(svg));
+    if (isObsidianDrawingPath(path))
+      throw new Error("Create an editable copy to save this drawing.");
+    await writeFile(path, await exportDrawing(scene));
   };
 
   const chained = (writeQueue.get(path) ?? Promise.resolve()).then(run, run);
@@ -125,11 +129,27 @@ export async function saveDrawing(path: string, scene: DrawingScene): Promise<vo
   }
 }
 
+export async function exportDrawing(
+  scene: DrawingScene,
+  { embedScene = true }: { embedScene?: boolean } = {},
+): Promise<string> {
+  const { exportToSvg } = await loadDrawingRuntime();
+  const svg = await exportToSvg({
+    elements: scene.elements,
+    appState: { ...scene.appState, exportEmbedScene: embedScene, exportBackground: false },
+    files: scene.files,
+  });
+  return new XMLSerializer().serializeToString(svg);
+}
+
 /** The drawing's display name — the filename with the compound extension
  *  stripped. `notes/sketch.excalidraw.svg` → `sketch`. */
 export function drawingName(path: string): string {
   const name = getFileName(path);
-  return name.slice(0, -DRAWING_EXTENSION.length);
+  return name.slice(
+    0,
+    -(isObsidianDrawingPath(path) ? OBSIDIAN_DRAWING_EXTENSION : DRAWING_EXTENSION).length,
+  );
 }
 
 /**

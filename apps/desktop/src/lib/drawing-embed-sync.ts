@@ -1,5 +1,6 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { isDrawingPath } from "./drawings";
+import { obsidianDrawings } from "./obsidian-drawings";
+import { isDrawingPath, isObsidianDrawingPath } from "./drawings";
 
 const drawingRevisions = new Map<string, number>();
 let globalRevision = 0;
@@ -43,6 +44,10 @@ export interface DomRootLike {
  * and displays the newly saved SVG from disk.
  */
 export function refreshDrawingEmbeds(targetPath?: string, rootNode?: DomRootLike): void {
+  if (targetPath && isObsidianDrawingPath(targetPath)) {
+    obsidianDrawings.invalidate(targetPath);
+    return;
+  }
   const revision = bumpDrawingRevision(targetPath);
   const root =
     rootNode ??
@@ -55,7 +60,7 @@ export function refreshDrawingEmbeds(targetPath?: string, rootNode?: DomRootLike
   for (const img of images) {
     const canonical = img.dataset.canonicalPath;
     const currentSrc = img.src;
-    if (!currentSrc) continue;
+    if (!currentSrc || currentSrc.startsWith("blob:") || currentSrc.startsWith("data:")) continue;
 
     const isMatch = targetPath
       ? canonical === targetPath ||

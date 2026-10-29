@@ -1,4 +1,4 @@
-import { useEditorStore } from "@/stores/editor-store";
+import { activeDocumentPath, useEditorStore } from "@/stores/editor-store";
 import * as tauri from "@/lib/tauri";
 
 /** Record a file into the global recents list (app-wide, cross-workspace).
@@ -15,8 +15,9 @@ export function recordRecentFile(path: string) {
 // so they don't flood the list.
 if (typeof window !== "undefined") {
   useEditorStore.subscribe((state, prev) => {
-    if (state.activeFilePath === prev.activeFilePath) return;
-    if (!state.activeFilePath) return;
-    recordRecentFile(state.activeFilePath);
+    const path = activeDocumentPath(state);
+    if (path === activeDocumentPath(prev)) return;
+    if (!path) return;
+    recordRecentFile(path);
   });
 }

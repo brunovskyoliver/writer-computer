@@ -1,4 +1,5 @@
-import { lazy, Suspense, useEffect } from "react";
+import { Component, lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
+import { isObsidianDrawingPath } from "@/lib/drawings";
 import type { DrawingLocation } from "./page-kinds/drawing";
 import { getDrawingSession, reportDrawingSaveError } from "@/lib/drawing-sessions";
 
@@ -7,7 +8,27 @@ import { getDrawingSession, reportDrawingSaveError } from "@/lib/drawing-session
 // of it out of the main graph. `views.tsx` is imported statically by the tab
 // renderer, so a top-level import here would land Excalidraw in the entry
 // chunk and defeat the point of the SVG-embed format (see spec.md).
-const DrawingEditor = lazy(() => import("./drawing-editor"));
+class DrawingBoundary extends Component<
+  { children: ReactNode; retry: () => void },
+  { failed: boolean }
+> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  render() {
+    return this.state.failed ? (
+      <div role="alert" className="overflow-auto p-3 text-sm">
+        <p>The drawing view could not be loaded.</p>
+        <button className="mt-2 rounded border px-2 py-1" onClick={this.props.retry}>
+          Retry
+        </button>
+      </div>
+    ) : (
+      this.props.children
+    );
+  }
+}
 
 // `EditorArea` starts at the top of the window and the window chrome floats
 // over it: the tab bar (`z-40`, 56px) and a full-width `data-tauri-drag-region`
@@ -32,6 +53,9 @@ export function DrawingPane({
   isVisible: boolean;
   isFocused: boolean;
 }) {
+  const [retry, setRetry] = useState(0);
+  const DrawingEditor = useMemo(() => lazy(() => import("./drawing-editor")), [retry]);
+  const ObsidianDrawingPane = useMemo(() => lazy(() => import("./obsidian-drawing-pane")), [retry]);
   useEffect(() => {
     if (!isFocused || !isVisible) {
       const session = getDrawingSession(location.path);
@@ -65,18 +89,24 @@ export function DrawingPane({
       }
       style={{ top: CHROME_OFFSET }}
     >
-      <Suspense
-        fallback={<div className="text-muted-foreground p-4 text-sm">Loading drawing…</div>}
-      >
-        {/* Keyed by path so navigating a tab to another drawing remounts with
+      <DrawingBoundary key={`${location.path}:${retry}`} retry={() => setRetry((n) => n + 1)}>
+        <Suspense
+          fallback={<div className="text-muted-foreground p-4 text-sm">Loading drawing…</div>}
+        >
+          {/* Keyed by path so navigating a tab to another drawing remounts with
             fresh state rather than reusing the previous scene. */}
-        <DrawingEditor
-          key={location.path}
-          tabId={tabId}
-          path={location.path}
-          isActive={isFocused}
-        />
-      </Suspense>
+          {isObsidianDrawingPath(location.path) ? (
+            <ObsidianDrawingPane path={location.path} tabId={tabId} />
+          ) : (
+            <DrawingEditor
+              key={location.path}
+              tabId={tabId}
+              path={location.path}
+              isActive={isFocused}
+            />
+          )}
+        </Suspense>
+      </DrawingBoundary>
     </div>
   );
 }

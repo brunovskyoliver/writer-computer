@@ -28,8 +28,10 @@ function copyExcalidrawAssets() {
 }
 
 // https://vite.dev/config/
-export default defineConfig(async () => {
-  copyExcalidrawAssets();
+export default defineConfig(async ({ mode }) => {
+  // Node tests do not load font assets. Mutating this directory while another
+  // process builds the app can delete its files mid-copy (EEXIST / missing fonts).
+  if (mode !== "test") copyExcalidrawAssets();
   return {
     plugins: [
       react({

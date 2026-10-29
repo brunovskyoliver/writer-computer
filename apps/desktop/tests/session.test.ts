@@ -251,3 +251,43 @@ describe("session persister", () => {
     error.mockRestore();
   });
 });
+
+describe("legacy drawing locations", () => {
+  test.each([1, 2])("v%s normalizes current/back/forward and retains PDF page state", (version) => {
+    const current = "/vault/current.excalidraw.md";
+    const back = "/vault/back.excalidraw.md";
+    const forward = "/vault/forward.excalidraw.svg";
+    const pdf = { kind: "pdf", path: "/vault/paper.pdf", page: 12 };
+    const tabs = [
+      {
+        id: "tab-1",
+        location: { kind: "file", path: current },
+        back: [pdf, { kind: "file", path: back }],
+        forward: [{ kind: "file", path: forward }],
+      },
+    ];
+    const raw =
+      version === 1
+        ? { tabs, active_index: 0 }
+        : {
+            version: 2,
+            tabs,
+            layout: {
+              root: { kind: "pane", id: "p", tab_ids: ["tab-1"], active_tab_id: "tab-1" },
+              focused_pane_id: "p",
+            },
+          };
+    const record = parseSession(raw);
+    expect(record.status).toBe("ready");
+    if (record.status !== "ready") return;
+    expect(focusedSessionFile(record.session)).toBeNull();
+    const decoded = decodeSession(record.session, () => "restored");
+    expect(decoded.tabs[0]).toEqual({
+      id: "restored",
+      location: { kind: "drawing", path: current },
+      back: [pdf, { kind: "drawing", path: back }],
+      forward: [{ kind: "drawing", path: forward }],
+    });
+    expect(encodeSession(decoded.tabs, decoded.layout)?.tabs[0]).toEqual(decoded.tabs[0]);
+  });
+});

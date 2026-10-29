@@ -118,7 +118,7 @@ Read a file's full on-disk text, frontmatter included.
 
 - **Input**: `{ workspace?, path }`
 - **Output**: `{ path, relative_path, content, modified_at }`
-- **Rules**: readable kinds are `.md`, `.markdown`, and `.excalidraw.svg`;
+- **Rules**: readable kinds are `.md`, `.markdown`, `.excalidraw.svg`, and `.excalidraw.md`;
   anything else fails `unsupported_kind`. Files over **1 MiB** fail
   `too_large`.
 
@@ -137,7 +137,8 @@ Create a new markdown file with the given content.
 
 - **Input**: `{ workspace?, path, content }`
 - **Output**: `{ path, relative_path, modified_at }`
-- **Rules**: `.md`/`.markdown` only (`unsupported_kind` otherwise); fails
+- **Rules**: Markdown notes (`.md`/`.markdown`) only, excluding `.excalidraw.md`
+  drawings (`unsupported_kind` otherwise); fails
   `already_exists` if the path exists — use `write_file` to replace.
 
 ### write_file
@@ -147,7 +148,8 @@ edit granularity in v1.
 
 - **Input**: `{ workspace?, path, content }`
 - **Output**: `{ path, relative_path, modified_at }`
-- **Rules**: `not_found` if missing; `.md`/`.markdown` only; **fails
+- **Rules**: `not_found` if missing; Markdown notes (`.md`/`.markdown`) only, excluding
+  `.excalidraw.md` drawings (`unsupported_kind`); **fails
   `unsaved_conflict` when the file has unsaved edits, an unresolved conflict,
   or changes on disk while the request is pending**. Writes check the observed
   disk content before replacing it. If typing overtakes a successful write,
@@ -238,9 +240,11 @@ Tool failures are JSON-RPC errors whose `data` carries a machine-readable
 - `read_file` refuses files over **1 MiB**.
 - `search_files` returns at most **200** results (default 50).
 - `list_files` returns at most **5,000** entries and reports `truncated`.
-- Only markdown (`.md`, `.markdown`) is writable; `.excalidraw.svg` is also
-  readable. PDFs appear in listings, search results, and tabs but cannot be
-  read or written.
+- Only Markdown notes (`.md`, `.markdown`) are writable. Drawing sources
+  (`.excalidraw.svg`, `.excalidraw.md`) are readable but cannot be created or
+  overwritten through Markdown mutation tools. Both drawing formats use
+  `"drawing"` in listings and can open in standalone windows. PDFs appear in
+  listings, search results, and tabs but cannot be read or written.
 - **Deleting and renaming are not available in v1.** No tool removes or
   moves anything.
 - Only the open/focus tools (`open_file`, `open_workspace`,

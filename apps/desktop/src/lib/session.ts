@@ -1,4 +1,5 @@
 import * as tauri from "@/lib/tauri";
+import { normalizeDrawingLocation } from "@/lib/drawing-location";
 import { useSettingsStore } from "@/stores/settings-store";
 import {
   createPaneId,
@@ -331,7 +332,8 @@ export function focusedSessionFile(session: SessionV2): string | null {
   );
   const tab = session.tabs.find((candidate) => candidate.id === focused?.active_tab_id);
   if (!tab || tab.location.kind !== "file") return null;
-  return locationPath(tab.location);
+  const location = normalizeDrawingLocation(tab.location);
+  return location.kind === "file" ? locationPath(location) : null;
 }
 
 // --- runtime codec --------------------------------------------------------------
@@ -353,7 +355,7 @@ export function decodeSession(session: SessionV2, mintTabId: () => string): Deco
   const pruned: string[] = [];
   const tabIds = new Map<string, string>();
   const tabs = session.tabs.flatMap((tab) => {
-    const location = deserializeLocation(tab.location);
+    const location = deserializeLocation(normalizeDrawingLocation(tab.location));
     if (!location) {
       pruned.push(`tab ${tab.id}: unsupported page kind ${tab.location.kind}`);
       return [];
@@ -361,7 +363,9 @@ export function decodeSession(session: SessionV2, mintTabId: () => string): Deco
     const id = mintTabId();
     tabIds.set(tab.id, id);
     const history = (entries: SerializedLocation[]) =>
-      entries.map(deserializeLocation).filter((entry): entry is Location => entry !== null);
+      entries
+        .map((entry) => deserializeLocation(normalizeDrawingLocation(entry)))
+        .filter((entry): entry is Location => entry !== null);
     return [{ id, location, back: history(tab.back), forward: history(tab.forward) }];
   });
 
@@ -402,10 +406,12 @@ export function encodeSession(
 ): SessionV2 | null {
   const serialized = new Map<string, SessionTab>();
   for (const tab of tabs) {
-    const location = serializeLocation(tab.location);
+    const location = serializeLocation(normalizeDrawingLocation(tab.location));
     if (!location) continue;
     const history = (entries: Location[]) =>
-      entries.map(serializeLocation).filter((entry): entry is SerializedLocation => entry !== null);
+      entries
+        .map((entry) => serializeLocation(normalizeDrawingLocation(entry)))
+        .filter((entry): entry is SerializedLocation => entry !== null);
     serialized.set(tab.id, {
       id: tab.id,
       location,

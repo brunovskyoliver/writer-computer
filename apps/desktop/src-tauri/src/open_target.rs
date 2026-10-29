@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 /// drag-drop, CLI arguments, or the single-instance plugin.
 ///
 /// Exactly one shape per source: a folder open carries `workspace` with no
-/// `file`; a markdown-file open carries `file` with no `workspace` — single
+/// `file`; a supported file open carries `file` with no `workspace` — single
 /// files open standalone (compact window) and never imply a workspace.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PendingOpenPayload {
@@ -41,7 +41,11 @@ impl std::fmt::Display for OpenTargetError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NotFound(p) => write!(f, "path does not exist: {}", p.display()),
-            Self::Unsupported(p) => write!(f, "not a directory or markdown file: {}", p.display()),
+            Self::Unsupported(p) => write!(
+                f,
+                "not a directory, markdown file, or drawing: {}",
+                p.display()
+            ),
             Self::Io(err) => write!(f, "{err}"),
         }
     }
@@ -50,8 +54,7 @@ impl std::fmt::Display for OpenTargetError {
 impl std::error::Error for OpenTargetError {}
 
 /// Lenient variant used by drag-drop and RunEvent::Opened. Returns `None`
-/// for anything that isn't a directory or a markdown file, matching the
-/// original `resolve_dropped_path` behavior.
+/// for anything that isn't a directory, Markdown note, or supported drawing.
 pub fn resolve_path(path: &Path) -> Option<PendingOpenPayload> {
     classify(path).ok()
 }
@@ -77,7 +80,7 @@ fn classify(path: &Path) -> Result<PendingOpenPayload, OpenTargetError> {
         });
     }
 
-    if metadata.is_file() && is_markdown(path) {
+    if metadata.is_file() && crate::commands::fs::is_standalone_file(path) {
         let canonical_file = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
         return Ok(PendingOpenPayload {
             workspace: None,
@@ -86,10 +89,6 @@ fn classify(path: &Path) -> Result<PendingOpenPayload, OpenTargetError> {
     }
 
     Err(OpenTargetError::Unsupported(path.to_path_buf()))
-}
-
-fn is_markdown(path: &Path) -> bool {
-    crate::commands::fs::is_markdown_file(path)
 }
 
 #[cfg(test)]
@@ -134,6 +133,27 @@ mod tests {
             fs::write(&path, "").unwrap();
             let payload = validate_and_resolve(&path).unwrap();
             assert!(payload.file.is_some(), "{name} should resolve as file");
+        }
+    }
+
+    #[test]
+    fn drawings_resolve_through_cli_and_finder_without_becoming_markdown() {
+        let dir = tempdir().unwrap();
+        for name in [
+            "scene.excalidraw.md",
+            "SCENE.EXCALIDRAW.MD",
+            "copy.excalidraw.svg",
+        ] {
+            let path = dir.path().join(name);
+            fs::write(&path, "source").unwrap();
+            let strict = validate_and_resolve(&path).unwrap();
+            assert_eq!(resolve_path(&path), Some(strict.clone()));
+            assert!(strict.workspace.is_none());
+            assert_eq!(
+                strict.file.unwrap(),
+                path.canonicalize().unwrap().to_string_lossy()
+            );
+            assert!(!crate::commands::fs::is_markdown_file(&path));
         }
     }
 

@@ -3,7 +3,10 @@ import type { AppState, BinaryFiles } from "@excalidraw/excalidraw/types";
 import type { OrderedExcalidrawElement } from "@excalidraw/excalidraw/element/types";
 vi.mock("../src/lib/tauri", () => ({ deleteEntry: vi.fn(async () => {}) }));
 import { deleteEntry } from "../src/lib/tauri";
-vi.mock("../src/lib/drawings", () => ({ saveDrawing: vi.fn(async () => {}) }));
+vi.mock("../src/lib/drawings", async (original) => ({
+  ...(await original<typeof import("../src/lib/drawings")>()),
+  saveDrawing: vi.fn(async () => {}),
+}));
 import { saveDrawing } from "../src/lib/drawings";
 import {
   attachDrawingView,
@@ -346,4 +349,11 @@ test("save completion retains edits made before the last view detaches", async (
   await saveDrawingSessions(path);
   expect(saveDrawing).toHaveBeenCalledTimes(2);
   expect(getDrawingSession(path)).toBeUndefined();
+});
+
+test("an Obsidian source cannot enter an editable drawing session", () => {
+  expect(() =>
+    attachDrawingView("/source.excalidraw.md", "preview", initial(), spyView().handle),
+  ).toThrow("cannot attach");
+  expect(hasDrawingSession("/source.excalidraw.md")).toBe(false);
 });

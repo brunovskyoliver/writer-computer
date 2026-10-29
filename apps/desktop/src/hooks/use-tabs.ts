@@ -1,5 +1,10 @@
 import { useMemo } from "react";
-import { createGraphTab, createSettingsTab, useEditorStore } from "@/stores/editor-store";
+import {
+  activeDocumentPath,
+  createGraphTab,
+  createSettingsTab,
+  useEditorStore,
+} from "@/stores/editor-store";
 import { usePaneTabIds } from "@/hooks/use-editor-layout";
 import { findPane } from "@/lib/editor-layout";
 import type { DocumentStats } from "@/lib/document-stats";
@@ -40,6 +45,10 @@ export function useActiveTabId() {
 
 export function useActiveTab() {
   return useEditorStore((s) => s.tabs.find((tab) => tab.id === s.activeTabId) ?? null);
+}
+
+export function useActiveDocumentPath() {
+  return useEditorStore(activeDocumentPath);
 }
 
 export function useActiveFilePath() {

@@ -1,6 +1,6 @@
 import { useResolvedDocumentTitle } from "@/hooks/use-tabs";
 import { isLatexSourcePath } from "@/lib/latex-document";
-import { getFileStem } from "@/lib/paths";
+import { getDocumentName } from "@/hooks/editor-api";
 import type { DirEntry } from "@/types/fs";
 
 /**
@@ -14,6 +14,6 @@ export function useFileTreeLabel(entry: DirEntry, fileLabelMode?: string): strin
   if (entry.is_dir) return entry.name;
   // `report.tex` sits beside `report.pdf`; the extension tells them apart.
   if (isLatexSourcePath(entry.path)) return entry.name;
-  if (fileLabelMode === "filename") return getFileStem(entry.name);
-  return editorTitle || entry.title || getFileStem(entry.name);
+  if (fileLabelMode === "filename") return getDocumentName(entry.path);
+  return editorTitle || entry.title || getDocumentName(entry.path);
 }

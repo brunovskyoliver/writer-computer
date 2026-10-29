@@ -116,3 +116,9 @@ The global config watcher notifies every window, including the window that wrote
 ## Editor workspace reset
 
 Path-owned caches register synchronous cleanup with `lib/editor-reset.ts` instead of importing a store that already depends on them. `editor-store.resetEditorState` advances the shared generation before clearing records or publishing tabs. Async root lookups, builds, commands and file writes capture that generation before awaiting; stale completions must not update new workspace state, notify saved-file listeners, open tabs or clean up a newer operation with the same key. Keep window-lifetime subscriptions registered once across resets.
+
+Drawing source tabs (`.excalidraw.md`) are standalone surfaces. Normalize legacy
+file locations through `drawing-location` before restoring current or history
+locations. Every placeholder/prefetch entry point must honor the standalone-surface
+gate. `activeFilePath` remains the text-buffer compatibility path; use
+`activeDocumentPath(state)` for compact watcher targeting and global recents.

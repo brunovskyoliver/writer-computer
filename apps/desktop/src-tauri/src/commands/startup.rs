@@ -1,4 +1,4 @@
-use crate::commands::fs::{read_file_impl, FileContent};
+use crate::commands::fs::{drawing_format, read_file_impl, FileContent};
 use crate::commands::settings::config_value_to_json;
 use crate::commands::workspace::{
     build_restore_bundle, load_recent_workspaces, watch_standalone_file_impl,
@@ -20,11 +20,12 @@ pub struct StartupState {
     /// Workspace restore payload. Populated for folder opens and session
     /// restores; `None` for standalone file opens and the welcome screen.
     pub restore_bundle: Option<RestoreWorkspaceResponse>,
-    /// Standalone compact-mode open (CLI arg / drag-drop of a markdown
-    /// file). Mutually exclusive with `restore_bundle`: no workspace is
-    /// prepared, no indexing runs — only the prefetched file content and a
-    /// single-file watcher started before this returns.
+    /// Optional text prefetch for a standalone Markdown note. Drawings use
+    /// `standalone_path` without entering the frontend's Markdown buffers.
+    /// Standalone opens start a single-file watcher and prepare no workspace.
     pub standalone_file: Option<FileContent>,
+    /// Standalone source path, including drawings with no text prefetch.
+    pub standalone_path: Option<String>,
 }
 
 #[tauri::command]
@@ -57,23 +58,22 @@ pub async fn get_startup_state(
     let recent_workspaces = load_recent_workspaces(&app).unwrap_or_default();
     let startup_open = state.take_startup_open();
 
-    // Standalone file open (CLI arg / drag-drop of a markdown file): no
-    // workspace is prepared at all — no watcher tree, no gitignore load, no
-    // index walk. Prefetch the file content so the compact editor mounts
-    // loaded, and start the lightweight single-file watcher.
+    // Standalone opens prepare no workspace. Prefetch notes for the compact
+    // editor; drawings retain their path and load through the drawing surface.
+    // Both start the lightweight single-file watcher.
     if let Some(payload) = &startup_open {
         if payload.workspace.is_none() {
             if let Some(file) = &payload.file {
-                let standalone_file = match read_file_impl(file) {
-                    Ok(content) => Some(content),
+                let (standalone_path, standalone_file) = match standalone_startup_file(file) {
+                    Ok(content) => (Some(file.clone()), content),
                     Err(err) => {
                         // File vanished between the open event and startup —
                         // fall through to the welcome screen.
                         eprintln!("failed to read standalone startup file {file}: {err:?}");
-                        None
+                        (None, None)
                     }
                 };
-                if standalone_file.is_some() {
+                if standalone_path.is_some() {
                     if let Err(err) = watch_standalone_file_impl(&app, &label, file) {
                         eprintln!("failed to start standalone file watcher: {err:?}");
                     }
@@ -83,6 +83,7 @@ pub async fn get_startup_state(
                     recent_workspaces,
                     restore_bundle: None,
                     standalone_file,
+                    standalone_path,
                 });
             }
         }
@@ -136,5 +137,48 @@ pub async fn get_startup_state(
         recent_workspaces,
         restore_bundle,
         standalone_file: None,
+        standalone_path: None,
     })
+}
+
+/// Drawings load through their own surface. Keep their path even
+/// without prefetched prose so cold-start compact windows can open and watch them.
+fn standalone_startup_file(path: &str) -> Result<Option<FileContent>, AppError> {
+    if drawing_format(Path::new(path)).is_some() {
+        if !Path::new(path).is_file() {
+            return Err(AppError::NotFound(path.to_string()));
+        }
+        Ok(None)
+    } else {
+        read_file_impl(path).map(Some)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn standalone_drawings_keep_open_access_without_text_prefetch() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["scene.excalidraw.md", "copy.EXCALIDRAW.SVG"] {
+            let path = dir.path().join(name);
+            // Deliberately invalid UTF-8 proves startup never reads drawing text.
+            std::fs::write(&path, [0xff]).unwrap();
+            assert!(standalone_startup_file(path.to_str().unwrap())
+                .unwrap()
+                .is_none());
+        }
+        let missing = dir.path().join("missing.excalidraw.md");
+        assert!(standalone_startup_file(missing.to_str().unwrap()).is_err());
+        let note = dir.path().join("note.md");
+        std::fs::write(&note, "note").unwrap();
+        assert_eq!(
+            standalone_startup_file(note.to_str().unwrap())
+                .unwrap()
+                .unwrap()
+                .content,
+            "note"
+        );
+    }
 }

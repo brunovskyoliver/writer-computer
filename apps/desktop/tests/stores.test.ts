@@ -39,6 +39,7 @@ import { consumePendingAnchor } from "../src/lib/pending-anchor";
 // Side-effect: registers the subscription that re-points the standalone
 // single-file watcher whenever the active file changes in a compact window.
 import "../src/lib/standalone-watch";
+import { obsidianDrawings } from "../src/lib/obsidian-drawings";
 
 const mockedInvoke = vi.mocked(invoke);
 
@@ -1206,6 +1207,33 @@ describe("handleOpenPayload", () => {
     expect(mockedInvoke).toHaveBeenCalledWith("watch_standalone_file", {
       path: "/anywhere/b.md",
     });
+  });
+
+  test("standalone drawing opens and tab focus retarget the watcher without Markdown buffers", async () => {
+    mockedInvoke.mockResolvedValue(undefined);
+    useWorkspaceStore.setState({ root: null });
+    const original = "/anywhere/source.excalidraw.md";
+    const copy = "/anywhere/source.excalidraw.svg";
+
+    await handleOpenPayload({ workspace: null, file: original });
+    const refresh = vi.fn();
+    const unsubscribe = obsidianDrawings.subscribe(original, refresh);
+    const originalTabId = useEditorStore.getState().activeTabId!;
+    await useEditorStore.getState().openFile(copy);
+    await Promise.resolve();
+    refresh.mockClear();
+    useEditorStore.getState().setActiveTab(originalTabId);
+    await vi.waitFor(() => expect(refresh).toHaveBeenCalled());
+    unsubscribe();
+
+    expect(useEditorStore.getState().activeFilePath).toBeNull();
+    expect(useEditorStore.getState().openFiles.size).toBe(0);
+    expect(
+      mockedInvoke.mock.calls
+        .filter(([command]) => command === "watch_standalone_file")
+        .map(([, args]) => args),
+    ).toEqual([{ path: original }, { path: copy }, { path: original }]);
+    expect(mockedInvoke).not.toHaveBeenCalledWith("read_file", expect.anything());
   });
 
   test("folder payload on a standalone compact window opens a new workspace window", async () => {

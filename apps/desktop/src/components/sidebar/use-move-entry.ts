@@ -5,7 +5,7 @@ import {
   useRewriteExpandedDir,
   useRewritePinnedPath,
 } from "@/hooks/use-file-tree";
-import { renameOpenFile, rewritePathPrefix } from "@/hooks/editor-api";
+import { renameOpenFile, rewritePathPrefix, withDrawingSourceRename } from "@/hooks/editor-api";
 import * as tauri from "@/lib/tauri";
 import { getParentDir } from "@/lib/paths";
 import type { DirEntry } from "@/types/fs";
@@ -32,19 +32,21 @@ export function useMoveEntry() {
   // its name (rename) or its parent (move) — the handling is identical.
   const applyPathChange = useCallback(
     async (entry: DirEntry, newPath: string): Promise<void> => {
-      await withDrawingSaveBoundary(async () => {
-        await tauri.renameEntry(entry.path, newPath);
-        discardDrawingSessions(entry.path);
-      }, entry.path);
-      if (entry.is_dir) {
-        rewritePathPrefix(entry.path, newPath);
-        rewriteExpandedDir(entry.path, newPath);
-        rewritePinnedPath(entry.path, newPath);
-      } else {
-        renameOpenFile(entry.path, newPath);
-        rewritePathPrefix(entry.path, newPath);
-        rewritePinnedPath(entry.path, newPath);
-      }
+      await withDrawingSourceRename(entry.path, newPath, async () => {
+        await withDrawingSaveBoundary(async () => {
+          await tauri.renameEntry(entry.path, newPath);
+          discardDrawingSessions(entry.path);
+        }, entry.path);
+        if (entry.is_dir) {
+          rewritePathPrefix(entry.path, newPath);
+          rewriteExpandedDir(entry.path, newPath);
+          rewritePinnedPath(entry.path, newPath);
+        } else {
+          renameOpenFile(entry.path, newPath);
+          rewritePathPrefix(entry.path, newPath);
+          rewritePinnedPath(entry.path, newPath);
+        }
+      });
       const fromParent = getParentDir(entry.path);
       const toParent = getParentDir(newPath);
       await refreshDirectory(fromParent);

@@ -20,6 +20,7 @@ import {
 } from "@/lib/frontmatter";
 import { getDocumentStats, type DocumentStats } from "@/lib/document-stats";
 import { isDrawingPath } from "@/lib/drawings";
+import { normalizeDrawingLocation } from "@/lib/drawing-location";
 import { clearPdfTextCache, isPdfPath } from "@/lib/pdf";
 import { cancelSave, scheduleSave, registerSaveStore, saveNow, isSaveInFlight } from "@/lib/save";
 import {
@@ -269,7 +270,7 @@ export function createLauncherTab(id = createTabId()): Tab {
  * kind of tab a path opens in is a one-line change in one file rather than a
  * branch repeated at every call site (see SPECs/excalidraw-embed/plan.md).
  *
- * Drawings (`.excalidraw.svg`) dispatch to a `drawing` location, PDFs to a
+ * Drawings (`.excalidraw.svg` and `.excalidraw.md`) dispatch to a `drawing` location, PDFs to a
  * `pdf` one; everything else is a `file`. This is the *only* site that
  * dispatches on extension —
  * every other question about a path ("is this its own surface?") is answered
@@ -418,6 +419,14 @@ function findSurfaceTab(tabs: Tab[], location: Location, path: string): Tab | un
   return tabs.find(
     (tab) => tab.location.kind === location.kind && locationPaths(tab.location).includes(path),
   );
+}
+
+/** The focused document for chrome, recents and watchers, including standalone surfaces. */
+export function activeDocumentPath(
+  state: Pick<EditorState, "tabs" | "activeTabId">,
+): string | null {
+  const tab = state.tabs.find((candidate) => candidate.id === state.activeTabId);
+  return tab ? (locationPrimaryPath(tab.location) ?? locationPaths(tab.location)[0] ?? null) : null;
 }
 
 function deriveActiveFilePath(tabs: Tab[], activeTabId: string | null): string | null {
@@ -629,9 +638,8 @@ async function ensureFileLoaded(path: string, set: EditorStateSetter, get: () =>
   // A standalone surface is not markdown and owns its own I/O. Reading one in
   // here would park its bytes in `openFiles` with the save machinery attached,
   // and the next autosave would overwrite the file with its own text.
-  // Guarding here rather than at the call sites covers all of them, including
-  // session restore, and drops the optimistic placeholder the callers insert
-  // before they await.
+  // Placeholder and prefetch paths apply this rule before publishing. Keep
+  // the load boundary defensive too, so stale buffers cannot retain save state.
   if (isStandaloneSurface(locationForPath(path))) {
     dropPendingEdit(path);
     set((state) => {
@@ -805,7 +813,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     // Seed the prefetched content (standalone startup hands the file over
     // in the startup IPC) so the editor mounts loaded; `ensureFileLoaded`
     // then short-circuits on the non-loading entry.
-    if (prefetched && prefetched.path === path) {
+    if (prefetched && prefetched.path === path && !isStandaloneSurface(locationForPath(path))) {
       const parsed = parseDocument(prefetched.content);
       set((state) => {
         const files = new Map(state.openFiles);
@@ -831,9 +839,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
     const nextTab = createFileTab(path);
     set((state) => {
-      const filesWithTarget = state.openFiles.has(path)
-        ? null
-        : new Map(state.openFiles).set(path, createLoadingFile(path));
+      const filesWithTarget =
+        isStandaloneSurface(nextTab.location) || state.openFiles.has(path)
+          ? null
+          : new Map(state.openFiles).set(path, createLoadingFile(path));
       const baseState = filesWithTarget ? { ...state, openFiles: filesWithTarget } : state;
       const tabs = [nextTab];
       const prunedFiles = maybePruneFiles(baseState, tabs);
@@ -873,9 +882,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const { paneId } = resolveOpenTarget(get(), target);
 
     set((state) => {
-      const openFiles = state.openFiles.has(path)
-        ? undefined
-        : new Map(state.openFiles).set(path, createLoadingFile(path));
+      const openFiles =
+        isStandaloneSurface(nextTab.location) || state.openFiles.has(path)
+          ? undefined
+          : new Map(state.openFiles).set(path, createLoadingFile(path));
       return { ...appendTab(state, nextTab, paneId), ...(openFiles ? { openFiles } : {}) };
     });
 
@@ -944,9 +954,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       if (state.tabs[index]?.location.kind !== "launcher") return state;
       const tabs = [...state.tabs];
       tabs[index] = nextTab;
-      const openFiles = state.openFiles.has(path)
-        ? undefined
-        : new Map(state.openFiles).set(path, createLoadingFile(path));
+      const openFiles =
+        isStandaloneSurface(nextTab.location) || state.openFiles.has(path)
+          ? undefined
+          : new Map(state.openFiles).set(path, createLoadingFile(path));
       // Same tab id, so the layout is unchanged; only the location moved.
       return {
         ...publish(tabs, state.layout, state.openFiles),
@@ -1464,29 +1475,36 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   renameOpenFile: (oldPath: string, newPath: string) => {
     let shouldScheduleSave = false;
+    const becomesSurface = isStandaloneSurface(locationForPath(newPath));
+    if (becomesSurface && (get().openFiles.get(oldPath)?.isDirty || pendingDocs.has(oldPath))) {
+      throw new Error("Save this note before renaming it as a drawing.");
+    }
 
     set((state) => {
       const file = state.openFiles.get(oldPath);
       if (!file) return state;
 
-      shouldScheduleSave = file.isDirty;
+      shouldScheduleSave = !becomesSurface && file.isDirty;
 
       const files = new Map(state.openFiles);
       files.delete(oldPath);
-      files.set(newPath, { ...file, path: newPath });
+      if (!becomesSurface) files.set(newPath, { ...file, path: newPath });
 
       const pendingDoc = pendingDocs.get(oldPath);
-      if (pendingDoc) {
+      if (pendingDoc && !becomesSurface) {
         pendingDocs.delete(oldPath);
         pendingDocs.set(newPath, pendingDoc);
       }
       const pendingTimer = pendingFlushTimers.get(oldPath);
-      if (pendingTimer) {
+      if (pendingTimer && !becomesSurface) {
         pendingFlushTimers.delete(oldPath);
         pendingFlushTimers.set(newPath, pendingTimer);
       }
 
-      const rewrite = (loc: Location) => rewriteLocation(loc, oldPath, newPath);
+      const rewrite = (loc: Location) => {
+        const next = rewriteLocation(loc, oldPath, newPath);
+        return next ? normalizeDrawingLocation(next) : null;
+      };
       const tabs = state.tabs.map((tab) => applyRewriteToTab(tab, rewrite) ?? tab);
 
       // Tab ids are untouched by a rename, so pane membership is too.
@@ -1494,6 +1512,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     });
 
     rewriteEditorPaths((path) => (path === oldPath ? newPath : path));
+    if (becomesSurface) dropPendingEdit(oldPath);
     cancelSave(oldPath);
     if (shouldScheduleSave) scheduleSave(newPath);
   },
@@ -1646,15 +1665,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
     // Restore applies the same bound runtime navigation enforces — an old or
     // crafted session cannot exceed it.
-    const cappedTabs = restoredTabs.map((tab) =>
-      tab.back.length > NAV_HISTORY_LIMIT || tab.forward.length > NAV_HISTORY_LIMIT
-        ? {
-            ...tab,
-            back: tab.back.slice(-NAV_HISTORY_LIMIT),
-            forward: tab.forward.slice(0, NAV_HISTORY_LIMIT),
-          }
-        : tab,
-    );
+    const cappedTabs = restoredTabs.map((tab) => ({
+      ...tab,
+      location: normalizeDrawingLocation(tab.location),
+      back: tab.back.slice(-NAV_HISTORY_LIMIT).map(normalizeDrawingLocation),
+      forward: tab.forward.slice(0, NAV_HISTORY_LIMIT).map(normalizeDrawingLocation),
+    }));
 
     // Warm set only: every tab's current location plus its nearest few
     // history entries. Older back/forward entries stay in the stacks — they
@@ -1669,7 +1685,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           ...tab.forward.slice(0, WARM_HISTORY_DEPTH).flatMap((l) => locationPaths(l)),
         ]),
       ),
-    ];
+    ].filter((path) => !isStandaloneSurface(locationForPath(path)));
     const activeTabId = focusedTabId(restoredLayout);
     const activeTab = cappedTabs.find((tab) => tab.id === activeTabId) ?? null;
     const activePath = activeTab ? locationPrimaryPath(activeTab.location) : null;

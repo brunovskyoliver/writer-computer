@@ -32,6 +32,10 @@ export function readFile(path: string): Promise<FileContent> {
   return invoke("read_file", { path });
 }
 
+export function readDrawingSource(path: string): Promise<string> {
+  return invoke("read_drawing_source", { path });
+}
+
 export async function writeFile(
   path: string,
   content: string,
@@ -86,8 +90,12 @@ export function fileExists(path: string): Promise<boolean> {
 
 /** Case-insensitive basename lookup across the workspace (gitignore-aware
  *  walk; shortest path wins on duplicates). Used by wiki image embeds. */
-export function findFileByName(root: string, fileName: string): Promise<string | null> {
-  return invoke("find_file_by_name", { root, fileName });
+export function findFileByName(
+  root: string,
+  fileName: string,
+  requireUnique = false,
+): Promise<string | null> {
+  return invoke("find_file_by_name", { root, fileName, requireUnique });
 }
 
 export function revealInFileManager(path: string): Promise<void> {
@@ -330,6 +338,8 @@ export interface StartupState {
    *  Mutually exclusive with `restore_bundle`; the single-file watcher is
    *  already running by the time this returns. */
   standalone_file: FileContent | null;
+  /** Standalone path, including drawings whose source is not prefetched as Markdown. */
+  standalone_path?: string | null;
 }
 
 export function getStartupState(): Promise<StartupState> {

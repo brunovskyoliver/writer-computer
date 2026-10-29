@@ -431,9 +431,22 @@ fn fuzzy_search_impl(query: &str, index: &[IndexedFile], limit: usize) -> Vec<Se
 ///
 /// Deterministic on duplicates: the match with the fewest path components
 /// wins, ties broken lexicographically — "shortest path" like Obsidian.
-pub fn find_file_by_name_impl(root: &Path, file_name: &str) -> Option<PathBuf> {
+#[cfg(test)]
+fn find_file_by_name_impl(root: &Path, file_name: &str) -> Option<PathBuf> {
+    find_file_by_name_checked(root, file_name, false).unwrap()
+}
+
+/// Drawing basenames require uniqueness across the complete walk. In that mode
+/// an unreadable subtree is an error because uniqueness cannot be established.
+fn find_file_by_name_checked(
+    root: &Path,
+    file_name: &str,
+    require_unique: bool,
+) -> Result<Option<PathBuf>, AppError> {
     let matches: Arc<Mutex<Vec<PathBuf>>> = Arc::new(Mutex::new(Vec::new()));
     let target = file_name.to_lowercase();
+    let walk_error = Arc::new(Mutex::new(None::<String>));
+    let walk_error_ref = Arc::clone(&walk_error);
 
     let threads = std::thread::available_parallelism()
         .map(|n| n.get().min(8))
@@ -450,9 +463,16 @@ pub fn find_file_by_name_impl(root: &Path, file_name: &str) -> Option<PathBuf> {
         .run(move || {
             let matches = Arc::clone(&matches_ref);
             let target = target.clone();
+            let walk_error = Arc::clone(&walk_error_ref);
             Box::new(move |entry| {
-                let Ok(entry) = entry else {
-                    return ignore::WalkState::Continue;
+                let entry = match entry {
+                    Ok(entry) => entry,
+                    Err(error) => {
+                        if require_unique {
+                            *walk_error.lock() = Some(error.to_string());
+                        }
+                        return ignore::WalkState::Continue;
+                    }
                 };
                 if entry.file_type().is_some_and(|ft| ft.is_dir()) {
                     if entry.file_name() == "node_modules" {
@@ -469,13 +489,23 @@ pub fn find_file_by_name_impl(root: &Path, file_name: &str) -> Option<PathBuf> {
             })
         });
 
+    if let Some(error) = walk_error.lock().take() {
+        return Err(AppError::Io(format!(
+            "Could not resolve drawing basename: {error}"
+        )));
+    }
     let mut matches = Arc::try_unwrap(matches).unwrap().into_inner();
+    if require_unique && matches.len() > 1 {
+        return Err(AppError::InvalidPath(format!(
+            "Ambiguous drawing basename '{file_name}'; use a relative path"
+        )));
+    }
     matches.sort_by(|a, b| {
         let depth_a = a.components().count();
         let depth_b = b.components().count();
         depth_a.cmp(&depth_b).then_with(|| a.cmp(b))
     });
-    matches.into_iter().next()
+    Ok(matches.into_iter().next())
 }
 
 // --- content search (SPECs/global-content-search) ---------------------------
@@ -877,10 +907,15 @@ pub async fn content_search(
 pub async fn find_file_by_name(
     root: String,
     file_name: String,
+    require_unique: Option<bool>,
 ) -> Result<Option<String>, AppError> {
     tauri::async_runtime::spawn_blocking(move || {
-        Ok(find_file_by_name_impl(Path::new(&root), &file_name)
-            .map(|path| path.to_string_lossy().to_string()))
+        Ok(find_file_by_name_checked(
+            Path::new(&root),
+            &file_name,
+            require_unique.unwrap_or(false),
+        )?
+        .map(|path| path.to_string_lossy().to_string()))
     })
     .await
     .map_err(|e| AppError::Io(e.to_string()))?
@@ -1119,6 +1154,38 @@ mod tests {
         assert!(subsequence_score(&needle, &hay, &boundaries).is_none());
         let needle: Vec<char> = "abcd".chars().collect();
         assert!(subsequence_score(&needle, &hay, &boundaries).is_none());
+    }
+
+    #[test]
+    fn drawing_basename_lookup_rejects_duplicates_instead_of_picking_shortest() {
+        let dir = TempDir::new().unwrap();
+        let root_drawing = dir.path().join("Scene.excalidraw.md");
+        fs::write(&root_drawing, "source").unwrap();
+        assert_eq!(
+            find_file_by_name_checked(dir.path(), "scene.excalidraw.md", true).unwrap(),
+            Some(root_drawing.clone())
+        );
+        fs::create_dir(dir.path().join("nested")).unwrap();
+        fs::write(
+            dir.path().join("nested/scene.EXCALIDRAW.MD"),
+            "other source",
+        )
+        .unwrap();
+        let error = find_file_by_name_checked(dir.path(), "scene.excalidraw.md", true).unwrap_err();
+        assert!(error.to_string().contains("Ambiguous drawing basename"));
+        assert_eq!(
+            find_file_by_name_checked(dir.path(), "scene.excalidraw.md", false).unwrap(),
+            Some(root_drawing)
+        );
+        assert!(
+            find_file_by_name_checked(dir.path(), "missing.excalidraw.md", true)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            find_file_by_name_checked(&dir.path().join("absent"), "scene.excalidraw.md", true)
+                .is_err()
+        );
     }
 
     #[test]

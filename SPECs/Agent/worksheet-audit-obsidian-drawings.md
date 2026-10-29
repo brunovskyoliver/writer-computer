@@ -86,15 +86,16 @@ remain follow-up work under AUD-03, alongside the wider link-integrity audit.
 
 ## Status
 
-Baseline captured; eight persona plan reviews complete with refinements below.
-AUD-10 no-clobber publication is implemented and verified. Last full baseline:
-1,727 frontend tests and 298 Rust tests. No implementation changes for this task yet. Original vault
-inspection was read-only and did not launch Obsidian or run its synchronization.
+Implemented and verified for preview and explicit editable copies. Eight plan and
+eight implementation persona reviews completed; accepted findings are fixed.
+Final gates: 1,801 frontend tests, 305 Rust tests, check/clippy/fmt and native build
+pass. Remaining migration and rendering work stays in the broader audit. Original
+vault inspection was read-only and did not launch Obsidian or its synchronization.
 
 ## Plan-review refinements
 
-Architecture, Editor, Rust, React, UX, QA, State and Startup reviews support the
-preserved-original/copy boundary. Address these before implementation:
+Architecture, Editor, Rust, React, UX, QA, State and Startup reviews supported the
+preserved-original/copy boundary. These refinements were incorporated:
 
 - Shared lazy Excalidraw runtime initializes local font assets before import or
   export, including cold-start inline embeds without any drawing tab.
@@ -136,3 +137,103 @@ preserved-original/copy boundary. Address these before implementation:
 
 Owning drawing spec, editor docs, Zustand ownership notes and any changed MCP
 contracts must be updated with the implementation. No complete-migration claim.
+
+## Final implementation
+
+- Shared format classification routes Obsidian Markdown sources to read-only
+  previews and Writer SVGs to editable canvases. Restore, sidebar, recents,
+  standalone startup and watchers use the same document identity. Source paths
+  never enter text buffers, editable drawing sessions or Markdown mutations.
+- Strict wrapper parsing honors Text Elements and Element Links. The attributed,
+  bounded LZString decoder runs in a worker with cancellation and timeout.
+  Rust caps source reads at 4 MiB; parser budgets also limit decoded output,
+  dictionary growth, nesting and element counts. All seven current SDU drawings
+  decode in a read-only diagnostic. External assets and unsupported content fail
+  explicitly instead of producing an incomplete copy.
+- Two jobs at a time and 12 current entries/32 MiB estimated current data bound
+  shared preview work. A matching reserve retains old UI leases during refresh.
+  DOM-owned cleanup survives CodeMirror equal-widget reuse. Reset and invalidation
+  cancel stale work; the last release revokes URLs. Preview images omit editable
+  metadata; actual copies and saves retain it.
+- Copy creates a separate SVG beside the source using exclusive missing-file
+  publication and collision naming. Focus/tab/workspace changes permanently
+  cancel stale navigation, including A→B→A. Existing note links keep resolving
+  to the original. Basename ambiguity produces a visible error.
+- Preview has loading, error/retry, empty, fit and zoom states, source reveal and
+  copy actions. Compact labels keep controls usable at 240×160. Dark-mode images
+  use the existing drawing filter. CSP permits blob images only in img-src.
+- Renaming a text note into a drawing source flushes pending text before rename;
+  failure aborts the operation. Returning to a compact source refreshes it after
+  watcher retargeting, including changes made while its copy was active.
+- Test configuration skips unnecessary font asset copying, resolving a reproduced
+  concurrent build/test EEXIST failure. The LaTeX highlight test explicitly
+  finishes syntax parsing before checking nested marks; production behavior did
+  not change. Existing user math/Mermaid/dependency changes remain separate.
+
+## Verification results
+
+Evidence directory: `/Users/oliver/agent-runs/2026-10-29-writer-audit/`.
+All interactive data came from the synthetic study fixture and isolated audit app.
+
+- Frontend: 1,801 tests in 119 files pass (`obsidian-drawings-tests-7.log`).
+  Check: zero errors, ten existing warnings (`obsidian-drawings-check-7.log`).
+- Rust: 305 tests pass; clippy completes with 13 existing warnings; fmt passes
+  (`obsidian-final-rust.log`, `obsidian-final-clippy.log`, `obsidian-final-fmt.log`).
+- Seventh release/e2e app build passes (`obsidian-drawings-build-7.log`).
+- Native copy: Create editable copy opened the canvas. Native Cmd+A, Right Arrow
+  and Cmd+S moved both elements by one pixel, changed the SVG hash, and retained
+  element IDs and positions after a full reload. Original source hash remained
+  unchanged (`obsidian-native-copy-roundtrip.json`).
+- Source and inline preview share a URL. Valid→corrupt→valid and delete→recreate
+  refresh both consumers; errors expose an operable link. Source hash was restored
+  (`obsidian-native-invalidation.json`). Final native embed removal released its
+  URLs (`obsidian-widget-lifecycle-final.json`). The precise equal-widget DOM
+  reuse regression is covered by the real-widget unit test, not a claimed native
+  red/green reproduction.
+- Shorthand link after copies existed reused the original preview, with no
+  editable canvas. Synthetic Cmd+S in that source issued no write_file call and
+  preserved its hash (`obsidian-native-source-routing.json`). The first harness
+  expected a duplicate preview; that assertion was wrong because navigation
+  correctly reused the already-open tab.
+- Cold Launch Services open of the source produced a compact drawing preview
+  without a CodeMirror editor (`obsidian-native-compact-startup.json`). Direct
+  executable argv is not the macOS open path and was excluded from this result.
+  Returning through recents from a copy rendered the changed Text Elements text;
+  empty→restored source transitions updated live, preserving original bytes
+  (`obsidian-native-compact-watch.json`). Generated SVG text was inspected through
+  a temporary createObjectURL observation hook because CSP correctly blocks
+  fetch(blob:). No CSP relaxation was made for the diagnostic.
+- A 240×160 pane leaves 42px fitted image height; all controls fit and Zoom out
+  shrinks the portrait. Light/dark screenshots were inspected
+  (`obsidian-native-small.json`, `obsidian-small-{dark,light}-800.png`).
+- Cold opening automatically tiled beside Safari: neighboring width changed
+  2998→1494px, Writer's parent was TilingContainer, and closing restored 2998px.
+  Reopening the same source kept one window. Evidence: compact-tiling and
+  compact-repeat-open JSON files. No AeroSpace configuration changed.
+- Native before/after screenshots are retained. The original file named
+  before-1200 is actually 1780×2238 physical pixels; matched after captures use
+  that same geometry. Do not infer viewport size from the historical filename.
+
+## Performance and remaining limits
+
+Native profiling used a synthetic 1,399,841-byte source with 430 freehand strokes.
+Before preview metadata removal, first display took 332ms with a 220ms maximum
+frame gap and 189ms maximum scheduled insertion delay; all 30 synthetic CodeMirror
+insertions completed. Warm repeats displayed in 282–310ms. Instrumented stages
+showed roughly 55ms for editable metadata and 100ms for stroke SVG construction,
+with worker decode off the main thread. This justified omitting metadata from
+previews while preserving it in copies and saves.
+
+A later diagnostic at 1494×1651 CSS pixels displayed in 246ms with a 143ms maximum
+frame gap and 105ms maximum insertion delay (30/30 completed). It differs from the
+1200×800 baseline geometry. Attempts at matching geometry lost foreground
+visibility and are excluded. No controlled speedup percentage is claimed. These
+are synthetic insertion timings, not hardware keyboard latency. AUD-11 tracks
+remaining synchronous export and comparable foreground measurements.
+
+Full Obsidian serialization, asset migration, relationship rewriting and itslearning
+integration remain open in the comprehensive audit. This task preserves the entire
+source and creates an explicit independent copy; it does not claim full migration.
+No production installation, push or deployment occurred. The goal remains active.
+
+Future subagents use gpt-6.1-sol with high reasoning, as requested by Oliver.

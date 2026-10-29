@@ -45,7 +45,7 @@ Do not run the source vault's synchronization or modify its files during audit.
 | ------ | --------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
 | AUD-01 | P1        | External reload overwrites newer edits or completed saves; dirty conflicts silently discard local text | Fixed in `2a71ac0`; 1,720 frontend / 292 Rust tests and native recovery verified                 |
 | AUD-02 | P2        | Atomic text save replaces permissions and symlink identity                                             | Fixed in `3aef86f`; 286 Rust tests and native IPC verified                                       |
-| AUD-03 | P2        | SDU Obsidian Excalidraw Markdown drawings/embeds unsupported                                           | Current scan: seven files; native baseline confirmed; preview/import task in progress            |
+| AUD-03 | P2        | SDU Obsidian Excalidraw Markdown drawings/embeds unsupported                                           | Preview/copy verified; 1,801 frontend / 305 Rust tests; full migration remains open              |
 | AUD-04 | P2        | Active tab clipped after window/pane resize                                                            | Fixed in `7ae7721`; 1,696 frontend tests and native layout checks pass                           |
 | AUD-05 | P2        | Existing course plugin persistence queue stays rejected after one IO failure                           | Static finding; source plugin not modified                                                       |
 | AUD-06 | P2        | Calendar refresh interval, course-folder mapping and dedup map drift                                   | Static findings plus stored-data mismatch; synthetic reproduction pending                        |
@@ -54,12 +54,12 @@ Do not run the source vault's synchronization or modify its files during audit.
 | AUD-09 | Untriaged | PDF rectangle encoding compatibility                                                                   | Inspect actual grammar before claiming compatibility; no PDF++ selection anchors observed in SDU |
 
 AUD-10 (P1): expected-missing saves can replace an external file created between
-check and rename. Fixed and verified with exclusive publication; 298 Rust / 1,727
+check and rename. Fixed in `430e347` and verified with exclusive publication; 298 Rust / 1,727
 frontend tests and repeated native recreation pass. Report: [atomic new-file publication](worksheet-audit-create-publication.md).
 
 ## Verification and remaining work
 
-Audit remains in progress. Five fixes implemented, reviewed and tested. No production
+Audit remains in progress. Six improvements implemented, reviewed and tested. No production
 installation, deployment or vault migration. No original notes changed.
 
 - Evidence reports: `academic-workflow.md`, `reliability.md` under the evidence directory.
@@ -92,7 +92,19 @@ AUD-07 report: [usable small split panes](worksheet-audit-small-panes.md). Nativ
 800/1200 light/dark checks, properties, conflicts, Find, Vim, undo and synthetic
 tab moves pass. The final app also fixes a measured Vim coordinate race.
 
-Next: evaluate SDU drawing import, fragment links and course navigation. Full metadata
+AUD-03 preview/copy report: [Obsidian drawings](worksheet-audit-obsidian-drawings.md).
+Native copy editing/save/reopen and source preservation, standalone watcher
+recovery, empty states, small panes and live tiling pass. Full migration remains.
+
+AUD-11 (P2): large drawing SVG export still blocks the main thread. A synthetic
+430-stroke scene showed roughly 100ms of SVG construction. Preview-only editable
+metadata generation was removed; copy/save still retain metadata. Post-change
+maximum frame gap was 143ms in one valid diagnostic, but its viewport differed
+from the baseline. Comparable runs lost foreground visibility and were excluded.
+Investigate export architecture and obtain controlled measurements before claiming
+a speedup. Evidence and scope are in the AUD-03 report.
+
+Next: resolve drawing export stalls, fragment links and course navigation. Full metadata
 preservation, save concurrency with external processes, performance profiling,
 accessibility and remaining UI states are still open. AUD-01 report has final native
 and automated evidence; no broad completion claim is made.

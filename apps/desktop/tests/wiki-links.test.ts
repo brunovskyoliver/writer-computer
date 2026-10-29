@@ -1,3 +1,5 @@
+import { EditorState } from "@codemirror/state";
+import { markdown } from "@codemirror/lang-markdown";
 import { beforeEach, describe, expect, test, vi } from "vite-plus/test";
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -11,6 +13,7 @@ import {
   openDrawingEmbed,
   __test,
 } from "../src/components/editor-area/wiki-link-extension";
+import { useEditorNoticeStore } from "../src/components/editor-area/editor-notice-store";
 import { useEditorStore } from "../src/stores/editor-store";
 import { createLayout, findPane, panes, splitPaneWithTab } from "../src/lib/editor-layout";
 import { isDrawingPath } from "../src/lib/drawings";
@@ -18,6 +21,7 @@ import {
   canonicalWikiTarget,
   normalizeWikiTarget,
   parseWikiLink,
+  parseWikiDrawingTarget,
   parseWikiImageEmbedTarget,
   resolveWikiImage,
   resolveWikiLink,
@@ -553,12 +557,37 @@ describe("drawing embed press stash", () => {
   const viewOf = (text: string) =>
     ({
       posAtCoords: () => 0,
-      state: { doc: { lineAt: () => ({ from: 0, text }) } },
+      state: EditorState.create({ doc: text, extensions: [markdown()] }),
     }) as never;
 
-  const press = (text: string, x = 100, y = 100) =>
-    recordDrawingPress({ clientX: x, clientY: y } as MouseEvent, viewOf(text));
-  const take = (x = 100, y = 100) => takeDrawingPress({ clientX: x, clientY: y } as MouseEvent);
+  const view = {
+    posAtCoords: () => 0,
+    state: EditorState.create({ extensions: [markdown()] }),
+  } as never;
+  const origin = {
+    workspaceRoot: "/vault",
+    filePath: "/vault/note.md",
+    tabId: "source",
+    isDisposed: () => false,
+  };
+  const press = (text: string, x = 100, y = 100) => {
+    (view as unknown as { state: EditorState }).state = EditorState.create({
+      doc: text,
+      extensions: [markdown()],
+    });
+    recordDrawingPress({ clientX: x, clientY: y } as MouseEvent, view, origin);
+  };
+  const take = (x = 100, y = 100) =>
+    takeDrawingPress({ clientX: x, clientY: y } as MouseEvent, view)?.target ?? null;
+
+  test("a second editor cannot consume the first editor's press or origin", () => {
+    press("![[a.excalidraw]]");
+    const event = { clientX: 100, clientY: 100 } as MouseEvent;
+    expect(takeDrawingPress(event, viewOf("![[b.excalidraw]]"))).toBeNull();
+    const result = takeDrawingPress(event, view);
+    expect(result?.target).toBe("a.excalidraw.md");
+    expect(result?.origin).toBe(origin);
+  });
 
   test("a press on a drawing embed is spendable once", () => {
     press("![[a.excalidraw.svg]]");
@@ -695,4 +724,49 @@ describe("in-editor open routes", () => {
     expect(findPane(state.layout, left.id)!.tabIds).toContain(drawing!.id);
     expect(findPane(state.layout, right.id)!.tabIds).not.toContain(drawing!.id);
   });
+});
+
+test("drawing shorthand and explicit Markdown keep pointing at the source", () => {
+  expect(parseWikiDrawingTarget("folder/Sketch.excalidraw|title")).toBe(
+    "folder/Sketch.excalidraw.md",
+  );
+  expect(parseWikiDrawingTarget("Sketch.excalidraw.md#section")).toBe("Sketch.excalidraw.md");
+  expect(parseWikiImageEmbedTarget("Sketch.excalidraw")).toBe("Sketch.excalidraw.md");
+  expect(parseWikiDrawingTarget("Sketch.excalidraw.svg")).toBe("Sketch.excalidraw.svg");
+  expect(parseWikiDrawingTarget(".excalidraw.md")).toBeNull();
+});
+
+test("literal drawing syntax inside code never starts a drawing gesture", () => {
+  const event = { clientX: 100, clientY: 100 } as MouseEvent;
+  const origin = {
+    workspaceRoot: "/vault",
+    filePath: "/vault/note.md",
+    tabId: "source",
+    isDisposed: () => false,
+  };
+  for (const doc of ["```\n![[a.excalidraw]]\n```", "`![[a.excalidraw]]`"]) {
+    const view = {
+      state: EditorState.create({ doc, extensions: [markdown()] }),
+      posAtCoords: () => doc.indexOf("[[") + 2,
+    } as never;
+    __test.recordDrawingPress(event, view, origin);
+    expect(__test.takeDrawingPress(event, view)).toBeNull();
+  }
+});
+
+test("ambiguous drawing links show the backend guidance in their originating pane", async () => {
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "file_exists") return false;
+    if (command === "find_file_by_name") throw "Ambiguous drawing basename; use a relative path";
+    throw new Error(`Unexpected command: ${command}`);
+  });
+  await openDrawingEmbed("a.excalidraw.md", {
+    workspaceRoot: "/vault",
+    filePath: "/vault/note.md",
+    tabId: "source",
+    isDisposed: () => false,
+  });
+  expect(useEditorNoticeStore.getState().message).toContain("use a relative path");
+  expect(useEditorNoticeStore.getState().tabId).toBe("source");
+  useEditorNoticeStore.getState().dismissNotice();
 });

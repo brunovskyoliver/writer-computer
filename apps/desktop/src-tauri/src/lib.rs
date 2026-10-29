@@ -582,6 +582,7 @@ pub fn run() {
             commands::fs::read_recent_files,
             commands::fs::read_file_entries,
             commands::fs::read_file,
+            commands::fs::read_drawing_source,
             commands::fs::write_file,
             commands::fs::create_file,
             commands::fs::create_directory,

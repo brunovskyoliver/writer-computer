@@ -3,7 +3,9 @@
 //! forwarded to the owning window's webview iff it needs live editor state
 //! or a UI action.
 
-use crate::commands::fs::{is_markdown_file, is_sidebar_file, modified_time, read_file_impl};
+use crate::commands::fs::{
+    drawing_format, is_markdown_file, is_sidebar_file, modified_time, read_file_impl,
+};
 use crate::commands::search::fuzzy_search_from;
 use crate::error::{McpErrorKind, McpToolError};
 use crate::ignore::WorkspaceIgnore;
@@ -312,9 +314,9 @@ impl WriterMcpServer {
     }
 
     /// On-disk text of a readable file kind (`.md`, `.markdown`,
-    /// `.excalidraw.svg`), frontmatter included, capped at 1 MiB.
+    /// `.excalidraw.svg`, `.excalidraw.md`), frontmatter included, capped at 1 MiB.
     #[tool(
-        description = "Read a file's on-disk text. Readable kinds: .md, .markdown, .excalidraw.svg. Files over 1 MiB are refused."
+        description = "Read a file's on-disk text. Readable kinds: .md, .markdown, .excalidraw.svg, .excalidraw.md. Files over 1 MiB are refused."
     )]
     async fn read_file(
         &self,
@@ -348,7 +350,7 @@ impl WriterMcpServer {
     /// editor save (FR-018). Rust checks the boundary and file kind; the
     /// create-new refusal (`already_exists`) is the webview's `create_file`.
     #[tool(
-        description = "Create a new markdown file (.md, .markdown) with the given content. Fails with already_exists if the path exists; use write_file to replace content."
+        description = "Create a new markdown note (.md, .markdown, excluding .excalidraw.md drawings) with the given content. Fails with already_exists if the path exists; use write_file to replace content."
     )]
     async fn create_file(
         &self,
@@ -371,7 +373,7 @@ impl WriterMcpServer {
     /// writes through the UI save path, and refreshes a clean open tab
     /// (FR-016/017/018). `resolve_path` itself answers `not_found`.
     #[tool(
-        description = "Replace a markdown file's content in full. Fails with not_found if missing, unsupported_kind for non-markdown kinds, unsaved_conflict when the file is open with unsaved edits."
+        description = "Replace a markdown file's content in full. Fails with not_found if missing, unsupported_kind for drawings and non-markdown kinds, unsaved_conflict when the file is open with unsaved edits."
     )]
     async fn write_file(
         &self,
@@ -570,7 +572,7 @@ fn entry_kind(path: &Path) -> &'static str {
         return "other";
     };
     let lower = name.to_ascii_lowercase();
-    if lower.ends_with(".excalidraw.svg") {
+    if drawing_format(path).is_some() {
         "drawing"
     } else if lower.ends_with(".pdf") {
         "pdf"
@@ -683,7 +685,7 @@ fn read_file_checked(canonical: &Path, relative: &str) -> Result<Value, McpToolE
     if !is_readable_kind(canonical) {
         return Err(McpToolError::new(
             McpErrorKind::UnsupportedKind,
-            format!("{relative} is not a readable kind (.md, .markdown, .excalidraw.svg)"),
+            format!("{relative} is not a readable kind (.md, .markdown, .excalidraw.svg, .excalidraw.md)"),
         ));
     }
     let size = std::fs::metadata(canonical)
@@ -708,10 +710,7 @@ fn read_file_checked(canonical: &Path, relative: &str) -> Result<Value, McpToolE
 /// The kinds `read_file` accepts: Writer's text documents. Listings may show
 /// more (PDFs); reading them is `unsupported_kind`.
 fn is_readable_kind(path: &Path) -> bool {
-    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
-        return false;
-    };
-    is_markdown_file(path) || name.to_ascii_lowercase().ends_with(".excalidraw.svg")
+    is_markdown_file(path) || drawing_format(path).is_some()
 }
 
 /// The kinds the write tools accept: markdown only. Drawings carry no dirty
@@ -722,7 +721,9 @@ fn check_writable_kind(canonical: &Path, relative: &str) -> Result<(), McpToolEr
     if !is_markdown_file(canonical) {
         return Err(McpToolError::new(
             McpErrorKind::UnsupportedKind,
-            format!("{relative} is not a writable kind (.md, .markdown)"),
+            format!(
+                "{relative} is not a writable Markdown note (.md, .markdown; drawings excluded)"
+            ),
         ));
     }
     Ok(())
@@ -802,6 +803,7 @@ mod tests {
         touch(&root.join("a.md"), "x");
         touch(&root.join("b.markdown"), "x");
         touch(&root.join("d.excalidraw.svg"), "x");
+        touch(&root.join("o.EXCALIDRAW.MD"), "source");
         touch(&root.join("p.pdf"), "x");
         touch(&root.join("note.txt"), "x");
         touch(&root.join("sub/nested.md"), "x");
@@ -822,6 +824,7 @@ mod tests {
             "a.md",
             "b.markdown",
             "d.excalidraw.svg",
+            "o.EXCALIDRAW.MD",
             "p.pdf",
             "sub/nested.md",
         ] {
@@ -841,6 +844,7 @@ mod tests {
             })
             .collect();
         assert_eq!(kinds["d.excalidraw.svg"], "drawing");
+        assert_eq!(kinds["o.EXCALIDRAW.MD"], "drawing");
         assert_eq!(kinds["p.pdf"], "pdf");
         assert_eq!(kinds["a.md"], "markdown");
         assert_eq!(kinds["b.markdown"], "markdown");
@@ -905,6 +909,30 @@ mod tests {
 
         let err = read_file_checked(&root.join("big.md"), "big.md").unwrap_err();
         assert_eq!(err.kind, McpErrorKind::TooLarge);
+    }
+
+    #[test]
+    fn obsidian_drawing_source_is_readable_but_rejected_by_both_mutation_gates() {
+        let dir = TempDir::new().unwrap();
+        let path = canonical(&dir).join("scene.EXCALIDRAW.MD");
+        let source = "---\ntitle: source metadata\n---\n# Drawing\n";
+        touch(&path, source);
+        assert_eq!(
+            read_file_checked(&path, "scene.EXCALIDRAW.MD").unwrap()["content"],
+            source
+        );
+        // create_file and write_file both call this before forwarding to the webview.
+        let error = check_writable_kind(&path, "scene.EXCALIDRAW.MD").unwrap_err();
+        assert_eq!(error.kind, McpErrorKind::UnsupportedKind);
+        let missing = canonical(&dir).join("new.excalidraw.md");
+        assert_eq!(
+            check_writable_kind(&missing, "new.excalidraw.md")
+                .unwrap_err()
+                .kind,
+            McpErrorKind::UnsupportedKind
+        );
+        assert!(check_writable_kind(&canonical(&dir).join("note.md"), "note.md").is_ok());
+        assert_eq!(std::fs::read_to_string(path).unwrap(), source);
     }
 
     // --- workspace entries ------------------------------------------------------

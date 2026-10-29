@@ -313,3 +313,45 @@ describe("editorApi", () => {
     });
   });
 });
+
+test("copy origin stays cancelled after focus leaves and returns", () => {
+  const tabs = [makeFileTab("copy-origin", "/vault/a.md"), makeFileTab("other", "/vault/b.md")];
+  useEditorStore.setState({
+    tabs,
+    layout: createLayout(
+      tabs.map((tab) => tab.id),
+      "copy-origin",
+    ),
+    activeTabId: "copy-origin",
+  });
+  const operation = editorApi.captureActiveTabOperation("copy-origin");
+  expect(operation.isCurrent()).toBe(true);
+  useEditorStore.getState().setActiveTab("other");
+  useEditorStore.getState().setActiveTab("copy-origin");
+  expect(operation.isCurrent()).toBe(false);
+  operation.dispose();
+});
+
+test("copy origin cannot revive after its tab is replaced or the operation is disposed", () => {
+  const tab = makeFileTab("copy-origin", "/vault/a.md");
+  useEditorStore.setState({
+    tabs: [tab],
+    layout: createLayout([tab.id], tab.id),
+    activeTabId: tab.id,
+  });
+  const operation = editorApi.captureActiveTabOperation(tab.id);
+  useEditorStore.setState({ tabs: [makeFileTab(tab.id, "/vault/b.md")] });
+  useEditorStore.setState({ tabs: [tab] });
+  expect(operation.isCurrent()).toBe(false);
+  operation.dispose();
+  const next = editorApi.captureActiveTabOperation(tab.id);
+  expect(next.isCurrent()).toBe(true);
+  next.dispose();
+  expect(next.isCurrent()).toBe(false);
+});
+
+test("drawing display names use the same compound extension rule as tabs", () => {
+  expect(editorApi.getDocumentName("/vault/Course.excalidraw.md")).toBe("Course");
+  expect(editorApi.getDocumentName("/vault/Course-1.excalidraw.svg")).toBe("Course-1");
+  expect(editorApi.getDocumentName("/vault/Notes.md")).toBe("Notes");
+});

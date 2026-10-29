@@ -180,3 +180,25 @@
 [data-pane-narrow] .cm-table-widget {
   overflow-x: auto;
 }
+
+.obsidian-preview-short,
+.obsidian-copy-short {
+  display: none;
+}
+[data-pane-narrow] .obsidian-preview-full,
+[data-pane-narrow] .obsidian-copy-full {
+  display: none;
+}
+[data-pane-narrow] .obsidian-preview-short,
+[data-pane-narrow] .obsidian-copy-short {
+  display: inline;
+}
+[data-pane-short] .obsidian-drawing-header {
+  padding-block: 1px;
+}
+[data-pane-short] .obsidian-drawing-zoom {
+  padding-block: 0;
+}
+[data-pane-short] .obsidian-drawing-zoom button {
+  padding-block: 1px;
+}

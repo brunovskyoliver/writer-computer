@@ -298,3 +298,23 @@ fallback when the filesystem lacks support for that operation. Successful creati
 removes its temporary name. A cleanup failure reports whether publication succeeded and
 is not a retryable filename collision. Existing-file replacement remains an
 optimistic check followed by rename, not an OS-wide compare-and-swap operation.
+
+Obsidian `.excalidraw.md` sources use a drawing location but never attach an editable
+session or enter `openFiles`, including compact prefetch and legacy restoration.
+`read_drawing_source` bounds reads to 4 MiB. Decode runs in a terminable worker;
+`drawing-source-cache` owns the two-job queue, 12-current-entry/32 MiB data limits (with an equal reserve for retired UI leases),
+reference leases and object URLs. Watcher invalidation notifies tabs and embeds;
+old displayed URLs live until their consumers release them. Blob URLs never receive
+file-image cache-busting query parameters. The source view uses SVG zoom/scroll;
+Create editable copy exports the current source to a distinct SVG with a conditional
+missing-file write. Existing links and metadata stay in the original wrapper.
+
+`find_file_by_name` accepts optional `require_unique`; drawing resolution sets it
+and fails on ambiguous names or incomplete scans. Ordinary attachment lookup keeps
+its existing shortest-path rule. `drawing-runtime` configures local font assets for
+cold inline export as well as canvas mounting. Main-process Markdown mutations reject
+Obsidian wrappers; source reading, sidebar listing and standalone opens allow them.
+
+CodeMirror may reuse an equal widget's DOM with a new WidgetType instance. Put
+resource cleanup in a shared DOM-keyed WeakMap, not an instance field, so the
+new instance's `destroy(dom)` releases the original subscriptions and leases.

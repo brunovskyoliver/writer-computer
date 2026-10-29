@@ -2,8 +2,8 @@ import { useCallback } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Cancel01Icon, File02Icon } from "@hugeicons/core-free-icons";
 import { useGlobalRecentFiles } from "@/hooks/use-global-recent-files";
-import { useActiveFilePath } from "@/hooks/use-tabs";
-import { getFileStem } from "@/lib/paths";
+import { useActiveDocumentPath } from "@/hooks/use-tabs";
+import { getDocumentName } from "@/hooks/editor-api";
 import type { RecentFile } from "@/lib/tauri";
 import { SIDEBAR_SECTION_LABEL_CLASS } from "./sidebar/sidebar-section";
 
@@ -14,7 +14,7 @@ interface CompactRecentsListProps {
 }
 
 function recentLabel(entry: RecentFile) {
-  return entry.title || getFileStem(entry.name);
+  return entry.title || getDocumentName(entry.path);
 }
 
 /** Picker content for standalone compact windows: a global recents list, with
@@ -25,7 +25,7 @@ export function CompactRecentsList({
   className,
 }: CompactRecentsListProps) {
   const { files: recentFiles, loaded, remove } = useGlobalRecentFiles();
-  const activeFilePath = useActiveFilePath();
+  const activeFilePath = useActiveDocumentPath();
   const visibleRecentFiles = recentFiles.filter((entry) => entry.path !== activeFilePath);
 
   const openFileAndComplete = useCallback(

@@ -16,7 +16,10 @@ import {
 import { getVersionedImageSrc } from "@/lib/drawing-embed-sync";
 import * as tauri from "@/lib/tauri";
 import { getFileStem } from "@/lib/paths";
-import { isDrawingPath } from "@/lib/drawings";
+import { editorGeneration } from "@/lib/editor-reset";
+import { obsidianDrawings } from "@/lib/obsidian-drawings";
+import type { DrawingLease } from "@/lib/drawing-source-cache";
+import { isDrawingPath, isObsidianDrawingPath } from "@/lib/drawings";
 import { isPdfPath } from "@/lib/pdf";
 import { useEditorStore } from "@/stores/editor-store";
 import { showEditorNotice } from "./editor-notice-store";
@@ -25,6 +28,8 @@ import * as editorApi from "@/hooks/editor-api";
 import {
   canonicalWikiTarget,
   parseWikiLink,
+  parseWikiDrawingTarget,
+  resolveWikiImage,
   parseWikiImageEmbedTarget,
   resolveWikiImageEmbed,
   resolveWikiLink,
@@ -120,6 +125,15 @@ function resolveEmbed(
   workspaceRoot: string | null,
   currentFilePath: string | null,
 ): Promise<string | null> {
+  if (isDrawingPath(target)) {
+    return resolveWikiImage(
+      target,
+      workspaceRoot,
+      currentFilePath,
+      tauri.fileExists,
+      (root, name) => tauri.findFileByName(root, name, true),
+    );
+  }
   return resolveWikiImageEmbed(
     target,
     workspaceRoot,
@@ -133,6 +147,9 @@ function resolveEmbed(
  *  inline (reusing the `.cm-image` styling and the shared height-stability
  *  cache from `fold/image.ts`); unresolved targets render the raw source
  *  text as a muted placeholder. */
+// CodeMirror may reuse an equal widget's DOM with a new WidgetType instance.
+// Cleanup therefore belongs to the DOM, not to the instance that built it.
+const imageEmbedCleanups = new WeakMap<HTMLElement, () => void>();
 class ImageEmbedWidget extends WidgetType {
   constructor(
     readonly rawText: string,
@@ -159,9 +176,53 @@ class ImageEmbedWidget extends WidgetType {
     attachStableImageHeight(image, elem, this.target, view);
     elem.appendChild(image);
 
+    image.addEventListener("error", () => {
+      if (disposed) return;
+      this.renderPlaceholder(elem, image);
+      elem.title = "The drawing image could not be displayed. Open it to retry.";
+      view.requestMeasure();
+    });
+    let disposed = false;
+    let lease: DrawingLease | undefined;
+    let unsubscribe: (() => void) | undefined;
+    let request = 0;
+    imageEmbedCleanups.set(elem, () => {
+      disposed = true;
+      request++;
+      unsubscribe?.();
+      lease?.release();
+    });
     void resolveEmbed(this.target, this.workspaceRoot, this.currentFilePath)
       .then((absolutePath) => {
-        if (absolutePath) {
+        if (disposed) return;
+        if (absolutePath && isObsidianDrawingPath(absolutePath)) {
+          const refresh = () => {
+            const token = ++request;
+            const previous = lease;
+            const next = obsidianDrawings.acquire(absolutePath);
+            lease = next;
+            void next.result
+              .then((preview) => {
+                if (disposed || token !== request) return;
+                elem.classList.remove("cm-image-embed-unresolved", "cm-wiki-link");
+                elem.replaceChildren(image);
+                image.dataset.canonicalPath = absolutePath;
+                image.dataset.obsidianDrawing = "";
+                image.src = preview.url;
+                image.alt = this.target;
+                view.requestMeasure();
+              })
+              .catch((error: unknown) => {
+                if (disposed || token !== request) return;
+                this.renderPlaceholder(elem, image);
+                elem.title = String(error);
+                view.requestMeasure();
+              })
+              .finally(() => previous?.release());
+          };
+          unsubscribe = obsidianDrawings.subscribe(absolutePath, refresh);
+          refresh();
+        } else if (absolutePath) {
           image.dataset.canonicalPath = absolutePath;
           image.src = getVersionedImageSrc(absolutePath);
         } else {
@@ -169,17 +230,26 @@ class ImageEmbedWidget extends WidgetType {
         }
       })
       .catch((error) => {
+        if (disposed) return;
         console.error("[editor] Failed to resolve image embed:", error);
         this.renderPlaceholder(elem, image);
+        elem.title = String(error);
       });
 
     return elem;
+  }
+
+  destroy(dom: HTMLElement): void {
+    imageEmbedCleanups.get(dom)?.();
+    imageEmbedCleanups.delete(dom);
   }
 
   private renderPlaceholder(elem: HTMLElement, image: HTMLImageElement) {
     image.remove();
     elem.classList.add("cm-image-embed-unresolved");
     elem.textContent = this.rawText;
+    elem.classList.add("cm-wiki-link");
+    elem.dataset.wikiTarget = this.target;
   }
 
   ignoreEvent(): boolean {
@@ -242,7 +312,12 @@ function wikiLinkDecorations(getFilePath: () => string) {
       }
 
       update(update: ViewUpdate) {
-        if (update.docChanged || update.viewportChanged || update.selectionSet) {
+        if (
+          update.docChanged ||
+          update.viewportChanged ||
+          update.selectionSet ||
+          syntaxTree(update.startState) !== syntaxTree(update.state)
+        ) {
           this.decorations = buildDecorations(update.view, getFilePath);
         }
       }
@@ -332,7 +407,10 @@ function wikiTargetAt(event: MouseEvent, view: EditorView): string | null {
  *  one embed must not open it when the user then double-clicks elsewhere.
  *  Both presses of a double-click land within a few pixels of each other, so
  *  a mismatch means this isn't the press that started it. */
-let lastDrawingPress: { target: string; x: number; y: number; at: number } | null = null;
+const drawingPresses = new WeakMap<
+  EditorView,
+  { target: string; x: number; y: number; at: number; origin: EditorOpenOrigin }
+>();
 
 const DRAWING_PRESS_MAX_AGE_MS = 800;
 const DRAWING_PRESS_MAX_DRIFT_PX = 8;
@@ -342,25 +420,32 @@ const DRAWING_PRESS_MAX_DRIFT_PX = 8;
 function drawingEmbedAt(event: MouseEvent, view: EditorView): string | null {
   const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
   if (pos === null) return null;
+  if (isInsideCode(view.state, pos)) return null;
   const token = extractWikiToken(view.state.doc, pos);
   if (!token?.embed) return null;
   const target = parseWikiImageEmbedTarget(token.inner);
   return target && isDrawingPath(target) ? target : null;
 }
 
-function recordDrawingPress(event: MouseEvent, view: EditorView): void {
+function recordDrawingPress(event: MouseEvent, view: EditorView, origin: EditorOpenOrigin): void {
   const target = drawingEmbedAt(event, view);
   // A press that finds nothing leaves the stash alone: the second press of a
   // double-click lands on the now-unfolded source, several lines off, and
   // finds nothing itself.
   if (target) {
-    lastDrawingPress = { target, x: event.clientX, y: event.clientY, at: Date.now() };
+    drawingPresses.set(view, {
+      target,
+      x: event.clientX,
+      y: event.clientY,
+      at: Date.now(),
+      origin,
+    });
   }
 }
 
-function takeDrawingPress(event: MouseEvent): string | null {
-  const press = lastDrawingPress;
-  lastDrawingPress = null;
+function takeDrawingPress(event: MouseEvent, view: EditorView) {
+  const press = drawingPresses.get(view);
+  drawingPresses.delete(view);
   if (!press) return null;
   if (Date.now() - press.at > DRAWING_PRESS_MAX_AGE_MS) return null;
   if (
@@ -369,7 +454,7 @@ function takeDrawingPress(event: MouseEvent): string | null {
   ) {
     return null;
   }
-  return press.target;
+  return press;
 }
 
 /**
@@ -426,6 +511,11 @@ export async function followWikiLink(
     fileExists: typeof tauri.fileExists;
   } = tauri,
 ): Promise<void> {
+  const drawing = parseWikiDrawingTarget(rawTarget);
+  if (drawing) {
+    await openDrawingEmbed(drawing, origin);
+    return;
+  }
   if (!origin.workspaceRoot) return;
 
   // A `.pdf` target is a quote link, not a note link: it resolves with its
@@ -452,19 +542,44 @@ export async function followWikiLink(
 
 /** Resolve an inline drawing embed and open it from the originating tab. */
 export async function openDrawingEmbed(drawing: string, origin: EditorOpenOrigin): Promise<void> {
-  const absolutePath = await resolveEmbed(drawing, origin.workspaceRoot, origin.filePath);
-  if (!absolutePath || origin.isDisposed()) return;
-  await editorApi.navigateToFile(absolutePath, origin.tabId ? { tabId: origin.tabId } : undefined);
+  try {
+    const absolutePath = await resolveEmbed(drawing, origin.workspaceRoot, origin.filePath);
+    if (origin.isDisposed()) return;
+    if (!absolutePath) {
+      showEditorNotice(`Can't find "${drawing}".`, origin.tabId);
+      return;
+    }
+    await editorApi.navigateToFile(
+      absolutePath,
+      origin.tabId ? { tabId: origin.tabId } : undefined,
+    );
+  } catch (error) {
+    if (!origin.isDisposed()) showEditorNotice(String(error), origin.tabId);
+  }
 }
 
 function wikiLinkClickHandler(getFilePath: () => string, isDisposed: () => boolean): Extension {
+  const originFor = (view: EditorView): EditorOpenOrigin => {
+    const generation = editorGeneration();
+    const tabId = editorApi.getTabIdForView(view);
+    const tab = useEditorStore.getState().tabs.find((item) => item.id === tabId);
+    return {
+      workspaceRoot: getWorkspaceRoot(),
+      filePath: getFilePath(),
+      tabId,
+      isDisposed: () =>
+        isDisposed() ||
+        generation !== editorGeneration() ||
+        useEditorStore.getState().tabs.find((item) => item.id === tabId) !== tab,
+    };
+  };
   return Prec.highest(
     EditorView.domEventHandlers({
       // Claim the press on mousedown so CodeMirror doesn't move the caret
       // into the link (which would unfold the rendered widget), but defer
       // navigation to the click (mouseup) so it follows on release.
       mousedown(event, view) {
-        recordDrawingPress(event, view);
+        recordDrawingPress(event, view, originFor(view));
         if (wikiTargetAt(event, view) === null) return false;
         event.preventDefault();
         event.stopPropagation();
@@ -480,18 +595,13 @@ function wikiLinkClickHandler(getFilePath: () => string, isDisposed: () => boole
       // embed any more. So `mousedown` stashes the target while the layout
       // is still intact and `dblclick` spends it.
       dblclick(event, view) {
-        const drawing = takeDrawingPress(event);
+        const drawing = takeDrawingPress(event, view);
         if (!drawing) return false;
 
         event.preventDefault();
         event.stopPropagation();
 
-        void openDrawingEmbed(drawing, {
-          workspaceRoot: getWorkspaceRoot(),
-          filePath: getFilePath() || null,
-          tabId: editorApi.getTabIdForView(view),
-          isDisposed,
-        }).catch((error) => {
+        void openDrawingEmbed(drawing.target, drawing.origin).catch((error) => {
           if (!isDisposed()) console.error("[editor] Failed to open drawing embed:", error);
         });
 
@@ -504,15 +614,7 @@ function wikiLinkClickHandler(getFilePath: () => string, isDisposed: () => boole
         event.preventDefault();
         event.stopPropagation();
 
-        const workspaceRoot = getWorkspaceRoot();
-        if (!workspaceRoot) return true;
-
-        void followWikiLink(rawTarget, {
-          workspaceRoot,
-          filePath: getFilePath(),
-          tabId: editorApi.getTabIdForView(view),
-          isDisposed,
-        }).catch((error) => {
+        void followWikiLink(rawTarget, originFor(view)).catch((error) => {
           if (!isDisposed()) console.error("[editor] Failed to follow wiki link:", error);
         });
 
@@ -572,7 +674,7 @@ const wikiLinkTheme = EditorView.baseTheme({
 
 /** Exported for the unit tests: the press stash is module state, and the
  *  time/position match is the only non-obvious part of the double-click. */
-export const __test = { recordDrawingPress, takeDrawingPress };
+export const __test = { recordDrawingPress, takeDrawingPress, ImageEmbedWidget };
 
 export function wikiLinkExtension(
   getFilePath: () => string,

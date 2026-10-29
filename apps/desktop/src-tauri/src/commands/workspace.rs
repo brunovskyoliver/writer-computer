@@ -689,7 +689,8 @@ pub async fn restore_workspace(
 
 fn active_session_path(record: &SessionRecord) -> Option<String> {
     match record {
-        SessionRecord::Ready { session } => session::focused_session_file(session),
+        SessionRecord::Ready { session } => session::focused_session_file(session)
+            .filter(|path| crate::commands::fs::drawing_format(Path::new(path)).is_none()),
         _ => None,
     }
 }
@@ -818,7 +819,7 @@ pub fn open_workspace_in_new_window(
     crate::open_new_workspace_window(&app, path, file)
 }
 
-/// Open a single markdown file in a standalone compact window (no
+/// Open a Markdown note or drawing in a standalone compact window (no
 /// workspace). Focuses the existing window when one already hosts the file.
 #[tauri::command]
 pub fn open_file_in_standalone_window(path: String, app: tauri::AppHandle) -> Result<(), AppError> {
@@ -998,6 +999,18 @@ mod tests {
             }
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn legacy_drawing_file_locations_are_not_prefetched_as_markdown() {
+        let drawing = SessionRecord::Ready {
+            session: valid_session("/ws/scene.EXCALIDRAW.MD"),
+        };
+        assert_eq!(active_session_path(&drawing), None);
+        let note = SessionRecord::Ready {
+            session: valid_session("/ws/note.md"),
+        };
+        assert_eq!(active_session_path(&note), Some("/ws/note.md".into()));
     }
 
     #[test]

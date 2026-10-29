@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vite-plus/test";
 import { EditorState } from "@codemirror/state";
 import { markdown } from "@codemirror/lang-markdown";
-import { LanguageDescription, syntaxTree } from "@codemirror/language";
+import { LanguageDescription, ensureSyntaxTree } from "@codemirror/language";
 import { GFM } from "@lezer/markdown";
 import type { SyntaxNode } from "@lezer/common";
 import { classHighlighter, highlightTree } from "@lezer/highlight";
@@ -38,11 +38,19 @@ function markdownState(doc: string) {
   });
 }
 
+// Initial parsing has a short time budget. These assertions need the completed
+// tree, including nested fences, even when the test runner shares CPU with builds.
+function completeTree(state: EditorState) {
+  const tree = ensureSyntaxTree(state, state.doc.length, 1000);
+  expect(tree).not.toBeNull();
+  return tree!;
+}
+
 /** Highlight classes the renderer would apply, as `[class, text]`. */
 function highlightClasses(doc: string): [string, string][] {
   const state = markdownState(doc);
   const out: [string, string][] = [];
-  highlightTree(syntaxTree(state), classHighlighter, (from, to, cls) => {
+  highlightTree(completeTree(state), classHighlighter, (from, to, cls) => {
     out.push([cls, state.doc.sliceString(from, to)]);
   });
   return out;
@@ -52,7 +60,7 @@ function highlightClasses(doc: string): [string, string][] {
 function nestedTokens(state: EditorState, name: string): [string, string][] {
   const out: [string, string][] = [];
   let inside: SyntaxNode | null = null;
-  syntaxTree(state).iterate({
+  completeTree(state).iterate({
     enter(node) {
       if (!inside && node.name === name) inside = node.node;
       if (inside && node.from >= inside.from && node.to <= inside.to && node.name !== name) {

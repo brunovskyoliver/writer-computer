@@ -137,8 +137,9 @@ async function resolveStartup() {
       recentWorkspaces: startup.recent_workspaces,
     });
 
-    if (startup.standalone_file) {
-      await openStandaloneFile(startup.standalone_file.path, startup.standalone_file);
+    const standalonePath = startup.standalone_path ?? startup.standalone_file?.path;
+    if (standalonePath) {
+      await openStandaloneFile(standalonePath, startup.standalone_file);
     } else if (startup.restore_bundle) {
       await useWorkspaceStore.getState().restoreFromBundle(startup.restore_bundle);
     }

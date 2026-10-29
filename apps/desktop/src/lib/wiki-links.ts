@@ -1,3 +1,4 @@
+import { isDrawingPath } from "./drawings";
 import { getFileStem, getParentDir, normalizePath } from "./paths";
 import { editorGeneration, onEditorReset } from "./editor-reset";
 import { LruCache } from "./lru";
@@ -132,7 +133,17 @@ const WIKI_IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg
  * Anything after an unescaped `|` (alias / size modifiers) is ignored —
  * v1 non-goals per the spec.
  */
+/** Obsidian shorthand always denotes the original, even after an SVG copy exists. */
+export function parseWikiDrawingTarget(raw: string): string | null {
+  const { target } = splitAlias(raw.trim());
+  const path = unescapeWikiText(target).split("#")[0]!.replace(/\\/g, "/").replace(/^\/+/, "");
+  if (isDrawingPath(path)) return path;
+  return isDrawingPath(`${path}.md`) ? `${path}.md` : null;
+}
+
 export function parseWikiImageEmbedTarget(raw: string): string | null {
+  const drawing = parseWikiDrawingTarget(raw);
+  if (drawing) return drawing;
   const { target } = splitAlias(raw.trim());
   const path = unescapeWikiText(target).replace(/\\/g, "/").replace(/^\/+/, "");
   const dot = path.lastIndexOf(".");

@@ -2,6 +2,8 @@
 
 ## 2026-10-29
 
+- Obsidian Excalidraw Markdown drawings open as previews and render in wiki embeds. Create editable copy writes a separate SVG; the original drawing and existing note links stay intact. Unsupported drawing content reports an error.
+
 - Recreating a deleted note no longer replaces a file another process creates between the missing-file check and publication. The competing file is preserved and the draft remains unsaved.
 
 - Small split panes keep tabs, writing and conflict recovery usable. Narrow properties stack; short panes collapse Properties and move conflict choices into a review dialog. Find stays outside short panes, Vim commands fit their footer, and rapid Vim scrolling keeps the cursor visible.

@@ -4,8 +4,9 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@/lib/theme", () => ({ applyTheme: vi.fn(), applyCssVarBindings: vi.fn() }));
 
 import { invoke } from "@tauri-apps/api/core";
-import { locationForPath, useEditorStore } from "../src/stores/editor-store";
+import { activeDocumentPath, locationForPath, useEditorStore } from "../src/stores/editor-store";
 import { useWorkspaceStore } from "../src/stores/workspace-store";
+import { withDrawingSourceRename } from "../src/hooks/editor-api";
 import { createLayout } from "../src/lib/editor-layout";
 
 /**
@@ -184,4 +185,137 @@ describe("the pdf page write-back", () => {
       path: "/ws/a.md",
     });
   });
+});
+
+describe("Obsidian drawing routing", () => {
+  const original = "/ws/Sketch.excalidraw.md";
+
+  test.each(["openFile", "openFileInNewTab", "openCompactFile", "replaceTabWithFile"] as const)(
+    "%s never publishes a Markdown buffer for a drawing",
+    async (route) => {
+      useEditorStore.getState().ensureLauncherTab();
+      const launcherId = useEditorStore.getState().activeTabId!;
+      const buffers: string[][] = [];
+      const unsubscribe = useEditorStore.subscribe((state) => {
+        buffers.push([...state.openFiles.keys()]);
+      });
+      try {
+        if (route === "replaceTabWithFile") {
+          await useEditorStore.getState().replaceTabWithFile(launcherId, original);
+        } else if (route === "openCompactFile") {
+          await useEditorStore.getState().openCompactFile(original, {
+            path: original,
+            content: "# Original scene wrapper",
+            modified_at: 1,
+          });
+        } else {
+          await useEditorStore.getState()[route](original);
+        }
+        const state = useEditorStore.getState();
+        expect(state.tabs.find((tab) => tab.id === state.activeTabId)?.location).toEqual({
+          kind: "drawing",
+          path: original,
+        });
+        expect(state.activeFilePath).toBeNull();
+        expect(activeDocumentPath(state)).toBe(original);
+        expect(buffers.flat()).not.toContain(original);
+        expect(mockedInvoke).not.toHaveBeenCalledWith("read_file", expect.anything());
+      } finally {
+        unsubscribe();
+      }
+    },
+  );
+
+  test("runtime restore normalizes current and history drawings before publishing or prefetching", async () => {
+    const back = "/ws/Back.excalidraw.md";
+    const forward = "/ws/Forward.excalidraw.svg";
+    const buffers: string[][] = [];
+    const unsubscribe = useEditorStore.subscribe((state) =>
+      buffers.push([...state.openFiles.keys()]),
+    );
+    try {
+      await useEditorStore.getState().restoreSession(
+        {
+          tabs: [
+            {
+              id: "legacy",
+              location: { kind: "file", path: original },
+              back: [
+                { kind: "pdf", path: PDF, page: 9 },
+                { kind: "file", path: back },
+              ],
+              forward: [{ kind: "file", path: forward }],
+            },
+          ],
+          layout: createLayout(["legacy"], "legacy"),
+        },
+        { path: original, content: "# Original scene wrapper", modified_at: 1 },
+      );
+      expect(buffers.flat()).toEqual([]);
+      expect(useEditorStore.getState().tabs[0]).toMatchObject({
+        location: { kind: "drawing", path: original },
+        back: [
+          { kind: "pdf", path: PDF, page: 9 },
+          { kind: "drawing", path: back },
+        ],
+        forward: [{ kind: "drawing", path: forward }],
+      });
+      await useEditorStore.getState().navigateBack();
+      expect(activeDocumentPath(useEditorStore.getState())).toBe(back);
+      expect(useEditorStore.getState().activeFilePath).toBeNull();
+      await useEditorStore.getState().navigateBack();
+      expect(useEditorStore.getState().tabs[0]?.location).toEqual({
+        kind: "pdf",
+        path: PDF,
+        page: 9,
+      });
+      await useEditorStore.getState().navigateForward();
+      expect(activeDocumentPath(useEditorStore.getState())).toBe(back);
+      expect(mockedInvoke).not.toHaveBeenCalledWith("read_file", expect.anything());
+    } finally {
+      unsubscribe();
+    }
+  });
+});
+
+test("renaming a note to an Obsidian source flushes edits before removing its text buffer", async () => {
+  const oldPath = "/ws/sketch.md",
+    newPath = "/ws/sketch.excalidraw.md";
+  mockedInvoke.mockImplementation(async (command, args) => {
+    if (command === "read_file") return { path: oldPath, content: "old", modified_at: 1 };
+    if (command === "write_file") return { path: (args as { path: string }).path, modified_at: 2 };
+    return undefined;
+  });
+  await useEditorStore.getState().openFile(oldPath);
+  useEditorStore.getState().updateContent(oldPath, "latest draft");
+  expect(() => useEditorStore.getState().renameOpenFile(oldPath, newPath)).toThrow(
+    "Save this note",
+  );
+  expect(useEditorStore.getState().openFiles.get(oldPath)?.content).toBe("latest draft");
+  await withDrawingSourceRename(oldPath, newPath, async () => {
+    expect(useEditorStore.getState().openFiles.get(oldPath)?.isDirty).toBe(false);
+    useEditorStore.getState().renameOpenFile(oldPath, newPath);
+  });
+  expect(useEditorStore.getState().openFiles.size).toBe(0);
+  expect(useEditorStore.getState().tabs[0]!.location).toEqual({ kind: "drawing", path: newPath });
+  const writes = mockedInvoke.mock.calls.filter(([command]) => command === "write_file");
+  expect(writes.length).toBeGreaterThan(0);
+  expect(writes.every(([, args]) => (args as { path: string }).path === oldPath)).toBe(true);
+});
+
+test("a failed save prevents a source-format rename from touching disk", async () => {
+  const path = "/ws/sketch.md";
+  mockedInvoke.mockImplementation(async (command) => {
+    if (command === "read_file") return { path, content: "old", modified_at: 1 };
+    if (command === "write_file") throw "disk full";
+    return undefined;
+  });
+  await useEditorStore.getState().openFile(path);
+  useEditorStore.getState().updateContent(path, "keep me");
+  const rename = vi.fn();
+  await expect(withDrawingSourceRename(path, "/ws/sketch.excalidraw.md", rename)).rejects.toThrow(
+    "Save this note",
+  );
+  expect(rename).not.toHaveBeenCalled();
+  expect(useEditorStore.getState().openFiles.get(path)?.content).toBe("keep me");
 });

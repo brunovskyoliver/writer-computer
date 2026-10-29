@@ -1,3 +1,7 @@
+import { freezeEditorInput, settleEditorInput } from "@/lib/editor-input";
+import { saveNow } from "@/lib/save";
+import { isObsidianDrawingPath } from "@/lib/drawings";
+import { editorGeneration } from "@/lib/editor-reset";
 import type { EditorView } from "@codemirror/view";
 import type { Text } from "@codemirror/state";
 import * as editorViews from "@/lib/editor-views";
@@ -6,7 +10,8 @@ import { findOuterScroller } from "@/components/editor-area/editor-scroll";
 import { setPendingLineTarget } from "@/lib/pending-anchor";
 import { encodeAnchorFragment } from "@/lib/pdf-anchor";
 import { requestPdfAnchor } from "@/stores/pdf-anchor-store";
-import { useEditorStore, type OpenTarget } from "@/stores/editor-store";
+import { pageKind } from "@/components/editor-area/page-kinds";
+import { locationForPath, useEditorStore, type OpenTarget } from "@/stores/editor-store";
 import type { SearchMatch } from "@/types/fs";
 export type { OpenFile, Tab, OpenTarget } from "@/stores/editor-store";
 
@@ -231,4 +236,56 @@ export function insertAtCursor(path: string, text: string, tabId: string | null 
     selection: { anchor: cursor + insertText.length },
   });
   return true;
+}
+
+/** Capture a focused operation and permanently cancel it when its origin changes. */
+export function captureActiveTabOperation(tabId: string) {
+  const origin = useEditorStore.getState();
+  const tab = origin.tabs.find((item) => item.id === tabId);
+  const generation = editorGeneration();
+  const matches = () => {
+    const now = useEditorStore.getState();
+    return (
+      generation === editorGeneration() &&
+      !!tab &&
+      now.tabs.find((item) => item.id === tabId) === tab &&
+      now.layout.focusedPaneId === origin.layout.focusedPaneId &&
+      now.activeTabId === tabId
+    );
+  };
+  let cancelled = !matches();
+  const unsubscribe = useEditorStore.subscribe(() => {
+    if (!matches()) cancelled = true;
+  });
+  return {
+    isCurrent: () => !cancelled && matches(),
+    dispose() {
+      cancelled = true;
+      unsubscribe();
+    },
+  };
+}
+
+/** Flush text before a rename changes its ownership to a source preview. */
+export async function withDrawingSourceRename<T>(
+  oldPath: string,
+  newPath: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  if (!isObsidianDrawingPath(newPath) || !getOpenFile(oldPath)) return operation();
+  const release = freezeEditorInput();
+  try {
+    await settleEditorInput();
+    if (!(await saveNow(oldPath)))
+      throw new Error("Save this note before renaming it as a drawing.");
+    return await operation();
+  } finally {
+    release();
+  }
+}
+
+/** Use each document kind's filename rule in tabs, sidebar rows and recents. */
+export function getDocumentName(path: string): string {
+  const location = locationForPath(path);
+  return pageKind(location).title(location);
 }

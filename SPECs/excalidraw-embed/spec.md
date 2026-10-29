@@ -231,3 +231,24 @@ exact drift `docs/consolidation.md` exists to prevent.
 
 Running speckit commands for this feature requires
 `SPECIFY_FEATURE_DIRECTORY=SPECs/excalidraw-embed` in the environment.
+
+## Obsidian source previews
+
+Writer recognizes `.excalidraw.md` wrappers as drawing sources. It reads a single
+Drawing JSON or compressed-json section, applies Text Elements and Element Links,
+and renders a preview. The original wrapper never enters the Markdown edit buffer
+or drawing save session. Existing metadata and links stay in the original file.
+
+Create editable copy writes a separate `.excalidraw.svg` beside the source, using
+an available numbered name and atomic no-replace publication. It does not rewrite
+existing note links. `.excalidraw` wiki shorthand always refers to the original
+Markdown source, including after an SVG copy exists. Ambiguous basename resolution
+fails and asks for a relative path.
+
+This is preview/copy support, not complete Obsidian serialization or migration.
+External embedded-file references, Markdown-image blocks, embedded web content and
+SVG binary assets produce explicit errors. Self-contained raster scene assets are
+supported. Text mappings remain literal text; Obsidian Markdown rendering in text
+nodes is not reproduced. Sources are capped at 4 MiB and decoding/work/cache limits
+prevent unbounded allocation. Unsupported sources remain available through Original
+(Show in Finder). No unsupported content is silently replaced with an empty scene.

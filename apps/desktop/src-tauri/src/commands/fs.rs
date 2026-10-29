@@ -124,10 +124,30 @@ pub(crate) fn modified_time(path: &std::path::Path) -> u64 {
         .unwrap_or(0)
 }
 
-/// Compound extension for drawings. Mirrors `DRAWING_EXTENSION` in
-/// `apps/desktop/src/lib/drawings.ts` — a plain `.svg` is an image, not a
-/// drawing.
-const DRAWING_EXTENSION: &str = ".excalidraw.svg";
+/// Matches the supported formats in `src/lib/drawings.ts`. Plain SVG is an image.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum DrawingFormat {
+    WriterSvg,
+    ObsidianMarkdown,
+}
+
+pub(crate) fn drawing_format(path: &Path) -> Option<DrawingFormat> {
+    let name = path.file_name()?.to_str()?.to_ascii_lowercase();
+    [
+        (".excalidraw.svg", DrawingFormat::WriterSvg),
+        (".excalidraw.md", DrawingFormat::ObsidianMarkdown),
+    ]
+    .into_iter()
+    .find_map(|(suffix, format)| {
+        (name.len() > suffix.len() && name.ends_with(suffix)).then_some(format)
+    })
+}
+
+/// Standalone opening and recents include drawings without granting Markdown
+/// mutation or title-extraction permission.
+pub(crate) fn is_standalone_file(path: &Path) -> bool {
+    is_markdown_file(path) || drawing_format(path).is_some()
+}
 
 /// Extension for PDFs. Mirrors `PDF_EXTENSION` in
 /// `apps/desktop/src/lib/pdf.ts` — a PDF is shown in the sidebar but is not
@@ -135,12 +155,12 @@ const DRAWING_EXTENSION: &str = ".excalidraw.svg";
 /// `is_sidebar_file`-filtered fuzzy index in `commands/search.rs`.
 pub(crate) const PDF_EXTENSION: &str = ".pdf";
 
-/// A Markdown note: `.md` or `.markdown`, case-insensitive. The one kind
-/// check shared by the sidebar, recents, standalone opens, and the MCP kind
-/// gates so the writable document set cannot drift. The search index and
-/// watcher use the wider `is_sidebar_file` — they track drawings and PDFs
-/// too.
+/// Editable Markdown prose. Obsidian drawing wrappers are source documents
+/// for the drawing preview, not notes eligible for Markdown mutation or AI indexing.
 pub(crate) fn is_markdown_file(path: &Path) -> bool {
+    if drawing_format(path) == Some(DrawingFormat::ObsidianMarkdown) {
+        return false;
+    }
     let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
         return false;
     };
@@ -159,7 +179,7 @@ pub(crate) fn is_sidebar_file(path: &Path) -> bool {
     };
     let lower = name.to_ascii_lowercase();
     is_markdown_file(path)
-        || (lower.ends_with(DRAWING_EXTENSION) && name.len() > DRAWING_EXTENSION.len())
+        || drawing_format(path).is_some()
         || (lower.ends_with(PDF_EXTENSION) && name.len() > PDF_EXTENSION.len())
         || crate::commands::latex_compile::is_latex_source(path)
 }
@@ -303,7 +323,7 @@ pub fn read_directory_impl(
         } else if file_type.is_file() && is_sidebar_file(&entry_path) {
             // `is_markdown` stays literal — it gates the file context menu and
             // title extraction, neither of which applies to a drawing (whose
-            // title is its filename stem and whose body is SVG, not prose).
+            // title is its filename stem and whose source is not editable prose).
             let is_markdown = is_markdown_file(&entry_path);
             files.push(DirEntry {
                 name,
@@ -335,6 +355,47 @@ pub async fn read_directory(
 ) -> Result<Vec<DirEntry>, AppError> {
     let state = app.state::<AppState>().get_or_create(webview.label());
     blocking(move || read_directory_impl(&path, Some(&state))).await
+}
+
+/// Source-byte budget before UTF-8 decoding or transfer to the webview.
+const DRAWING_SOURCE_LIMIT: u64 = 4 * 1024 * 1024;
+
+fn read_drawing_source_impl(path: &str) -> Result<String, AppError> {
+    use std::io::Read;
+    let source = Path::new(path);
+    if drawing_format(source) != Some(DrawingFormat::ObsidianMarkdown) {
+        return Err(AppError::InvalidPath(
+            "Expected an Obsidian .excalidraw.md drawing".into(),
+        ));
+    }
+    let file = fs::File::open(source).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            AppError::NotFound(path.into())
+        } else {
+            AppError::Io(error.to_string())
+        }
+    })?;
+    if !file.metadata()?.is_file() {
+        return Err(AppError::InvalidPath(
+            "Drawing source must be a regular file".into(),
+        ));
+    }
+    let mut bytes = Vec::new();
+    file.take(DRAWING_SOURCE_LIMIT + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > DRAWING_SOURCE_LIMIT {
+        return Err(AppError::Io(
+            "Drawing source exceeds the 4 MiB limit".into(),
+        ));
+    }
+    String::from_utf8(bytes)
+        .map_err(|error| AppError::Io(format!("Drawing source is not UTF-8: {error}")))
+}
+
+/// Same local-file access as `read_file`, limited to Obsidian drawing sources.
+#[tauri::command]
+pub async fn read_drawing_source(path: String) -> Result<String, AppError> {
+    blocking(move || read_drawing_source_impl(&path)).await
 }
 
 pub fn read_file_impl(path: &str) -> Result<FileContent, AppError> {
@@ -568,8 +629,8 @@ pub async fn write_file(
     Ok(result)
 }
 
-pub(crate) fn markdown_file_entry(path: &Path) -> Option<DirEntry> {
-    if !path.is_file() || !is_markdown_file(path) {
+pub(crate) fn standalone_file_entry(path: &Path) -> Option<DirEntry> {
+    if !path.is_file() || !is_standalone_file(path) {
         return None;
     }
 
@@ -578,9 +639,11 @@ pub(crate) fn markdown_file_entry(path: &Path) -> Option<DirEntry> {
         name,
         path: path.to_string_lossy().to_string(),
         is_dir: false,
-        is_markdown: true,
+        is_markdown: is_markdown_file(path),
         modified_at: modified_time(path),
-        title: extract_title(path),
+        title: is_markdown_file(path)
+            .then(|| extract_title(path))
+            .flatten(),
     })
 }
 
@@ -592,7 +655,7 @@ pub fn read_recent_files_impl(
     state
         .recent_files_slice(offset, limit)
         .into_iter()
-        .filter_map(|file| markdown_file_entry(&file.path))
+        .filter_map(|file| standalone_file_entry(&file.path))
         .collect()
 }
 
@@ -621,7 +684,7 @@ pub fn read_file_entries_impl(paths: Vec<String>, root: &Path) -> Vec<DirEntry> 
             if !path.starts_with(root) {
                 return None;
             }
-            markdown_file_entry(&path)
+            standalone_file_entry(&path)
         })
         .collect()
 }
@@ -729,7 +792,7 @@ fn create_sidebar_candidate(
 ) -> Result<DirEntry, AppError> {
     match kind {
         SidebarEntryKind::File => create_file_impl(&candidate.to_string_lossy()).and_then(|_| {
-            markdown_file_entry(candidate)
+            standalone_file_entry(candidate)
                 .ok_or_else(|| AppError::Io("Created Markdown file is unreadable".into()))
         }),
         SidebarEntryKind::Folder => create_directory_impl(&candidate.to_string_lossy()),
@@ -983,6 +1046,62 @@ mod tests {
         for entry in &result {
             assert!(entry.is_dir || entry.is_markdown);
         }
+    }
+
+    #[test]
+    fn obsidian_drawings_are_visible_readonly_sources_with_filename_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("Scene.EXCALIDRAW.MD");
+        let source = "---\ntitle: Internal wrapper title\n---\n# Drawing\n";
+        fs::write(&path, source).unwrap();
+        assert_eq!(drawing_format(&path), Some(DrawingFormat::ObsidianMarkdown));
+        assert!(!is_markdown_file(&path));
+        assert!(is_standalone_file(&path));
+        assert!(is_sidebar_file(&path));
+        assert_eq!(drawing_format(Path::new(".excalidraw.md")), None);
+        assert_eq!(drawing_format(Path::new("plain.svg")), None);
+        assert!(is_markdown_file(Path::new("drawing.excalidraw.markdown")));
+        let entries = read_directory_impl(dir.path().to_str().unwrap(), None).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert!(!entries[0].is_markdown);
+        assert!(entries[0].title.is_none());
+        let recent = standalone_file_entry(&path).unwrap();
+        assert!(!recent.is_markdown);
+        assert!(recent.title.is_none());
+        assert_eq!(
+            read_drawing_source_impl(path.to_str().unwrap()).unwrap(),
+            source
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), source);
+    }
+
+    #[test]
+    fn drawing_source_reader_bounds_bytes_and_rejects_invalid_sources() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("scene.excalidraw.md");
+        let file = fs::File::create(&path).unwrap();
+        file.set_len(DRAWING_SOURCE_LIMIT).unwrap();
+        assert_eq!(
+            read_drawing_source_impl(path.to_str().unwrap())
+                .unwrap()
+                .len(),
+            DRAWING_SOURCE_LIMIT as usize
+        );
+        file.set_len(DRAWING_SOURCE_LIMIT + 1).unwrap();
+        assert!(read_drawing_source_impl(path.to_str().unwrap())
+            .unwrap_err()
+            .to_string()
+            .contains("4 MiB"));
+        fs::write(&path, [0xff]).unwrap();
+        assert!(read_drawing_source_impl(path.to_str().unwrap())
+            .unwrap_err()
+            .to_string()
+            .contains("UTF-8"));
+        assert!(read_drawing_source_impl(dir.path().join("note.md").to_str().unwrap()).is_err());
+        assert!(read_drawing_source_impl(
+            dir.path().join("missing.excalidraw.md").to_str().unwrap()
+        )
+        .is_err());
     }
 
     #[test]
