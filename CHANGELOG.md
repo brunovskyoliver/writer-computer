@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-29
+
+- Saving preserves a note's existing file permissions and updates symlink targets without replacing the links. Read-only and non-file destinations fail explicitly; failed atomic replacements clean up temporary output.
+
 ## 2026-10-08
 
 - Content search now saves a PDF's extracted text to the app cache after its first pdf.js pass. Later searches match it in Rust like a text file, so large PDFs no longer get re-extracted page by page on each query. A PDF that changes on disk is extracted again.

@@ -349,20 +349,83 @@ pub async fn read_file(path: String) -> Result<FileContent, AppError> {
 }
 
 pub fn write_file_impl(path: &str, content: &str) -> Result<WriteResult, AppError> {
-    let file_path = PathBuf::from(path);
+    let requested_path = PathBuf::from(path);
+    // Rename must replace the target, not the link the user opened. Inspect
+    // the link itself first so a dangling link is an error, not a new file.
+    let file_path = match fs::symlink_metadata(&requested_path) {
+        Ok(metadata) if metadata.is_symlink() => fs::canonicalize(&requested_path)?,
+        Ok(_) => requested_path,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => requested_path,
+        Err(error) => return Err(error.into()),
+    };
+    let permissions = match fs::metadata(&file_path) {
+        Ok(metadata) => {
+            if !metadata.is_file() {
+                return Err(AppError::Io(
+                    "Save destination is not a regular file".into(),
+                ));
+            }
+            if metadata.permissions().readonly() {
+                return Err(AppError::Io("Save destination is read-only".into()));
+            }
+            // Rename permission on the parent must not bypass the file's own
+            // write permissions (including ACLs). Open without truncation.
+            OpenOptions::new().write(true).open(&file_path)?;
+            Some(metadata.permissions())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error.into()),
+    };
 
-    // Atomic write: write to temp file, then rename
-    let dir = file_path
-        .parent()
-        .ok_or_else(|| AppError::Io("No parent directory".into()))?;
-    let temp_path = dir.join(format!(".~{}", uuid::Uuid::new_v4()));
-    fs::write(&temp_path, content)?;
-    fs::rename(&temp_path, &file_path)?;
+    atomic_replace_file(&file_path, content, permissions, |from, to| {
+        fs::rename(from, to)
+    })?;
 
     Ok(WriteResult {
         path: path.to_string(),
         modified_at: modified_time(&file_path),
     })
+}
+
+fn atomic_replace_file(
+    file_path: &Path,
+    content: &str,
+    permissions: Option<fs::Permissions>,
+    replace: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
+) -> Result<(), AppError> {
+    // Adjacent to the resolved target so the rename stays on one filesystem.
+    let dir = file_path
+        .parent()
+        .ok_or_else(|| AppError::Io("No parent directory".into()))?;
+    let temp_path = dir.join(format!(".~{}", uuid::Uuid::new_v4()));
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // Never expose private note bytes through a default-mode temp file.
+        options.mode(0o600);
+    }
+    let mut temporary = options.open(&temp_path)?;
+    let result = (|| -> std::io::Result<()> {
+        temporary.write_all(content.as_bytes())?;
+        if let Some(permissions) = permissions {
+            temporary.set_permissions(permissions)?;
+        }
+        drop(temporary);
+        replace(&temp_path, file_path)
+    })();
+    if let Err(error) = result {
+        if let Err(cleanup) = fs::remove_file(&temp_path) {
+            return Err(AppError::Io(format!(
+                "{error}; could not remove temporary save file {}: {cleanup}",
+                temp_path.display()
+            )));
+        }
+        return Err(error.into());
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -1016,6 +1079,142 @@ mod tests {
 
         let content = fs::read_to_string(&path).unwrap();
         assert_eq!(content, "new content");
+    }
+
+    #[test]
+    fn test_write_file_creates_new_file() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("new.md");
+        write_file_impl(path.to_str().unwrap(), "new").unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "new");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_write_file_preserves_permission_bits() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("private.md");
+        for mode in [0o600, 0o640, 0o750] {
+            fs::write(&path, "old").unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
+            write_file_impl(path.to_str().unwrap(), "new").unwrap();
+            assert_eq!(
+                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                mode
+            );
+            assert_eq!(fs::read_to_string(&path).unwrap(), "new");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_write_file_preserves_chained_relative_symlinks() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let dir = TempDir::new().unwrap();
+        let targets = dir.path().join("targets");
+        fs::create_dir(&targets).unwrap();
+        let target = targets.join("note.md");
+        fs::write(&target, "old").unwrap();
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o600)).unwrap();
+        let middle = dir.path().join("middle.md");
+        let link = dir.path().join("link.md");
+        symlink("targets/note.md", &middle).unwrap();
+        symlink("middle.md", &link).unwrap();
+        let result = write_file_impl(link.to_str().unwrap(), "new").unwrap();
+        assert_eq!(result.path, link.to_str().unwrap());
+        assert_eq!(fs::read_link(&link).unwrap(), Path::new("middle.md"));
+        assert_eq!(
+            fs::read_link(&middle).unwrap(),
+            Path::new("targets/note.md")
+        );
+        assert_eq!(fs::read_to_string(&target).unwrap(), "new");
+        assert_eq!(
+            fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert_eq!(fs::read_dir(&targets).unwrap().count(), 1);
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 3);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_write_file_rejects_dangling_symlink() {
+        use std::os::unix::fs::symlink;
+        let dir = TempDir::new().unwrap();
+        let link = dir.path().join("link.md");
+        symlink("missing.md", &link).unwrap();
+        assert!(write_file_impl(link.to_str().unwrap(), "new").is_err());
+        assert_eq!(fs::read_link(&link).unwrap(), Path::new("missing.md"));
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_write_file_rejects_read_only_target() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let dir = TempDir::new().unwrap();
+        let target = dir.path().join("note.md");
+        let link = dir.path().join("link.md");
+        fs::write(&target, "old").unwrap();
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o444)).unwrap();
+        symlink("note.md", &link).unwrap();
+        assert!(write_file_impl(target.to_str().unwrap(), "new").is_err());
+        assert!(write_file_impl(link.to_str().unwrap(), "new").is_err());
+        assert_eq!(fs::read_to_string(&target).unwrap(), "old");
+        assert_eq!(fs::read_link(&link).unwrap(), Path::new("note.md"));
+        assert_eq!(
+            fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+            0o444
+        );
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn test_write_file_rejects_directory_without_leaving_temp_file() {
+        let dir = TempDir::new().unwrap();
+        let target = dir.path().join("folder");
+        fs::create_dir(&target).unwrap();
+        fs::write(target.join("note.md"), "old").unwrap();
+        assert!(write_file_impl(target.to_str().unwrap(), "new").is_err());
+        assert_eq!(fs::read_to_string(target.join("note.md")).unwrap(), "old");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_write_file_rejects_special_target() {
+        use std::os::unix::{fs::symlink, net::UnixListener};
+        let dir = TempDir::new().unwrap();
+        let target = dir.path().join("socket");
+        let _listener = UnixListener::bind(&target).unwrap();
+        let link = dir.path().join("link.md");
+        symlink("socket", &link).unwrap();
+        assert!(write_file_impl(target.to_str().unwrap(), "new").is_err());
+        assert!(write_file_impl(link.to_str().unwrap(), "new").is_err());
+        assert_eq!(fs::read_link(&link).unwrap(), Path::new("socket"));
+        assert!(!fs::metadata(&target).unwrap().is_file());
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn test_write_file_cleans_up_after_failed_replace() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("note.md");
+        fs::write(&path, "old").unwrap();
+        let result = atomic_replace_file(&path, "new", None, |temporary, destination| {
+            assert_eq!(temporary.parent(), destination.parent());
+            assert_eq!(fs::read_to_string(temporary).unwrap(), "new");
+            assert_eq!(fs::read_to_string(destination).unwrap(), "old");
+            Err(std::io::Error::other("injected rename failure"))
+        });
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("injected rename failure"));
+        assert_eq!(fs::read_to_string(&path).unwrap(), "old");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
     }
 
     #[test]
