@@ -1,4 +1,5 @@
 import { invoke, Channel } from "@tauri-apps/api/core";
+import { decodeFileConflict } from "./file-conflict";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import sidebarEntryKinds from "@shared/sidebar-entry-kinds.json";
@@ -31,8 +32,20 @@ export function readFile(path: string): Promise<FileContent> {
   return invoke("read_file", { path });
 }
 
-export function writeFile(path: string, content: string): Promise<WriteResult> {
-  return invoke("write_file", { path, content });
+export async function writeFile(
+  path: string,
+  content: string,
+  expectedContent?: string | null,
+): Promise<WriteResult> {
+  try {
+    return await invoke<WriteResult>("write_file", {
+      path,
+      content,
+      ...(expectedContent === undefined ? {} : { expected: { content: expectedContent } }),
+    });
+  } catch (error) {
+    throw decodeFileConflict(error) ?? error;
+  }
 }
 
 // LaTeX documents (SPECs/latex-documents)

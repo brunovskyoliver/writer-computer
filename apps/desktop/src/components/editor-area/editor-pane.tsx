@@ -2,6 +2,8 @@ import type { EditorView } from "@codemirror/view";
 import { ProseMarkEditor } from "./prosemark-editor";
 import { HighlightBar } from "./highlight-bar";
 import { FrontmatterPanel } from "./frontmatter-panel";
+import { FileConflictNotice } from "./file-conflict-notice";
+import { useFileConflict } from "@/hooks/use-file-conflict";
 import { EditorScrollContainer } from "./editor-scroll-container";
 import { EditorSearchOverview } from "./editor-search-overview";
 import { SectionRail } from "./section-rail";
@@ -43,6 +45,7 @@ export const EditorPane = memo(function EditorPane({
   isFocused,
 }: EditorPaneProps) {
   const isLoading = useIsFileLoading(path);
+  const conflict = useFileConflict(path);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const [editorView, setEditorView] = useState<EditorView | null>(null);
   // The find overlay belongs to the focused editor, so losing focus closes it
@@ -80,12 +83,15 @@ export const EditorPane = memo(function EditorPane({
   }, []);
 
   const getScrollContainer = useCallback(() => scrollContainerRef.current, []);
+  const focusEditor = useCallback(() => editorView?.focus(), [editorView]);
 
   if (isLoading) {
     return (
       <div
         className={
-          isVisible ? "relative z-10 h-full" : "absolute inset-0 invisible pointer-events-none"
+          isVisible
+            ? "relative z-10 h-full"
+            : "absolute inset-0 invisible pointer-events-none flex h-full flex-col"
         }
       >
         <div className="flex h-full items-center justify-center text-[13px] text-[var(--text-muted)]">
@@ -99,37 +105,42 @@ export const EditorPane = memo(function EditorPane({
     <div
       data-pane
       className={
-        isVisible ? "relative z-10 h-full" : "absolute inset-0 invisible pointer-events-none"
+        isVisible
+          ? "relative z-10 flex h-full flex-col"
+          : "absolute inset-0 invisible pointer-events-none flex h-full flex-col"
       }
     >
-      <EditorScrollContainer ref={scrollContainerRef}>
-        <div
-          className="mx-auto w-full pt-32 pb-6 md:pt-[9rem]"
-          style={{
-            maxWidth: "var(--writer-editor-outer-width)",
-            boxSizing: "border-box",
-            paddingLeft: "var(--writer-editor-side-padding)",
-            paddingRight: "var(--writer-editor-side-padding)",
-          }}
-        >
-          <FrontmatterPanel filePath={path} />
-        </div>
-        <ProseMarkEditor
-          // Markdown and code tabs are built from different extension sets, so
-          // a switch between the two must rebuild the view rather than swap the
-          // document into it. Every note shares the "markdown" key, so ordinary
-          // tab switches still reuse the view.
-          key={editorFlavorKey(path)}
-          tabId={tabId}
-          filePath={path}
-          getScrollContainer={getScrollContainer}
-          autoFocus={isFocused}
-          onViewChange={setEditorView}
-        />
-        <HighlightBar view={editorView} tabId={tabId} />
-      </EditorScrollContainer>
-      <SectionRail filePath={path} view={editorView} scrollContainerRef={scrollContainerRef} />
-      {isFocused && <EditorSearchOverview scrollContainerRef={scrollContainerRef} />}
+      <FileConflictNotice path={path} focusEditor={focusEditor} />
+      <div className="relative min-h-0 flex-1">
+        <EditorScrollContainer ref={scrollContainerRef} fadeTop={!conflict}>
+          <div
+            className={`mx-auto w-full pb-6 ${conflict ? "pt-4" : "pt-32 md:pt-[9rem]"}`}
+            style={{
+              maxWidth: "var(--writer-editor-outer-width)",
+              boxSizing: "border-box",
+              paddingLeft: "var(--writer-editor-side-padding)",
+              paddingRight: "var(--writer-editor-side-padding)",
+            }}
+          >
+            <FrontmatterPanel filePath={path} />
+          </div>
+          <ProseMarkEditor
+            // Markdown and code tabs are built from different extension sets, so
+            // a switch between the two must rebuild the view rather than swap the
+            // document into it. Every note shares the "markdown" key, so ordinary
+            // tab switches still reuse the view.
+            key={editorFlavorKey(path)}
+            tabId={tabId}
+            filePath={path}
+            getScrollContainer={getScrollContainer}
+            autoFocus={isFocused}
+            onViewChange={setEditorView}
+          />
+          <HighlightBar view={editorView} tabId={tabId} />
+        </EditorScrollContainer>
+        <SectionRail filePath={path} view={editorView} scrollContainerRef={scrollContainerRef} />
+        {isFocused && <EditorSearchOverview scrollContainerRef={scrollContainerRef} />}
+      </div>
     </div>
   );
 });

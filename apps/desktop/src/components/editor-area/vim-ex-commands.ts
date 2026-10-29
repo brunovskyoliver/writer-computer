@@ -14,13 +14,16 @@ export interface VimExDeps {
   resolve: (view: EditorView) => { tabId: string; path: string } | null;
   getOpenFile: (
     path: string,
-  ) => { isDirty: boolean; content: string; diskContent: string } | undefined;
+  ) =>
+    | { isDirty: boolean; content: string; diskContent: string | null; conflict?: unknown }
+    | undefined;
   /** Materialize a buffered document into `content` — `hasUnsavedChanges`
    *  compares against `diskContent`, which a pending doc invalidates. */
   flushPendingEdit: (path: string) => void;
   /** Immediate save; resolves `false` when the write failed (error already surfaced). */
   saveNow: (path: string) => Promise<boolean>;
   closeTab: (tabId: string) => void;
+  loadCurrentDiskVersion: (path: string) => Promise<boolean>;
   reloadFromDisk: (path: string, raw: string) => void;
   notify: (view: EditorView, message: string) => void;
 }
@@ -57,9 +60,11 @@ export function registerVimExCommands(vim: VimExRegistry, deps: VimExDeps) {
     return file !== undefined && file.isDirty && file.content !== file.diskContent;
   };
 
-  const discardAndClose = (tabId: string, path: string) => {
+  const discardAndClose = async (tabId: string, path: string) => {
     const file = deps.getOpenFile(path);
-    if (file) deps.reloadFromDisk(path, file.diskContent);
+    if (file?.conflict) {
+      if (!(await deps.loadCurrentDiskVersion(path))) return;
+    } else if (file) deps.reloadFromDisk(path, file.diskContent ?? "");
     deps.closeTab(tabId);
   };
 
@@ -74,7 +79,7 @@ export function registerVimExCommands(vim: VimExRegistry, deps: VimExDeps) {
   vim.defineEx("quit", "q", (cm, params) => {
     withFile(cm, (tabId, path) => {
       if (isBang(params)) {
-        discardAndClose(tabId, path);
+        void discardAndClose(tabId, path);
       } else if (hasUnsavedChanges(path)) {
         deps.notify(cm.cm6, E37);
       } else {

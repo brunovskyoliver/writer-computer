@@ -148,9 +148,14 @@ edit granularity in v1.
 - **Input**: `{ workspace?, path, content }`
 - **Output**: `{ path, relative_path, modified_at }`
 - **Rules**: `not_found` if missing; `.md`/`.markdown` only; **fails
-  `unsaved_conflict` when the file is open in a tab with unsaved edits** —
-  the user's text is never overwritten. A clean open tab shows the new
-  content immediately.
+  `unsaved_conflict` when the file has unsaved edits, an unresolved conflict,
+  or changes on disk while the request is pending**. Writes check the observed
+  disk content before replacing it. If typing overtakes a successful write,
+  Writer preserves the buffer and asks the user which version to keep; it does
+  not automatically overwrite either version to repair the race. A clean open
+  tab shows the new content immediately. The disk comparison and rename are
+  serialized against other Writer writes, but are not an OS transaction with
+  external processes.
 
 ### create_folder
 
@@ -221,7 +226,7 @@ Tool failures are JSON-RPC errors whose `data` carries a machine-readable
 | `no_workspace`        | -32602 | No workspace is open                                             |
 | `unsupported_kind`    | -32602 | File kind not readable or writable through MCP                   |
 | `already_exists`      | -32602 | `create_file`/`create_folder` target exists                      |
-| `unsaved_conflict`    | -32603 | Target is open in a tab with unsaved user edits                  |
+| `unsaved_conflict`    | -32603 | Target has unsaved edits or changed during the write             |
 | `too_large`           | -32602 | Read exceeds the 1 MiB cap                                       |
 | `window_unavailable`  | -32603 | Target window closed or did not answer within 5 seconds          |
 | `server_disabled`     | -32603 | Feature was toggled off while connected                          |

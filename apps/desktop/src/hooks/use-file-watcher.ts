@@ -3,9 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { startLatexSnippetSubscriptions } from "@/stores/latex-snippet-store";
-import * as editorApi from "./editor-api";
-import * as tauri from "@/lib/tauri";
-import { cancelSave, isSaveInFlight } from "@/lib/save";
+import { createExternalFileSync } from "./file-sync";
 import { useAiStore } from "@/stores/ai-store";
 import { isWorkspaceEventCurrent, type WorkspaceIdentity } from "@/lib/workspace-events";
 import { isDrawingPath } from "@/lib/drawings";
@@ -41,6 +39,8 @@ function currentWorkspaceIdentity(): WorkspaceIdentity | null {
 
 export function useFileWatcher() {
   useEffect(() => {
+    const fileSync = createExternalFileSync();
+    let disposed = false;
     let flushTimer: ReturnType<typeof setTimeout> | null = null;
     let metadataDirty = false;
     const pendingDrawingPaths = new Set<string>();
@@ -99,7 +99,7 @@ export function useFileWatcher() {
 
     const unlistenFile = listen<FileChangePayload>("fs:file-changed", (event) => {
       const { path, kind, workspace } = event.payload;
-      if (!isWorkspaceEventCurrent(workspace, currentWorkspaceIdentity())) return;
+      if (disposed || !isWorkspaceEventCurrent(workspace, currentWorkspaceIdentity())) return;
       if (WATCHER_DEBUG) console.debug("[watcher] fs:file-changed", kind, path);
       metadataDirty = true;
       if (isDrawingPath(path)) {
@@ -107,20 +107,9 @@ export function useFileWatcher() {
       }
       scheduleFlush();
 
-      const openFiles = editorApi.getOpenFiles();
-      const file = openFiles.get(path);
-
-      if (!file) return;
-      if (kind === "deleted") return;
-      if (isSaveInFlight(path)) return;
-
-      cancelSave(path);
-      void tauri.readFile(path).then((content) => {
-        const latest = editorApi.getOpenFiles().get(path);
-        if (!latest || content.content === latest.diskContent) return;
-        if (WATCHER_DEBUG) console.debug("[watcher] reload-from-disk", path);
-        editorApi.reloadFromDisk(path, content.content);
-      });
+      void fileSync.refresh(path, () =>
+        isWorkspaceEventCurrent(workspace, currentWorkspaceIdentity()),
+      );
     });
 
     const unlistenIndexComplete = listen<IndexCompletePayload>("index:complete", (event) => {
@@ -164,6 +153,8 @@ export function useFileWatcher() {
     const stopSnippetSubscriptions = startLatexSnippetSubscriptions();
 
     return () => {
+      disposed = true;
+      fileSync.dispose();
       if (flushTimer !== null) clearTimeout(flushTimer);
       stopSnippetSubscriptions();
       void unlistenFile.then((fn) => fn());

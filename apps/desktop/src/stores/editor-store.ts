@@ -4,7 +4,8 @@ import {
   discardDrawingSessions,
   reportDrawingSaveError,
 } from "@/lib/drawing-sessions";
-import { notifyEditorReset } from "@/lib/editor-reset";
+import { editorGeneration, notifyEditorReset } from "@/lib/editor-reset";
+import { FILE_CONFLICT_MESSAGE, type FileConflict } from "@/lib/file-conflict";
 import { resetDrawingRevisions } from "@/lib/drawing-embed-sync";
 import { clearTabViewState, rewriteEditorPaths } from "@/lib/editor-views";
 import type { Text } from "@codemirror/state";
@@ -20,7 +21,7 @@ import {
 import { getDocumentStats, type DocumentStats } from "@/lib/document-stats";
 import { isDrawingPath } from "@/lib/drawings";
 import { clearPdfTextCache, isPdfPath } from "@/lib/pdf";
-import { cancelSave, scheduleSave, registerSaveStore } from "@/lib/save";
+import { cancelSave, scheduleSave, registerSaveStore, saveNow, isSaveInFlight } from "@/lib/save";
 import {
   activateTab as activateTabInLayout,
   createLayout,
@@ -51,6 +52,7 @@ import { setPendingTarget, type PendingTarget } from "@/lib/pending-anchor";
 import { requestPdfAnchor } from "./pdf-anchor-store";
 
 export interface OpenFile {
+  instanceId: number;
   path: string;
   frontmatter: string | null;
   /**
@@ -63,7 +65,9 @@ export interface OpenFile {
   content: string;
   title: string;
   titleSource: TitleSource;
-  diskContent: string;
+  diskContent: string | null;
+  conflict?: FileConflict | null;
+  conflictResolving?: boolean;
   isDirty: boolean;
   isLoading: boolean;
   saveError: string | null;
@@ -197,10 +201,15 @@ interface EditorState {
   /** True while a doc newer than `content` sits in `pendingDocs` — the save
    *  engine's post-write supersession check. */
   hasPendingEdit: (path: string) => boolean;
+  getPendingEdit: (path: string) => Text | undefined;
   updateFrontmatter: (path: string, frontmatter: string | null) => void;
   markSaved: (path: string, diskContent: string, hasNewerChanges?: boolean) => void;
   setSaveError: (path: string, error: string | null) => void;
   reloadFromDisk: (path: string, rawContent: string) => void;
+  receiveDiskContent: (path: string, rawContent: string | null) => void;
+  recordDiskConflict: (path: string, diskContent: string | null) => void;
+  keepLocalChanges: (path: string) => void;
+  setConflictResolving: (path: string, resolving: boolean) => void;
 }
 
 type EditorStateSetter = (
@@ -211,7 +220,7 @@ type EditorStateSetter = (
   replace?: boolean,
 ) => void;
 
-const pendingLoads = new Map<string, Promise<void>>();
+const pendingLoads = new Map<string, { instanceId: number; promise: Promise<void> }>();
 const pendingNavigationVersionByTabId = new Map<string, number>();
 
 /**
@@ -290,8 +299,18 @@ export function createGraphTab(id = createTabId()): Tab {
 
 const EMPTY_STATS: DocumentStats = { words: 0, characters: 0, paragraphs: 0 };
 
+let fileSequence = 0;
+
+export function waitForFileLoad(path: string): Promise<void> {
+  const pending = pendingLoads.get(path);
+  return pending?.instanceId === useEditorStore.getState().openFiles.get(path)?.instanceId
+    ? pending!.promise
+    : Promise.resolve();
+}
+
 function createLoadingFile(path: string): OpenFile {
   return {
+    instanceId: ++fileSequence,
     path,
     frontmatter: null,
     content: "",
@@ -418,7 +437,20 @@ function deriveActiveFilePath(tabs: Tab[], activeTabId: string | null): string |
 function publish(
   tabs: Tab[],
   layout: Layout,
+  files: ReadonlyMap<string, OpenFile>,
 ): Pick<EditorState, "tabs" | "layout" | "activeTabId" | "activeFilePath"> {
+  // A paused conflict must stay reachable even after navigating away from its
+  // tab or dropping history. Keep one direct tab without changing focus.
+  for (const [path, file] of files) {
+    if (
+      !file.conflict ||
+      tabs.some((tab) => tab.location.kind === "file" && tab.location.path === path)
+    )
+      continue;
+    const tab = createFileTab(path);
+    tabs = [...tabs, tab];
+    layout = insertTab(layout, layout.focusedPaneId, tab.id, undefined, { activate: false });
+  }
   const normalized = normalizeLayout(layout);
   const byId = new Map(tabs.map((tab) => [tab.id, tab]));
   const ordered = layoutTabIds(normalized).flatMap((tabId) => {
@@ -496,12 +528,12 @@ function dropMissingTabs(state: Pick<EditorState, "tabs" | "layout">, nextTabs: 
 /** Add a tab to `paneId` (default: the focused pane) and make it active. A
  *  pane captured before an await may be gone by now, so fall back to focus. */
 function appendTab(
-  state: Pick<EditorState, "tabs" | "layout">,
+  state: Pick<EditorState, "tabs" | "layout" | "openFiles">,
   tab: Tab,
   paneId: string = state.layout.focusedPaneId,
 ) {
   const target = findPane(state.layout, paneId) ? paneId : state.layout.focusedPaneId;
-  return publish([...state.tabs, tab], insertTab(state.layout, target, tab.id));
+  return publish([...state.tabs, tab], insertTab(state.layout, target, tab.id), state.openFiles);
 }
 
 function getTabIndex(tabs: Tab[], tabId: string) {
@@ -557,7 +589,7 @@ function maybePruneFiles(state: Pick<EditorState, "openFiles" | "tabs">, nextTab
   let files: Map<string, OpenFile> | null = null;
 
   for (const [path, file] of state.openFiles) {
-    if (referenced.has(path) || file.isDirty) continue;
+    if (referenced.has(path) || file.isDirty || file.conflict) continue;
     cancelSave(path);
     dropPendingEdit(path);
     if (!files) files = new Map(state.openFiles);
@@ -615,13 +647,11 @@ async function ensureFileLoaded(path: string, set: EditorStateSetter, get: () =>
   if (before && !before.isLoading) return;
 
   const pending = pendingLoads.get(path);
-  if (pending) {
-    await pending;
-    // The read that was in flight can have landed in a store that was reset
-    // meanwhile, leaving this caller's placeholder still loading. Read again
-    // for it rather than returning a placeholder that never fills in.
-    const settled = get().openFiles.get(path);
-    if (!settled || !settled.isLoading) return;
+  if (pending && pending.instanceId === before?.instanceId) {
+    await pending.promise;
+    // This caller owns only that instance. A reopened buffer has its own
+    // load; joining it here could create two reads that both publish to it.
+    return;
   }
 
   const existing = get().openFiles.get(path);
@@ -634,9 +664,14 @@ async function ensureFileLoaded(path: string, set: EditorStateSetter, get: () =>
     });
   }
 
+  const instanceId = get().openFiles.get(path)!.instanceId;
+  const generation = editorGeneration();
+  const ownsLoad = () =>
+    generation === editorGeneration() && get().openFiles.get(path)?.instanceId === instanceId;
   const loadPromise = tauri
     .readFile(path)
     .then((raw) => {
+      if (!ownsLoad()) return;
       const parsed = parseDocument(raw.content);
       set((state) => {
         const file = state.openFiles.get(path);
@@ -659,6 +694,7 @@ async function ensureFileLoaded(path: string, set: EditorStateSetter, get: () =>
       });
     })
     .catch((error) => {
+      if (!ownsLoad()) return;
       dropPendingEdit(path);
       set((state) => {
         const file = state.openFiles.get(path);
@@ -670,10 +706,10 @@ async function ensureFileLoaded(path: string, set: EditorStateSetter, get: () =>
       throw error;
     })
     .finally(() => {
-      pendingLoads.delete(path);
+      if (pendingLoads.get(path)?.promise === loadPromise) pendingLoads.delete(path);
     });
 
-  pendingLoads.set(path, loadPromise);
+  pendingLoads.set(path, { instanceId, promise: loadPromise });
   await loadPromise;
 }
 
@@ -695,6 +731,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
    * caller that needs the destination id gets it instead of re-finding it.
    */
   openFile: async (path: string, target?: OpenTarget) => {
+    const generation = editorGeneration();
     const state = get();
     // Resolved before any await: a slow read must land in the pane the user
     // opened from, not in whichever pane happens to be focused when it lands.
@@ -736,7 +773,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       ),
       new Promise<false>((resolve) => setTimeout(() => resolve(false), OPEN_FILE_GRACE_MS)),
     ]);
-    if (loadFailedBeforeGrace) return null;
+    if (loadFailedBeforeGrace || generation !== editorGeneration()) return null;
 
     const nextTab = createFileTab(path);
     set((state) => {
@@ -802,7 +839,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       const prunedFiles = maybePruneFiles(baseState, tabs);
       // A compact window is single-view by definition: drop the whole tree.
       return {
-        ...publish(tabs, createLayout([nextTab.id], nextTab.id, state.layout.revision + 1)),
+        ...publish(
+          tabs,
+          createLayout([nextTab.id], nextTab.id, state.layout.revision + 1),
+          prunedFiles ?? baseState.openFiles,
+        ),
         ...(prunedFiles
           ? { openFiles: prunedFiles }
           : filesWithTarget
@@ -876,7 +917,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           // Reusing the launcher's id leaves pane membership untouched.
           const tabs = [...currentState.tabs];
           tabs[index] = { ...nextTab, id: activeTab.id };
-          return publish(tabs, activateTabInLayout(currentState.layout, activeTab.id));
+          return publish(
+            tabs,
+            activateTabInLayout(currentState.layout, activeTab.id),
+            currentState.openFiles,
+          );
         }
       }
       return appendTab(currentState, nextTab);
@@ -903,7 +948,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         ? undefined
         : new Map(state.openFiles).set(path, createLoadingFile(path));
       // Same tab id, so the layout is unchanged; only the location moved.
-      return { ...publish(tabs, state.layout), ...(openFiles ? { openFiles } : {}) };
+      return {
+        ...publish(tabs, state.layout, state.openFiles),
+        ...(openFiles ? { openFiles } : {}),
+      };
     });
 
     try {
@@ -929,7 +977,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         tabs[index] = targetTab;
         const files = maybePruneFiles(state, tabs);
 
-        return { ...publish(tabs, state.layout), ...(files ? { openFiles: files } : {}) };
+        return {
+          ...publish(tabs, state.layout, state.openFiles),
+          ...(files ? { openFiles: files } : {}),
+        };
       });
     }
   },
@@ -967,7 +1018,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
         const files = maybePruneFiles(state, tabs);
 
-        return { ...publish(tabs, layout), ...(files ? { openFiles: files } : {}) };
+        return {
+          ...publish(tabs, layout, state.openFiles),
+          ...(files ? { openFiles: files } : {}),
+        };
       });
 
       pendingNavigationVersionByTabId.delete(tabId);
@@ -976,6 +1030,28 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       forgetKeepAliveTab(tabId);
     };
     const tab = get().tabs.find((candidate) => candidate.id === tabId);
+    const textPath = tab?.location.kind === "file" ? tab.location.path : null;
+    const textFile = textPath ? get().openFiles.get(textPath) : null;
+    if (
+      textPath &&
+      textFile &&
+      (textFile.isDirty ||
+        textFile.conflict ||
+        get().hasPendingEdit(textPath) ||
+        isSaveInFlight(textPath))
+    ) {
+      void saveNow(textPath)
+        .then((saved) => {
+          if (get().tabs.find((candidate) => candidate.id === tabId)?.location !== tab?.location)
+            return;
+          if (saved) close();
+          else get().setActiveTab(tabId);
+        })
+        .catch((error: unknown) => {
+          console.error("Could not save before closing tab", error);
+        });
+      return;
+    }
     const path = tab?.location.kind === "drawing" ? tab.location.path : null;
     if (path && hasDrawingSession(path)) {
       void withDrawingSaveBoundary(close, path).catch(reportDrawingSaveError);
@@ -994,13 +1070,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       (candidate) => candidate.location.kind === "file" && candidate.location.path === path,
     );
     if (!tab) return;
-    set((state) => publish(state.tabs, activateTabInLayout(state.layout, tab.id)));
+    set((state) => publish(state.tabs, activateTabInLayout(state.layout, tab.id), state.openFiles));
   },
 
   setActiveTab: (tabId: string) => {
     const tab = get().tabs.find((candidate) => candidate.id === tabId);
     if (!tab) return;
-    set((state) => publish(state.tabs, activateTabInLayout(state.layout, tabId)));
+    set((state) => publish(state.tabs, activateTabInLayout(state.layout, tabId), state.openFiles));
   },
 
   /**
@@ -1029,6 +1105,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
             : candidate,
         ),
         state.layout,
+        state.openFiles,
       ),
     );
   },
@@ -1094,7 +1171,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         const backgroundTabId = pane.tabIds.find((tabId) => isTarget(tabId));
         if (backgroundTabId) {
           anchor(backgroundTabId);
-          return publish(current.tabs, activateTabInLayout(current.layout, backgroundTabId));
+          return publish(
+            current.tabs,
+            activateTabInLayout(current.layout, backgroundTabId),
+            current.openFiles,
+          );
         }
       }
 
@@ -1115,6 +1196,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       return publish(
         [...current.tabs, tab],
         splitPaneWithTab(withTab, notePaneId, "x", "after", tab.id),
+        current.openFiles,
       );
     });
   },
@@ -1122,11 +1204,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   // Focus follows the pane, and the active file follows focus. Selecting a
   // pane is therefore the same kind of state change as selecting a tab.
   setFocusedPane: (paneId: string) => {
-    set((state) => publish(state.tabs, focusPaneInLayout(state.layout, paneId)));
+    set((state) => publish(state.tabs, focusPaneInLayout(state.layout, paneId), state.openFiles));
   },
 
   setSplitRatio: (splitId: string, ratio: number) => {
-    set((state) => publish(state.tabs, setSplitRatioInLayout(state.layout, splitId, ratio)));
+    set((state) =>
+      publish(state.tabs, setSplitRatioInLayout(state.layout, splitId, ratio), state.openFiles),
+    );
   },
 
   /**
@@ -1166,7 +1250,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
     // The candidate already carries focus: the new pane for a split, the
     // target for a centre drop. One publish applies tabs, tree, and focus.
-    set((state) => publish([...state.tabs, ...newTabs], candidate.layout));
+    set((state) => publish([...state.tabs, ...newTabs], candidate.layout, state.openFiles));
     return { status: "committed" };
   },
 
@@ -1189,7 +1273,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const removed = state.tabs.filter((tab) => !kept.has(tab.id));
     if (state.tabs.length - removed.length !== kept.size) return false;
 
-    set(publish(state.tabs, candidate.layout));
+    set(publish(state.tabs, candidate.layout, state.openFiles));
     for (const tab of removed) {
       pendingNavigationVersionByTabId.delete(tab.id);
       clearTabViewState(tab.id);
@@ -1263,7 +1347,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       const openFiles = files.has(path)
         ? pruned
         : new Map(files).set(path, createLoadingFile(path));
-      return { ...publish(tabs, currentState.layout), ...(openFiles ? { openFiles } : {}) };
+      return {
+        ...publish(tabs, currentState.layout, currentState.openFiles),
+        ...(openFiles ? { openFiles } : {}),
+      };
     });
 
     try {
@@ -1277,7 +1364,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         const tabs = [...currentState.tabs];
         tabs[index] = previousTab;
         const files = maybePruneFiles(currentState, tabs);
-        return { ...publish(tabs, currentState.layout), ...(files ? { openFiles: files } : {}) };
+        return {
+          ...publish(tabs, currentState.layout, currentState.openFiles),
+          ...(files ? { openFiles: files } : {}),
+        };
       });
     }
   },
@@ -1303,7 +1393,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       if (index === -1) return currentState;
       const tabs = [...currentState.tabs];
       tabs[index] = nextTab;
-      return publish(tabs, currentState.layout);
+      return publish(tabs, currentState.layout, currentState.openFiles);
     });
 
     if (!targetPath) return;
@@ -1319,7 +1409,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         const tabs = [...currentState.tabs];
         tabs[index] = previousTab;
         const files = maybePruneFiles(currentState, tabs);
-        return { ...publish(tabs, currentState.layout), ...(files ? { openFiles: files } : {}) };
+        return {
+          ...publish(tabs, currentState.layout, currentState.openFiles),
+          ...(files ? { openFiles: files } : {}),
+        };
       });
     }
   },
@@ -1345,7 +1438,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       if (index === -1) return currentState;
       const tabs = [...currentState.tabs];
       tabs[index] = nextTab;
-      return publish(tabs, currentState.layout);
+      return publish(tabs, currentState.layout, currentState.openFiles);
     });
 
     if (!targetPath) return;
@@ -1361,7 +1454,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         const tabs = [...currentState.tabs];
         tabs[index] = previousTab;
         const files = maybePruneFiles(currentState, tabs);
-        return { ...publish(tabs, currentState.layout), ...(files ? { openFiles: files } : {}) };
+        return {
+          ...publish(tabs, currentState.layout, currentState.openFiles),
+          ...(files ? { openFiles: files } : {}),
+        };
       });
     }
   },
@@ -1394,7 +1490,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       const tabs = state.tabs.map((tab) => applyRewriteToTab(tab, rewrite) ?? tab);
 
       // Tab ids are untouched by a rename, so pane membership is too.
-      return { openFiles: files, ...publish(tabs, state.layout) };
+      return { openFiles: files, ...publish(tabs, state.layout, files) };
     });
 
     rewriteEditorPaths((path) => (path === oldPath ? newPath : path));
@@ -1417,7 +1513,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       files?.delete(path);
 
       return {
-        ...publish(tabs, dropMissingTabs(state, tabs)),
+        ...publish(tabs, dropMissingTabs(state, tabs), files ?? state.openFiles),
         ...(files ? { openFiles: files } : {}),
       };
     });
@@ -1460,7 +1556,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         }
       }
 
-      return { ...publish(tabs, dropMissingTabs(state, tabs)), openFiles: files };
+      return {
+        ...publish(tabs, dropMissingTabs(state, tabs), files ?? state.openFiles),
+        openFiles: files,
+      };
     });
 
     for (const path of cancelledPaths) {
@@ -1514,7 +1613,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         }
       }
 
-      return { openFiles: files, ...publish(tabs, state.layout) };
+      return { openFiles: files, ...publish(tabs, state.layout, files) };
     });
 
     rewriteEditorPaths(rewritePath);
@@ -1608,7 +1707,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       // change; only the revision is this window's.
       return {
         openFiles: files,
-        ...publish(cappedTabs, { ...restoredLayout, revision: state.layout.revision + 1 }),
+        ...publish(cappedTabs, { ...restoredLayout, revision: state.layout.revision + 1 }, files),
       };
     });
 
@@ -1618,11 +1717,20 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       ? uniquePaths.filter((path) => path !== activePath)
       : uniquePaths;
 
+    const generation = editorGeneration();
+    const instances = new Map(
+      pathsToLoad.map((path) => [path, get().openFiles.get(path)?.instanceId]),
+    );
     const results = await Promise.allSettled(
       pathsToLoad.map((path) => ensureFileLoaded(path, set as EditorStateSetter, get)),
     );
+    if (generation !== editorGeneration()) return;
     const failedPaths = new Set(
-      pathsToLoad.filter((_, index) => results[index]?.status === "rejected"),
+      pathsToLoad.filter((path, index) => {
+        if (results[index]?.status !== "rejected") return false;
+        const current = get().openFiles.get(path);
+        return !current || current.instanceId === instances.get(path);
+      }),
     );
 
     if (failedPaths.size === 0) return;
@@ -1646,7 +1754,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
       shouldEnsureLauncher = nextTabs.length === 0;
 
-      return { openFiles: files, ...publish(nextTabs, dropMissingTabs(state, nextTabs)) };
+      return { openFiles: files, ...publish(nextTabs, dropMissingTabs(state, nextTabs), files) };
     });
 
     if (shouldEnsureLauncher) get().ensureLauncherTab();
@@ -1670,7 +1778,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     resetKeepAlive();
     set((state) => ({
       openFiles: new Map(),
-      ...publish([], createLayout([], null, state.layout.revision + 1)),
+      ...publish([], createLayout([], null, state.layout.revision + 1), new Map()),
     }));
   },
 
@@ -1742,6 +1850,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   hasPendingEdit: (path: string) => pendingDocs.has(path),
+  getPendingEdit: (path: string) => pendingDocs.get(path),
 
   updateFrontmatter: (path: string, frontmatter: string | null) => {
     // Title inference reads the body — materialize a pending doc first so a
@@ -1779,8 +1888,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       files.set(path, {
         ...file,
         diskContent,
-        isDirty: hasNewerChanges,
-        saveError: null,
+        isDirty: hasNewerChanges || Boolean(file.conflict),
+        saveError: file.conflict ? FILE_CONFLICT_MESSAGE : null,
       });
       return { openFiles: files };
     });
@@ -1819,10 +1928,81 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           titleSource: parsed.titleSource,
           diskContent: rawContent,
           isDirty: false,
+          conflict: null,
+          conflictResolving: false,
+          saveError: null,
           reloadVersion: file.reloadVersion + 1,
           editSeq: file.editSeq + 1,
         }),
       );
+      return { openFiles: files };
+    });
+  },
+
+  receiveDiskContent: (path, rawContent) => {
+    const file = get().openFiles.get(path);
+    if (!file || file.isLoading) return;
+    if (rawContent === file.diskContent && !file.conflictResolving) {
+      if (!file.conflict) return;
+      set((state) => {
+        const files = new Map(state.openFiles);
+        files.set(path, { ...file, conflict: null, saveError: null });
+        return { openFiles: files };
+      });
+      if (file.isDirty) scheduleSave(path);
+    } else if (
+      rawContent !== null &&
+      !file.isDirty &&
+      !get().hasPendingEdit(path) &&
+      !file.conflict
+    ) {
+      get().reloadFromDisk(path, rawContent);
+    } else {
+      get().recordDiskConflict(path, rawContent);
+    }
+  },
+
+  recordDiskConflict: (path, diskContent) => {
+    cancelSave(path);
+    set((state) => {
+      const file = state.openFiles.get(path);
+      if (!file) return state;
+      if (file.conflict?.diskContent === diskContent) return state;
+      const files = new Map(state.openFiles);
+      files.set(path, {
+        ...file,
+        conflict: { diskContent },
+        isDirty: true,
+        saveError: FILE_CONFLICT_MESSAGE,
+      });
+      return { openFiles: files, ...publish(state.tabs, state.layout, files) };
+    });
+  },
+
+  keepLocalChanges: (path) => {
+    const file = get().openFiles.get(path);
+    if (!file?.conflict || file.conflictResolving) return;
+    set((state) => {
+      const files = new Map(state.openFiles);
+      files.set(path, {
+        ...file,
+        diskContent: file.conflict!.diskContent,
+        conflict: null,
+        saveError: null,
+        isDirty: true,
+        editSeq: file.editSeq + 1,
+      });
+      return { openFiles: files };
+    });
+    scheduleSave(path);
+  },
+
+  setConflictResolving: (path, resolving) => {
+    set((state) => {
+      const file = state.openFiles.get(path);
+      if (!file || Boolean(file.conflictResolving) === resolving) return state;
+      const files = new Map(state.openFiles);
+      files.set(path, { ...file, conflictResolving: resolving });
       return { openFiles: files };
     });
   },
@@ -1839,6 +2019,8 @@ registerSaveStore({
   setSaveError: (path, error) => useEditorStore.getState().setSaveError(path, error),
   flushPendingEdit: (path) => useEditorStore.getState().flushPendingEdit(path),
   hasPendingEdit: (path) => useEditorStore.getState().hasPendingEdit(path),
+  recordDiskConflict: (path, content) =>
+    useEditorStore.getState().recordDiskConflict(path, content),
 });
 
 /**
@@ -1853,7 +2035,10 @@ export function editorRetentionSnapshot() {
   let openFileChars = 0;
   let dirtyFiles = 0;
   for (const file of state.openFiles.values()) {
-    openFileChars += file.content.length + file.diskContent.length;
+    openFileChars +=
+      file.content.length +
+      (file.diskContent?.length ?? 0) +
+      (file.conflict?.diskContent?.length ?? 0);
     if (file.isDirty) dirtyFiles += 1;
   }
   return {

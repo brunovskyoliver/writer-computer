@@ -11,7 +11,9 @@
 
 ## Done
 
-- AUD-04: Keep the active tab visible when its pane shrinks ([ticket](SPECs/Agent/worksheet-audit-tab-resize.md)). 1,696 frontend tests pass; native window, sidebar and split-pane checks pass; manual scrolling preserved. Frontend, UX and QA reviews approved.
+- AUD-01: Preserve local edits during external changes ([report](SPECs/Agent/worksheet-audit-file-conflicts.md)). Conditional saves, guarded reads/load completion, reachable conflict tabs, explicit recovery and text watcher echo reconciliation. 1,720 frontend + 292 Rust tests pass; native conflict/recreation/focus checks pass. Minimum-pane layout remains AUD-07.
+
+- AUD-04: Keep the active tab visible when its pane shrinks ([ticket](SPECs/Agent/worksheet-audit-tab-resize.md)). `7ae7721`. 1,696 frontend tests pass; native window, sidebar and split-pane checks pass; manual scrolling preserved. Frontend, UX and QA reviews approved.
 
 - AUD-02: Preserve permissions and symlinks on atomic text saves ([ticket](SPECs/Agent/worksheet-audit-atomic-save.md)). `3aef86f`. Eight regressions added; 286 Rust tests pass; isolated release-app IPC confirms private modes, symlink identity, read-only rejection and no temporary-file leaks. Rust and QA reviews approved.
 
@@ -158,6 +160,8 @@
 - Mermaid drag-selection edit-mode flip: [`SPECs/mermaid-drag-selection-edit-mode-flip-spec.md`](SPECs/mermaid-drag-selection-edit-mode-flip-spec.md) — freeze `editMode` for the duration of a pointer drag-selection so the widget doesn't flip into source view mid-drag.
 
 ## Up Next
+
+- AUD-07: Make minimum split panes usable, including tab strip, document chrome, conflict actions and visible editor space. Native 240×160 probe leaves the editor at zero height under the conflict notice. Resolve as the next audit layout task; evidence in `~/agent-runs/2026-10-29-writer-audit/conflict-min-pane-*.png`.
 
 - WebContent retention caveat: [`SPECs/Agent/worksheet-webcontent-retention.md`](SPECs/Agent/worksheet-webcontent-retention.md) — post-close WebContent RSS is ~790 MB while `footprint` shows ~264 MB live + ~544 MB reclaimable. Split live-JS vs allocator pools via a heap-snapshot diff and fix anything still reachable.
 

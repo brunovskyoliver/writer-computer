@@ -144,5 +144,5 @@ export async function applyTags(path: string, tags: string[]): Promise<void> {
   const file = await readFile(path);
   const parsed = parseFrontmatter(file.content);
   const merged = mergeTagsIntoFrontmatter(parsed.frontmatter, tags);
-  await writeFile(path, serializeFile(merged, parsed.body));
+  await writeFile(path, serializeFile(merged, parsed.body), file.content);
 }

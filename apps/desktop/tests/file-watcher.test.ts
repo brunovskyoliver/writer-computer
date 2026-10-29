@@ -39,7 +39,9 @@ vi.mock("@/stores/latex-snippet-store", () => ({ startLatexSnippetSubscriptions:
 vi.mock("@/stores/ai-store", () => ({
   useAiStore: { getState: () => ({ bumpGraphVersion: vi.fn() }) },
 }));
-vi.mock("@/hooks/editor-api", () => ({}));
+vi.mock("@/hooks/file-sync", () => ({
+  createExternalFileSync: () => ({ refresh: vi.fn(), dispose: vi.fn() }),
+}));
 vi.mock("@/lib/tauri", () => ({}));
 vi.mock("@/lib/save", () => ({}));
 

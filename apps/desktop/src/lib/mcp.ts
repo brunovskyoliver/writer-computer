@@ -1,4 +1,6 @@
 import * as tauri from "@/lib/tauri";
+import { FileConflictError } from "@/lib/file-conflict";
+import { editorGeneration } from "@/lib/editor-reset";
 import { locationBehavior } from "@/components/editor-area/page-kinds";
 import { getParentDir } from "@/lib/paths";
 import { revealPathInSidebar } from "@/lib/reveal-in-sidebar";
@@ -171,36 +173,55 @@ async function writeFile(args: unknown) {
 }
 
 async function writeFileResolved(path: string, relativePath: string, content: string) {
-  // Flush pending edits so both dirty checks and the re-dirty path below see
-  // the live text, not the debounced mirror.
   useEditorStore.getState().flushPendingEdit(path);
   const admitted = useEditorStore.getState().openFiles.get(path);
-  if (admitted?.isDirty) {
-    throw unsavedConflict(relativePath, "is open with unsaved changes");
+  if (admitted?.isDirty || admitted?.conflict || admitted?.isLoading) {
+    throw unsavedConflict(relativePath, "is open with unsaved changes or is loading");
   }
-  const written = await tauri.writeFile(path, content);
-  // Re-check the tab's state after the write resolves, not just at
-  // admission: an edit landing mid-await either leaves the tab dirty (an
-  // autosave is queued and will write the user's text back over ours) or
-  // moves `diskContent` (a save or external reload completed during the
-  // write, so disk no longer matches what the editor shows). Both mean this
-  // write lost the race — report the conflict and restore the editor's text
-  // instead of reloading ours over it.
+  const generation = editorGeneration();
+  const expected = admitted ? admitted.diskContent : (await tauri.readFile(path)).content;
+  let written;
+  try {
+    written = await tauri.writeFile(path, content, expected);
+  } catch (error) {
+    if (!(error instanceof FileConflictError)) throw error;
+    const current = useEditorStore.getState().openFiles.get(path);
+    if (
+      admitted &&
+      generation === editorGeneration() &&
+      current?.instanceId === admitted.instanceId
+    )
+      useEditorStore.getState().recordDiskConflict(path, error.diskContent);
+    throw unsavedConflict(relativePath, "changed on disk before the write");
+  }
+  // A conditional write protects disk; a separate ownership check protects
+  // text typed or reopened while the IPC was pending. Never repair a race
+  // by scheduling an unconditional overwrite of either version.
+  if (generation !== editorGeneration())
+    throw unsavedConflict(relativePath, "changed workspace while the write was in flight");
   const settled = useEditorStore.getState().openFiles.get(path);
-  if (settled && (settled.isDirty || settled.diskContent !== admitted?.diskContent)) {
-    if (!settled.isDirty) {
-      // Clean in the store but our write outran the save that set this
-      // diskContent: re-dirtying queues an autosave that restores the
-      // user's text to disk.
-      useEditorStore.getState().updateContent(path, settled.content);
-    }
+  if (
+    settled &&
+    settled.instanceId !== admitted?.instanceId &&
+    !settled.isDirty &&
+    !settled.conflict &&
+    !useEditorStore.getState().hasPendingEdit(path) &&
+    settled.diskContent === content
+  ) {
+    return { path, relative_path: relativePath, modified_at: written.modified_at };
+  }
+  if (
+    settled &&
+    (settled.instanceId !== admitted?.instanceId ||
+      settled.isDirty ||
+      settled.conflict ||
+      useEditorStore.getState().hasPendingEdit(path) ||
+      settled.diskContent !== admitted?.diskContent)
+  ) {
+    useEditorStore.getState().recordDiskConflict(path, content);
     throw unsavedConflict(relativePath, "changed while the write was in flight");
   }
-  // A clean open tab must show the new content without user action (FR-017)
-  // — the same refresh the file watcher applies to an external change.
-  if (settled) {
-    useEditorStore.getState().reloadFromDisk(path, content);
-  }
+  if (settled) useEditorStore.getState().reloadFromDisk(path, content);
   return { path, relative_path: relativePath, modified_at: written.modified_at };
 }
 

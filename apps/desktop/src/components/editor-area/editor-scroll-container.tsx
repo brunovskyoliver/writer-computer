@@ -36,9 +36,17 @@ function ProgressiveBlur({ position }: { position: "top" | "bottom" }) {
 interface EditorScrollContainerProps {
   ref?: Ref<HTMLDivElement>;
   children: ReactNode;
+  fadeTop?: boolean;
 }
 
-export function EditorScrollContainer({ ref, children }: EditorScrollContainerProps) {
+export function EditorScrollContainer({
+  ref,
+  children,
+  fadeTop = true,
+}: EditorScrollContainerProps) {
+  const mask = fadeTop
+    ? FADE_MASK
+    : `linear-gradient(to bottom, black calc(100% - min(15%, 120px)), transparent), ${FADE_MASK_GUTTER}`;
   return (
     <div
       className="relative h-full"
@@ -48,8 +56,8 @@ export function EditorScrollContainer({ ref, children }: EditorScrollContainerPr
         ref={ref}
         className="relative h-full overflow-y-auto [scrollbar-gutter:stable_both-edges]"
         style={{
-          maskImage: FADE_MASK,
-          WebkitMaskImage: FADE_MASK,
+          maskImage: mask,
+          WebkitMaskImage: mask,
           maskComposite: "add",
           WebkitMaskComposite: "source-over",
           borderTop: "12px solid transparent",
@@ -59,7 +67,7 @@ export function EditorScrollContainer({ ref, children }: EditorScrollContainerPr
       >
         {children}
       </div>
-      <ProgressiveBlur position="top" />
+      {fadeTop && <ProgressiveBlur position="top" />}
       <ProgressiveBlur position="bottom" />
     </div>
   );

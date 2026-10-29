@@ -95,6 +95,7 @@ function openDocument(path: string, content: string) {
           displayDate: null,
           stats: { words: 0, characters: 0, paragraphs: 0 },
           editSeq: 0,
+          instanceId: 1,
         },
       ],
     ]),

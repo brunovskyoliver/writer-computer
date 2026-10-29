@@ -3,6 +3,7 @@ import { useSettingsStore } from "@/stores/settings-store";
 import type { OpenFile } from "@/hooks/editor-api";
 import { serializeDocument } from "@/lib/frontmatter";
 import * as tauri from "@/lib/tauri";
+import { FileConflictError } from "./file-conflict";
 
 const THROTTLE_MS = 1000;
 
@@ -23,6 +24,7 @@ export interface SaveStoreAccess {
   /** True while edits newer than `content` sit unflushed — the post-write
    *  supersession signal alongside `editSeq`. */
   hasPendingEdit: (path: string) => boolean;
+  recordDiskConflict: (path: string, content: string | null) => void;
 }
 
 let storeAccess: SaveStoreAccess | null = null;
@@ -91,10 +93,11 @@ function clearSaveTimer(controller: SaveController) {
 
 function cleanupSaveController(path: string, controller: SaveController) {
   if (controller.inFlight || controller.pending || controller.timer) return;
-  saveControllers.delete(path);
+  if (saveControllers.get(path) === controller) saveControllers.delete(path);
 }
 
 export function scheduleSave(path: string) {
+  if (requireStore().getOpenFile(path)?.conflict) return;
   const controller = getSaveController(path);
   controller.pending = true;
   queueSave(path, controller);
@@ -102,6 +105,12 @@ export function scheduleSave(path: string) {
 
 export function isSaveInFlight(path: string) {
   return saveControllers.get(path)?.inFlight != null;
+}
+
+/** Observe the current write without scheduling another one. */
+export async function waitForSave(path: string): Promise<void> {
+  const pending = saveControllers.get(path)?.inFlight;
+  if (pending) await pending;
 }
 
 /**
@@ -112,8 +121,14 @@ export function isSaveInFlight(path: string) {
  * surface it a second time.
  */
 export async function saveNow(path: string): Promise<boolean> {
+  const generation = editorGeneration();
+  const instanceId = requireStore().getOpenFile(path)?.instanceId;
+  const ownsRequest = () =>
+    generation === editorGeneration() &&
+    requireStore().getOpenFile(path)?.instanceId === instanceId;
   const controller = getSaveController(path);
   for (;;) {
+    if (!ownsRequest()) return false;
     if (controller.inFlight) {
       await controller.inFlight;
       continue;
@@ -121,7 +136,7 @@ export async function saveNow(path: string): Promise<boolean> {
     clearSaveTimer(controller);
     const outcome = await performSave(path, controller);
     if (outcome === "superseded" || outcome === "busy") continue;
-    return outcome !== "failed";
+    return ownsRequest() && outcome !== "failed";
   }
 }
 
@@ -206,6 +221,13 @@ async function performSave(
   // queues behind this write instead of re-entering performSave.
   store.flushPendingEdit(path);
   const file = store.getOpenFile(path);
+  if (file?.conflict) {
+    controller.pending = false;
+    controller.inFlight = null;
+    settle();
+    cleanupSaveController(path, controller);
+    return "failed";
+  }
   if (!file || !file.isDirty) {
     controller.inFlight = null;
     settle();
@@ -214,15 +236,18 @@ async function performSave(
   }
 
   const generation = editorGeneration();
+  const instanceId = file.instanceId;
+  const ownsFile = () =>
+    generation === editorGeneration() && store.getOpenFile(path)?.instanceId === instanceId;
   const full = serializeForSave(file);
   const savedSeq = file.editSeq;
   let shouldReschedule = false;
   let outcome: SaveOutcome = "saved";
 
   try {
-    await tauri.writeFile(path, full);
+    await tauri.writeFile(path, full, file.diskContent);
 
-    if (generation !== editorGeneration()) return "clean";
+    if (!ownsFile()) return "failed";
     const latestFile = store.getOpenFile(path);
     if (!latestFile) return "clean";
 
@@ -232,18 +257,26 @@ async function performSave(
     shouldReschedule = latestFile.editSeq !== savedSeq || store.hasPendingEdit(path);
     if (shouldReschedule) outcome = "superseded";
     store.markSaved(path, full, shouldReschedule);
+    if (store.getOpenFile(path)?.conflict) outcome = "failed";
   } catch (err) {
-    console.error(`[save] Failed to save ${path}:`, err);
-    const message = err instanceof Error ? err.message : String(err);
-    if (generation === editorGeneration()) store.setSaveError(path, message);
+    if (err instanceof FileConflictError) {
+      if (ownsFile()) store.recordDiskConflict(path, err.diskContent);
+    } else {
+      console.error(`[save] Failed to save ${path}:`, err);
+      const message = err instanceof Error ? err.message : String(err);
+      if (ownsFile()) store.setSaveError(path, message);
+    }
     outcome = "failed";
   } finally {
     controller.inFlight = null;
 
-    const needsFollowUpSave = controller.pending || shouldReschedule;
+    const needsFollowUpSave =
+      !store.getOpenFile(path)?.conflict &&
+      (controller.pending || (ownsFile() && shouldReschedule));
     if (needsFollowUpSave) {
       queueSave(path, controller);
     } else {
+      controller.pending = false;
       cleanupSaveController(path, controller);
     }
     settle();

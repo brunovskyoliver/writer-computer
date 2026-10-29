@@ -1360,6 +1360,7 @@ describe("workspace-store closeWorkspace", () => {
             displayDate: null,
             stats: { words: 0, characters: 0, paragraphs: 0 },
             editSeq: 0,
+            instanceId: 1,
           },
         ],
       ]),

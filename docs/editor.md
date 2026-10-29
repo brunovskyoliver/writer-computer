@@ -246,3 +246,22 @@ Math source rewrites must prove the resulting formulas render before dispatch. F
 ## Math editing previews
 
 Inline and display math keep a rendered preview above its opening source line while selected, using `keepDecorationOnUnfold` and a block widget with `side: -1`. Preview widgets use a separate class from clickable folded formulas, so clicking a preview does not reset the source selection. Standalone root-level `$$` blocks parse across blank lines; nested containers retain the inline parser. An unclosed root math block stays visible as source through the end of the document.
+
+## External file changes
+
+Text autosaves compare the last observed disk content before replacement. A
+mismatch or external deletion preserves the buffer, pauses saves, and keeps a
+direct tab reachable even after navigation. Keep my changes (Recreate file for a
+deletion) saves conditionally against the competing version. Use disk version
+rereads disk and refuses discard if typing or buffer ownership changes while it
+waits. Watcher observations can also force that read to retry.
+
+Initial loads, watcher reads and save completions belong to a buffer instance and
+editor generation. A reopened path is a new instance; old completion and cleanup
+must not modify it. Session restoration applies the same guard to failed reads.
+
+A conflict blocks tab/workspace close and native shutdown drains. Vim `:q!` uses
+the guarded disk read for a conflicted file before closing its view, so another
+view cannot inherit a stale baseline as clean text. A missing file or newer typing
+keeps the conflict open. Ordinary non-conflict `:q!` retains its existing discard
+behavior. Conflict notices sit outside editor masks; their editor has no top fade.

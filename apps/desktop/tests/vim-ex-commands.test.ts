@@ -12,7 +12,12 @@ import {
 const view = {} as EditorView;
 const cm = { cm6: view };
 
-function setup(file?: { isDirty: boolean; content: string; diskContent: string }) {
+function setup(file?: {
+  isDirty: boolean;
+  content: string;
+  diskContent: string;
+  conflict?: unknown;
+}) {
   const handlers = new Map<string, VimExFn>();
   const vim = {
     defineEx: vi.fn((name: string, _prefix: string | undefined, fn: VimExFn) => {
@@ -26,6 +31,7 @@ function setup(file?: { isDirty: boolean; content: string; diskContent: string }
     saveNow: vi.fn(() => Promise.resolve(true)),
     closeTab: vi.fn(),
     reloadFromDisk: vi.fn(),
+    loadCurrentDiskVersion: vi.fn(async () => true),
     notify: vi.fn(),
   };
   registerVimExCommands(vim, deps);
@@ -116,4 +122,35 @@ describe("vim ex commands", () => {
     expect(deps.saveNow).not.toHaveBeenCalled();
     expect(deps.closeTab).not.toHaveBeenCalled();
   });
+});
+
+test(":q! resolves a shared conflict from current disk before closing its view", async () => {
+  resetVimExCommandsForTests();
+  const { deps, run } = setup({
+    isDirty: true,
+    content: "local",
+    diskContent: "old",
+    conflict: { diskContent: "external" },
+  });
+  run("quit", "!");
+  expect(deps.closeTab).not.toHaveBeenCalled();
+  await settle();
+  expect(deps.loadCurrentDiskVersion).toHaveBeenCalledWith("/note.md");
+  expect(deps.reloadFromDisk).not.toHaveBeenCalled();
+  expect(deps.closeTab).toHaveBeenCalledWith("tab-1");
+});
+
+test(":q! preserves a conflict when disk loading or the edit guard refuses discard", async () => {
+  resetVimExCommandsForTests();
+  const { deps, run } = setup({
+    isDirty: true,
+    content: "local",
+    diskContent: "old",
+    conflict: { diskContent: null },
+  });
+  vi.mocked(deps.loadCurrentDiskVersion).mockResolvedValue(false);
+  run("quit", "!");
+  await settle();
+  expect(deps.reloadFromDisk).not.toHaveBeenCalled();
+  expect(deps.closeTab).not.toHaveBeenCalled();
 });

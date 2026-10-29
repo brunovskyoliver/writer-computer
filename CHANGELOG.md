@@ -2,6 +2,8 @@
 
 ## 2026-10-29
 
+- External edits and deletions preserve open drafts. Conflicts pause saving and offer explicit local/disk choices or recreation; stale reads and saves cannot replace reopened buffers. Conditional text saves no longer hide quick external changes behind self-write suppression.
+
 - The active tab stays visible when the window or split pane narrows, or the sidebar expands. Manual tab-strip scrolling remains available.
 
 - Saving preserves a note's existing file permissions and updates symlink targets without replacing the links. Read-only and non-file destinations fail explicitly; failed atomic replacements clean up temporary output.

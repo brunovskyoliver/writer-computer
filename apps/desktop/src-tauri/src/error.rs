@@ -14,6 +14,8 @@ pub enum AppError {
     NoWorkspace,
     #[error("Invalid session: {0}")]
     InvalidSession(String),
+    #[error("The file changed outside Writer. Choose which version to keep.")]
+    FileConflict { disk_content: Option<String> },
 }
 
 impl Serialize for AppError {
@@ -21,7 +23,15 @@ impl Serialize for AppError {
     where
         S: serde::Serializer,
     {
-        serializer.serialize_str(&self.to_string())
+        if let Self::FileConflict { disk_content } = self {
+            use serde::ser::SerializeStruct;
+            let mut value = serializer.serialize_struct("FileConflict", 2)?;
+            value.serialize_field("kind", "file_conflict")?;
+            value.serialize_field("diskContent", disk_content)?;
+            value.end()
+        } else {
+            serializer.serialize_str(&self.to_string())
+        }
     }
 }
 
@@ -140,5 +150,29 @@ impl From<McpToolError> for rmcp::ErrorData {
                 "detail": err.detail,
             })),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AppError;
+
+    #[test]
+    fn conflict_wire_format_preserves_missing_empty_and_text() {
+        for content in [None, Some(String::new()), Some("disk version".into())] {
+            let error = AppError::FileConflict {
+                disk_content: content.clone(),
+            };
+            assert_eq!(
+                serde_json::to_value(error).unwrap(),
+                serde_json::json!({
+                    "kind": "file_conflict", "diskContent": content,
+                })
+            );
+        }
+        assert_eq!(
+            serde_json::to_value(AppError::Io("denied".into())).unwrap(),
+            "IO error: denied"
+        );
     }
 }

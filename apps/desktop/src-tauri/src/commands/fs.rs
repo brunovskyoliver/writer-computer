@@ -7,6 +7,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::{OnceLock, Weak};
 use tauri::{Emitter, Manager};
 
 #[derive(Debug, Clone, Serialize)]
@@ -32,6 +33,12 @@ pub struct FileContent {
 pub struct WriteResult {
     pub path: String,
     pub modified_at: u64,
+}
+
+/// Omitted means an unconditional write; `content: null` expects a missing file.
+#[derive(Debug, Deserialize)]
+pub struct ExpectedContent {
+    pub content: Option<String>,
 }
 
 async fn blocking<T: Send + 'static>(
@@ -349,15 +356,32 @@ pub async fn read_file(path: String) -> Result<FileContent, AppError> {
 }
 
 pub fn write_file_impl(path: &str, content: &str) -> Result<WriteResult, AppError> {
+    write_file_checked_impl(path, content, None)
+}
+
+fn write_file_checked_impl(
+    path: &str,
+    content: &str,
+    expected: Option<&ExpectedContent>,
+) -> Result<WriteResult, AppError> {
     let requested_path = PathBuf::from(path);
     // Rename must replace the target, not the link the user opened. Inspect
     // the link itself first so a dangling link is an error, not a new file.
     let file_path = match fs::symlink_metadata(&requested_path) {
-        Ok(metadata) if metadata.is_symlink() => fs::canonicalize(&requested_path)?,
-        Ok(_) => requested_path,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => requested_path,
+        Ok(_) => fs::canonicalize(&requested_path)?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let parent = requested_path
+                .parent()
+                .ok_or_else(|| AppError::InvalidPath(path.into()))?;
+            let name = requested_path
+                .file_name()
+                .ok_or_else(|| AppError::InvalidPath(path.into()))?;
+            fs::canonicalize(parent)?.join(name)
+        }
         Err(error) => return Err(error.into()),
     };
+    let lock = file_write_lock(&file_path);
+    let _guard = lock.lock();
     let permissions = match fs::metadata(&file_path) {
         Ok(metadata) => {
             if !metadata.is_file() {
@@ -377,6 +401,17 @@ pub fn write_file_impl(path: &str, content: &str) -> Result<WriteResult, AppErro
         Err(error) => return Err(error.into()),
     };
 
+    if let Some(expected) = expected {
+        let disk_content = match fs::read_to_string(&file_path) {
+            Ok(content) => Some(content),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(error.into()),
+        };
+        if disk_content != expected.content {
+            return Err(AppError::FileConflict { disk_content });
+        }
+    }
+
     atomic_replace_file(&file_path, content, permissions, |from, to| {
         fs::rename(from, to)
     })?;
@@ -385,6 +420,20 @@ pub fn write_file_impl(path: &str, content: &str) -> Result<WriteResult, AppErro
         path: path.to_string(),
         modified_at: modified_time(&file_path),
     })
+}
+
+/// Only active/waiting writes retain locks; aliases use the same canonical key.
+fn file_write_lock(path: &Path) -> Arc<parking_lot::Mutex<()>> {
+    type Locks = std::collections::HashMap<PathBuf, Weak<parking_lot::Mutex<()>>>;
+    static LOCKS: OnceLock<parking_lot::Mutex<Locks>> = OnceLock::new();
+    let mut locks = LOCKS.get_or_init(Default::default).lock();
+    locks.retain(|_, lock| lock.strong_count() > 0);
+    if let Some(lock) = locks.get(path).and_then(Weak::upgrade) {
+        return lock;
+    }
+    let lock = Arc::new(parking_lot::Mutex::new(()));
+    locks.insert(path.to_path_buf(), Arc::downgrade(&lock));
+    lock
 }
 
 fn atomic_replace_file(
@@ -432,19 +481,23 @@ fn atomic_replace_file(
 pub async fn write_file(
     path: String,
     content: String,
+    expected: Option<ExpectedContent>,
     webview: tauri::Webview,
     app: tauri::AppHandle,
 ) -> Result<WriteResult, AppError> {
-    // Record self-write before spawning (fast, just a HashMap insert).
-    // The record is per-window so only this window's watcher suppresses
-    // the echo — if another window is watching the same workspace it
-    // still sees a genuine file-changed event.
+    // Conditional text saves reconcile their echoes against diskContent in
+    // the frontend. Suppressing their path for two seconds would also hide
+    // genuine external changes (even after a failed precondition). Keep
+    // legacy suppression only for unconditional drawing/creation callers.
     let state = app.state::<AppState>().get_or_create(webview.label());
     let label = webview.label().to_string();
-    crate::watcher::record_write(&state, &PathBuf::from(&path));
+    if expected.is_none() {
+        crate::watcher::record_write(&state, &PathBuf::from(&path));
+    }
 
     let write_path = PathBuf::from(&path);
-    let result = blocking(move || write_file_impl(&path, &content)).await?;
+    let result =
+        blocking(move || write_file_checked_impl(&path, &content, expected.as_ref())).await?;
     state.index_written_file(&write_path, result.modified_at);
     let _ = app.emit_to(label, "sidebar:metadata-changed", &result.path);
     Ok(result)
@@ -1088,6 +1141,117 @@ mod tests {
         write_file_impl(path.to_str().unwrap(), "new").unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), "new");
         assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn conditional_write_preserves_a_competing_version() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("note.md");
+        fs::write(&path, "external version").unwrap();
+        let expected = ExpectedContent {
+            content: Some("original".into()),
+        };
+        let error =
+            write_file_checked_impl(path.to_str().unwrap(), "local version", Some(&expected))
+                .unwrap_err();
+        assert!(
+            matches!(error, AppError::FileConflict { disk_content: Some(content) } if content == "external version")
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), "external version");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn conditional_write_does_not_recreate_an_externally_deleted_file() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("deleted.md");
+        let expected = ExpectedContent {
+            content: Some("original".into()),
+        };
+        let error =
+            write_file_checked_impl(path.to_str().unwrap(), "local version", Some(&expected))
+                .unwrap_err();
+        assert!(matches!(
+            error,
+            AppError::FileConflict { disk_content: None }
+        ));
+        assert!(!path.exists());
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn conditional_write_distinguishes_empty_from_missing() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("empty.md");
+        fs::write(&path, "").unwrap();
+        let missing = ExpectedContent { content: None };
+        let error =
+            write_file_checked_impl(path.to_str().unwrap(), "new", Some(&missing)).unwrap_err();
+        assert!(
+            matches!(error, AppError::FileConflict { disk_content: Some(content) } if content.is_empty())
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), "");
+        let empty = ExpectedContent {
+            content: Some("".into()),
+        };
+        write_file_checked_impl(path.to_str().unwrap(), "new", Some(&empty)).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "new");
+    }
+
+    #[test]
+    fn conditional_write_allows_explicit_recreation_and_matching_baselines() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("note.md");
+        let missing = ExpectedContent { content: None };
+        write_file_checked_impl(path.to_str().unwrap(), "first", Some(&missing)).unwrap();
+        let first = ExpectedContent {
+            content: Some("first".into()),
+        };
+        write_file_checked_impl(path.to_str().unwrap(), "second", Some(&first)).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "second");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn conditional_writers_through_symlink_and_target_have_one_winner() {
+        let dir = TempDir::new().unwrap();
+        let target = dir.path().join("target.md");
+        let link = dir.path().join("link.md");
+        fs::write(&target, "baseline").unwrap();
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        let start = Arc::new(std::sync::Barrier::new(2));
+        let writers: Vec<_> = [target.clone(), link.clone()]
+            .into_iter()
+            .enumerate()
+            .map(|(i, path)| {
+                let start = start.clone();
+                std::thread::spawn(move || {
+                    let content = format!("writer {i}");
+                    let expected = ExpectedContent {
+                        content: Some("baseline".into()),
+                    };
+                    start.wait();
+                    write_file_checked_impl(path.to_str().unwrap(), &content, Some(&expected))
+                })
+            })
+            .collect();
+        let results: Vec<_> = writers
+            .into_iter()
+            .map(|writer| writer.join().unwrap())
+            .collect();
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        let winner = fs::read_to_string(&target).unwrap();
+        assert!(winner == "writer 0" || winner == "writer 1");
+        let error = results.into_iter().find_map(Result::err).unwrap();
+        assert!(
+            matches!(error, AppError::FileConflict { disk_content: Some(content) } if content == winner)
+        );
+        assert!(fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(fs::read_to_string(&link).unwrap(), winner);
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 2);
     }
 
     #[cfg(unix)]

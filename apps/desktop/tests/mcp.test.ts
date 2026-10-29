@@ -65,6 +65,7 @@ function openFile(path: string, content: string, isDirty = false): OpenFile {
     displayDate: null,
     stats: { words: 0, characters: 0, paragraphs: 0 },
     editSeq: 0,
+    instanceId: 1,
   };
 }
 
@@ -238,6 +239,8 @@ describe("dispatchMcpRequest write tools", () => {
     const first = deferred<{ path: string; modified_at: number }>();
     const writes: string[] = [];
     mockedInvoke.mockImplementation((cmd, payload) => {
+      if (cmd === "read_file")
+        return Promise.resolve({ path: "/ws/a.md", content: "old", modified_at: 1 });
       if (cmd === "write_file") {
         const content = (payload as { content: string }).content;
         writes.push(content);
@@ -267,7 +270,7 @@ describe("dispatchMcpRequest write tools", () => {
     expect(writes).toEqual(["first", "second"]);
   });
 
-  test("write_file reports unsaved_conflict when a save lands mid-write and restores the user's text", async () => {
+  test("write_file reports unsaved_conflict when a save lands before the conditional write", async () => {
     vi.useFakeTimers();
     try {
       useEditorStore.setState({
@@ -297,19 +300,20 @@ describe("dispatchMcpRequest write tools", () => {
       // lands before it resolves.
       useEditorStore.getState().updateContent("/ws/a.md", "user");
       await flushMicrotasks();
-      agentWrite.resolve({ path: "/ws/a.md", modified_at: 4 });
+      agentWrite.reject({ kind: "file_conflict", diskContent: "user" });
       const dispatch = await dispatchPromise;
 
       expect(dispatch.ok).toBe(false);
       if (!dispatch.ok) expect(dispatch.error.kind).toBe("unsaved_conflict");
 
-      // The re-dirtied tab's queued autosave restores the user's text to disk.
+      // No repair write may overwrite the version that won the native comparison.
       await vi.runOnlyPendingTimersAsync();
       const file = useEditorStore.getState().openFiles.get("/ws/a.md");
       expect(file?.content).toBe("user");
       expect(file?.diskContent).toBe("user");
-      expect(file?.isDirty).toBe(false);
-      expect(writes).toEqual(["agent", "user", "user"]);
+      expect(file?.isDirty).toBe(true);
+      expect(file?.conflict?.diskContent).toBe("user");
+      expect(writes).toEqual(["agent", "user"]);
     } finally {
       vi.useRealTimers();
     }
@@ -347,12 +351,13 @@ describe("dispatchMcpRequest write tools", () => {
     expect(file?.content).toBe("user");
     expect(file?.isDirty).toBe(true);
 
-    // The pending autosave then writes the user's text over the agent's.
-    userSave.resolve({ path: "/ws/a.md", modified_at: 5 });
+    // The conditional autosave refuses to overwrite the agent's new version.
+    userSave.reject({ kind: "file_conflict", diskContent: "agent" });
     await flushMicrotasks();
     file = useEditorStore.getState().openFiles.get("/ws/a.md");
-    expect(file?.diskContent).toBe("user");
-    expect(file?.isDirty).toBe(false);
+    expect(file?.diskContent).toBe("old");
+    expect(file?.conflict?.diskContent).toBe("agent");
+    expect(file?.isDirty).toBe(true);
   });
 
   test("create_file removes its placeholder when the content write fails", async () => {
@@ -399,6 +404,7 @@ describe("dispatchMcpRequest write tools", () => {
     expect(mockedInvoke).toHaveBeenCalledWith("write_file", {
       path: "/ws/a.md",
       content: "new text",
+      expected: { content: "old" },
     });
     const file = useEditorStore.getState().openFiles.get("/ws/a.md");
     expect(file?.content).toBe("new text");
@@ -536,4 +542,30 @@ describe("respondToMcpRequest", () => {
       error: { kind: "internal", detail: "unknown webview tool: nonsense" },
     });
   });
+});
+
+test("an MCP response does not conflict a reopened buffer that already loaded its write", async () => {
+  useEditorStore.setState({ openFiles: new Map([["/ws/a.md", openFile("/ws/a.md", "old")]]) });
+  const writing = deferred<{ path: string; modified_at: number }>();
+  mockedInvoke.mockImplementation((cmd) =>
+    cmd === "write_file" ? writing.promise : Promise.resolve(null),
+  );
+  const result = dispatchMcpRequest({
+    request_id: 99,
+    tool: "write_file",
+    args: {
+      path: "/ws/a.md",
+      relative_path: "a.md",
+      content: "new",
+    },
+  });
+  await flushMicrotasks();
+  useEditorStore.setState({
+    openFiles: new Map([["/ws/a.md", { ...openFile("/ws/a.md", "new"), instanceId: 2 }]]),
+  });
+  writing.resolve({ path: "/ws/a.md", modified_at: 2 });
+  expect((await result).ok).toBe(true);
+  const current = useEditorStore.getState().openFiles.get("/ws/a.md");
+  expect(current?.isDirty).toBe(false);
+  expect(current?.conflict).toBeFalsy();
 });

@@ -7,6 +7,7 @@ import { saveNow } from "@/lib/save";
 import { useSettingsStore } from "@/stores/settings-store";
 import { createVimClipboardBridge, type VimClipboardBridge } from "./vim-clipboard";
 import { registerVimExCommands } from "./vim-ex-commands";
+import { loadCurrentDiskVersion } from "@/hooks/use-file-conflict";
 import { registerVimMoveLines } from "./vim-move-lines";
 import { registerVimPaste } from "./vim-paste";
 import { showEditorNotice } from "./editor-notice-store";
@@ -58,6 +59,7 @@ function loadVim(): Promise<VimModule> {
       saveNow,
       closeTab: editorApi.closeTab,
       reloadFromDisk: editorApi.reloadFromDisk,
+      loadCurrentDiskVersion,
       notify: (view, message) => {
         const cm = mod.getCM(view);
         if (!cm) throw new Error("[vim-mode] notify on a view without the vim plugin");
