@@ -49,3 +49,7 @@ Rust tests only, not in the app: credential file left out, gitignored edit, rena
 - **Other windows.** Only the window that pressed the button is flushed. Other windows' unsaved text isn't committed.
 - **Very long tab rows.** The buttons float over the tab strip and can cover the end of it.
 - **Windows.** Never built or run there: the record stores native path separators, and a cross-compile check fails on `ring`.
+
+### Install (2026-10-30)
+
+`master` (`019837c`, including AUD-11) was merged into `feat/git-sync` as `59142f1`; `master` itself is unchanged. After the merge: `vp test` 1,849 passed, `cargo test` 333 passed, native 11 of 11 on the isolated build. That commit is built and installed at `/Applications/Writer.app`, ad-hoc signed like the build it replaced. The previous app is at `~/agent-runs/2026-10-30-git-sync/Writer-before-git-buttons.app`. The installed app was not launched, because launch runs lesson sorting on the real vault; the bundle's identifier, signature and feature strings were checked instead. A first install attempt put the test bundle in `/Applications` for about three minutes after a failed release build (a stale `sccache` temp path) and was replaced. Nothing launched it.
