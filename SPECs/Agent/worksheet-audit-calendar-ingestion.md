@@ -80,10 +80,18 @@ Run on the real vault on 2026-10-30, with Oliver's approval and Obsidian closed.
 Not sorted: notes without calendar frontmatter, Excalidraw drawings named after lessons, `boom.md` and loose images.
 The plugin keeps writing to the wrong folder while enabled; Writer corrects its notes only when Writer runs.
 
+## Automatic mode
+
+Added at Oliver's request on 2026-10-30. A saved calendar link is the opt-in: each sync sorts lesson notes, and a one-minute
+check creates a note for a running lesson without taking focus. Events with no recognizable course get no note. A note
+deleted during a lesson isn't recreated until the app restarts. Fetching stays hourly.
+
+Checked on a vault copy with a loopback feed and no interaction: a stray note sorted, a running lesson got a note, a
+party event got none, and a relaunch made no duplicate. Writer's HTTPS fetch then ran against the real feed from the
+real vault: 47 events, and the vault's file list didn't change.
+
 ## Limits
 
-- Writer's own HTTPS path never ran against the real feed: the approved request was a separate script, and the native run
-  used loopback HTTP, which only the `e2e` build allows.
 - Only today's lessons are listed, and the list updates when the palette opens.
 - Assignments and resources aren't in the feed; getting them needs a separate authenticated itslearning API.
 - `Own notes` is a fixed folder name.

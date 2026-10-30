@@ -3,13 +3,12 @@ import { useMoveEntry } from "@/components/sidebar/use-move-entry";
 import { showEditorNotice } from "@/components/editor-area/editor-notice-store";
 import { planLessonMoves, type LessonMove } from "@/lib/calendar";
 import { getFileName } from "@/lib/paths";
-import { getPreference, setPreference } from "@/lib/preferences";
 import * as tauri from "@/lib/tauri";
 import { useCalendarStore } from "@/stores/calendar-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 
-const autoKey = (root: string) => `workspace:${root}:organize-lessons`;
 const PREVIEW_LINES = 8;
+const LESSON_CHECK_MS = 60_000;
 let running = false;
 
 async function planMoves(root: string): Promise<LessonMove[]> {
@@ -27,11 +26,15 @@ async function planMoves(root: string): Promise<LessonMove[]> {
   return planLessonMoves(files, root, folders, existing);
 }
 
-/** Sort calendar notes into course folders: on request first, then after every calendar sync. */
+/**
+ * Keep a workspace with a calendar link organized: each sync sorts its notes,
+ * and a lesson that starts gets a note. Adding the link is the opt-in; without
+ * one, sorting happens only through the palette command.
+ */
 export function useOrganizeLessons() {
   const { applyPathChange } = useMoveEntry();
   const root = useWorkspaceStore((s) => s.root);
-  const fetchedAt = useCalendarStore((s) => s.fetchedAt);
+  const syncedAt = useCalendarStore((s) => s.syncedAt);
 
   const apply = useCallback(
     async (workspace: string, moves: LessonMove[]) => {
@@ -65,16 +68,23 @@ export function useOrganizeLessons() {
   );
 
   useEffect(() => {
-    if (root) useCalendarStore.getState().refreshIfStale();
+    if (!root) return;
+    const report = (error: unknown) => showEditorNotice(`Calendar: ${String(error)}`);
+    useCalendarStore.getState().refreshIfStale();
+    const timer = setInterval(() => {
+      useCalendarStore.getState().refreshIfStale();
+      void useCalendarStore.getState().createCurrentLessons().catch(report);
+    }, LESSON_CHECK_MS);
+    return () => clearInterval(timer);
   }, [root]);
 
   useEffect(() => {
-    if (!root || !fetchedAt || running) return;
+    if (!root || !syncedAt || running) return;
     running = true;
     void (async () => {
-      if (!(await getPreference(autoKey(root), false))) return;
       const moves = await planMoves(root);
       if (moves.length > 0) await apply(root, moves);
+      await useCalendarStore.getState().createCurrentLessons();
     })()
       .catch((error: unknown) => {
         showEditorNotice(`Couldn't organize lesson notes: ${String(error)}`);
@@ -82,26 +92,24 @@ export function useOrganizeLessons() {
       .finally(() => {
         running = false;
       });
-  }, [apply, fetchedAt, root]);
+  }, [apply, syncedAt, root]);
 
   return useCallback(async () => {
     if (!root) return;
     const moves = await planMoves(root);
     if (moves.length === 0) {
       showEditorNotice("Lesson notes are already organized.");
-    } else {
-      const preview = moves
-        .slice(0, PREVIEW_LINES)
-        .map(({ to }) => to.slice(root.length + 1))
-        .join("\n");
-      const more =
-        moves.length > PREVIEW_LINES ? `\n…and ${moves.length - PREVIEW_LINES} more` : "";
-      const confirmed = window.confirm(
-        `Move and rename ${moves.length} lesson notes? Links are updated. New notes will then be sorted after each calendar sync.\n\n${preview}${more}`,
-      );
-      if (!confirmed) return;
-      await apply(root, moves);
+      return;
     }
-    await setPreference(autoKey(root), true);
+    const preview = moves
+      .slice(0, PREVIEW_LINES)
+      .map(({ to }) => to.slice(root.length + 1))
+      .join("\n");
+    const more = moves.length > PREVIEW_LINES ? `\n…and ${moves.length - PREVIEW_LINES} more` : "";
+    const confirmed = window.confirm(
+      `Move and rename ${moves.length} lesson notes? Links are updated.\n\n${preview}${more}`,
+    );
+    if (!confirmed) return;
+    await apply(root, moves);
   }, [apply, root]);
 }

@@ -29,6 +29,16 @@ export function lessonsOn(events: CalendarEvent[], day: Date) {
     .sort((a, b) => a.start.localeCompare(b.start));
 }
 
+/** Lessons running now. Events with no recognizable course, like parties, get no note. */
+export function lessonsInProgress(events: CalendarEvent[], now: Date) {
+  return events.filter(
+    (event) =>
+      courseName(event.summary) !== null &&
+      new Date(event.start) <= now &&
+      now < new Date(event.end),
+  );
+}
+
 function yamlQuote(value: string) {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\r?\n/g, " ")}"`;
 }

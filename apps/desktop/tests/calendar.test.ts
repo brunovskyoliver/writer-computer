@@ -5,6 +5,7 @@ import {
   lessonKind,
   lessonNoteContent,
   lessonTopic,
+  lessonsInProgress,
   planLessonMoves,
   lessonsOn,
 } from "../src/lib/calendar";
@@ -111,4 +112,12 @@ test("same-day lessons get the start time, and foreign notes are ignored", () =>
   );
   expect(moves).toHaveLength(2);
   expect(moves[1].to).toMatch(/Eigenvectors|eigenvectors \d\d\.\d\d\.md$/);
+});
+
+test("only running lessons of a real course get an automatic note", () => {
+  const now = new Date("2026-10-07T13:00:00.000Z");
+  const running = event();
+  const finished = event({ end: "2026-10-07T13:00:00.000Z", start: "2026-10-07T12:00:00.000Z" });
+  const party = event({ summary: "Party: Hall" });
+  expect(lessonsInProgress([running, finished, party], now)).toEqual([running]);
 });

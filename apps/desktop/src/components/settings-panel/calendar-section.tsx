@@ -33,8 +33,8 @@ export function CalendarSection() {
     <div className="mt-3 px-4">
       <p className="text-[12px] text-[var(--text-muted)]">
         {configured
-          ? "Calendar link saved for this workspace, outside your notes."
-          : "Add a private calendar link (webcal or https) to list today's lessons in the command palette."}
+          ? "Calendar link saved outside your notes. Lesson notes are created when a lesson starts and sorted into course folders automatically."
+          : "Add a private calendar link (webcal or https) to list today's lessons, create a note when a lesson starts, and sort lesson notes into course folders automatically."}
       </p>
       <form
         className="mt-2 flex items-center gap-3"
