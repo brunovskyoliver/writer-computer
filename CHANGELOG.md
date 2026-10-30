@@ -4,6 +4,8 @@
 
 - Pull and Push buttons in the top-right corner. Push saves your work, commits the files you edited in Writer as "Edited a.md, b.md", and pushes. Pull only happens if everything applies cleanly; otherwise nothing changes and it says why. They use your system git and existing credentials, and files that look like credentials are left out and named.
 
+- Opening a very large Excalidraw drawing no longer freezes the window for long: the worst pause on a 1.37MB test drawing fell from about 545ms to 63ms, and the output is unchanged. A drawing too big for the preview budget now opens when nothing else is open, instead of failing with a false error; other drawings need it closed first.
+
 - Obsidian Excalidraw drawings can now be edited in place: Edit in the preview opens the editor, and saves go to the same file. Frontmatter and notes stay byte for byte, and Obsidian can still read it, though a saved file is larger because it's no longer compressed. A drawing changed in Obsidian since you opened it is refused rather than overwritten. Adding images still needs Obsidian.
 
 - Accessibility: closing the command palette or content search returns focus to where you were typing. Muted text, sidebar search and light-mode links now meet 4.5:1 contrast, keyboard focus shows on Settings and search-bar buttons, and the app exposes main and sidebar landmarks, a named editor and the active tab to screen readers.

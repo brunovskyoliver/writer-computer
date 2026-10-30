@@ -61,7 +61,11 @@ export function createDrawingSourceCache(
           if (entry.controller.signal.aborted) return;
           const activeBytes = [...current.values()].reduce((sum, item) => sum + item.bytes, 0);
           // Keep one bounded reserve for old images still leased by the UI.
-          if (loaded.bytes > limits.bytes - activeBytes || loaded.bytes > 2 * limits.bytes - bytes)
+          // One drawing alone may exceed the budget: closing others couldn't make it fit.
+          const alone = activeBytes === 0 && bytes === 0;
+          const fits =
+            loaded.bytes <= limits.bytes - activeBytes && loaded.bytes <= 2 * limits.bytes - bytes;
+          if (!alone && !fits)
             throw new Error("Too many large drawings are open. Close a drawing and retry.");
           const url = deps.createUrl(loaded.svg);
           entry.bytes = loaded.bytes;

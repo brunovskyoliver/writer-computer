@@ -177,7 +177,8 @@ history. Vault has no remote. Writer `master` pushed to `origin` at `9a372c9` be
 
 Done: AUD-01, 02, 04, 06, 07, 08, 10, 12, 13 fixed; AUD-03 in-place editing; AUD-05 and AUD-09 closed; review findings
 fixed; accessibility, light mode and performance passes run.
-Open: AUD-11 large drawing export (deferred, SDU unaffected at 394KB). itslearning assignments and resources need a
+AUD-11 fixed on 2026-10-30: the worst freeze on a 1.37MB drawing fell from 545ms to 63ms, with byte-identical SVG output ([report](worksheet-audit-drawing-performance.md)).
+Open: itslearning assignments and resources need a
 separate login. Not exercised: VoiceOver, real keyboard latency, native context-menu clicks, a saved drawing opened in
 Obsidian, drawings with Embedded Files (Obsidian only; 1 in SDU). Notes without calendar frontmatter stay unsorted.
 Deployment: local install only; no signed release was cut.

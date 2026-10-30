@@ -66,6 +66,8 @@ overrides:
   vitest: "catalog:"
   "website>vite": "npm:vite@^8.0.16"
   ws: 8.20.1
+patchedDependencies:
+  "@excalidraw/excalidraw@0.18.1": patches/@excalidraw__excalidraw@0.18.1.patch
 peerDependencyRules:
   allowAny:
     - vite
