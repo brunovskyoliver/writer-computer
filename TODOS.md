@@ -11,6 +11,8 @@
 
 ## Done
 
+- AUD-11: large drawing export no longer freezes the window for long ([report](SPECs/Agent/worksheet-audit-drawing-performance.md)).
+
 - Sort and name lesson notes ([report](SPECs/Agent/worksheet-audit-calendar-ingestion.md)). Verified on a copy, then run on the real SDU vault with Oliver's approval on 2026-10-30.
 
 - AUD-06: Calendar lessons in the palette ([report](SPECs/Agent/worksheet-audit-calendar-ingestion.md)). Native checks pass on a synthetic feed; Writer's HTTPS path not run against the real feed.
@@ -178,8 +180,6 @@
 - Mermaid drag-selection edit-mode flip: [`SPECs/mermaid-drag-selection-edit-mode-flip-spec.md`](SPECs/mermaid-drag-selection-edit-mode-flip-spec.md) — freeze `editMode` for the duration of a pointer drag-selection so the widget doesn't flip into source view mid-drag.
 
 ## Up Next
-
-- AUD-11: Reduce synchronous export stalls for large drawings ([worksheet](SPECs/Agent/worksheet-audit-drawing-performance.md)). Native profiling is recorded; investigate a rendering change that preserves scene fidelity, then review and measure it.
 
 - WebContent retention caveat: [`SPECs/Agent/worksheet-webcontent-retention.md`](SPECs/Agent/worksheet-webcontent-retention.md) — post-close WebContent RSS is ~790 MB while `footprint` shows ~264 MB live + ~544 MB reclaimable. Split live-JS vs allocator pools via a heap-snapshot diff and fix anything still reachable.
 

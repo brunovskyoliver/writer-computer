@@ -101,3 +101,36 @@ The mixed fixture now has corrected bounds through AUD-12. Its degenerate zero-a
 single-point stroke is normalized away by the existing restore path, and its frame
 clipping needs closer inspection before treating that output as a fidelity oracle.
 Oliver requested a pause after AUD-12. Resume only when requested.
+
+## 2026-10-30: fixed with a dependency patch
+
+`patches/@excalidraw__excalidraw@0.18.1.patch` makes `renderSceneToSvg` async. It renders the
+same elements in the same order with the same renderer, and yields through a MessageChannel
+once a slice passes 8ms. The drawing cache now lets one drawing exceed the byte budget when
+nothing else is open; before, the 3.8MB fixture failed with a false "Too many large drawings".
+
+Native e2e release builds, cold open, window in the background, 4ms interval gap monitor.
+One run per build and drawing:
+
+| Drawing                                     | Max gap before | Max gap after | Display before | Display after |
+| ------------------------------------------- | -------------- | ------------- | -------------- | ------------- |
+| Largest real SDU drawing (394KB compressed) | 53ms           | 38ms          | 660ms          | 571ms         |
+| Big430 (1.37MB scene)                       | 545ms          | 63ms          | 1128ms         | 1238ms        |
+| Huge1200 (3.8MB scene)                      | 1359ms         | 142ms         | 2075ms         | 2225ms        |
+
+An earlier pair of runs agreed: Big430 442 to 55ms, Huge1200 1188 to 130ms. Display time rises
+on the largest fixtures because the export now yields. SDU's own drawings never stalled badly,
+so this protects larger drawings more than it changes SDU.
+
+Fidelity: exported SVG is byte-identical between the two builds for a mixed fixture (frame,
+bound text, arrow, link, freedraw, deleted element), the real drawing, Big430 and Huge1200.
+Switching drawings during a Big430 export shows the second one without error. Create editable
+copy still writes an `.excalidraw.svg` with its embedded scene. 1,839 frontend tests pass, and
+`vp check` reports 0 errors.
+
+Limits: while a drawing over budget stays open in any tab, every other drawing is refused with
+an accurate message, and needs Retry after closing it. Cancellation doesn't stop a running
+export; its result is discarded. One huge stroke and XML serialization still block. The patch
+is tied to 0.18.1 and must be redone on upgrade. Not measured with the window in front. Saving
+an existing `.excalidraw.svg` was not run natively, though it uses the same `exportToSvg` call
+as the copy.

@@ -117,6 +117,24 @@ test("entry and byte limits reject excess work and recover after release", async
   d.release();
 });
 
+test("one drawing alone may exceed the byte budget, but nothing joins it", async () => {
+  const { cache, jobs } = setup();
+  const huge = cache.acquire("huge");
+  jobs[0]!.resolve({ ...loaded, bytes: 100 });
+  expect((await huge.result).url).toBe("blob:1");
+  await flush();
+  const other = cache.acquire("other");
+  jobs[1]!.resolve(loaded);
+  await expect(other.result).rejects.toThrow("Too many large drawings");
+  other.release();
+  huge.release();
+  await flush();
+  const after = cache.acquire("other");
+  jobs[2]!.resolve(loaded);
+  await after.result;
+  after.release();
+});
+
 test("failure, invalidation and retry cannot return a previous successful scene", async () => {
   const { cache, jobs } = setup();
   const a = cache.acquire("a");
