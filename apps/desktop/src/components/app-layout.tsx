@@ -3,6 +3,7 @@ import { Sidebar } from "./sidebar";
 import { EditorArea } from "./editor-area";
 import { SidebarToggleButton } from "./sidebar/sidebar-toggle-button";
 import { CompactFileLayout } from "./compact-file-layout";
+import { GitButtons } from "./git-buttons";
 import { WelcomeScreen } from "./welcome";
 import { useSidebar } from "@/hooks/use-sidebar";
 import { useWorkspaceChromeMode, useWorkspaceRoot } from "@/hooks/use-workspace";
@@ -130,6 +131,7 @@ function WorkspaceLayout({ showWelcome }: { showWelcome: boolean }) {
       >
         <SidebarToggleButton />
       </div>
+      <GitButtons />
       {/* Tab strips live in the pane chrome (`editor-area/pane-layout.tsx`);
           only the window-drag band and the sidebar toggle float here. */}
       <div className="flex h-full min-h-0 flex-col">

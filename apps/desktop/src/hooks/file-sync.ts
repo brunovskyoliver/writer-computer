@@ -68,6 +68,18 @@ export function createExternalFileSync() {
   };
 }
 
+/**
+ * Re-check every open buffer after git rewrote the tree. The watcher reports
+ * the same files, but it hides paths Writer wrote in the last two seconds, so a
+ * pull right after a flush could otherwise leave a stale buffer on screen.
+ */
+export async function recheckOpenFiles(isCurrent: () => boolean): Promise<void> {
+  const sync = createExternalFileSync();
+  const paths = [...useEditorStore.getState().openFiles.keys()];
+  await Promise.all(paths.map((path) => sync.refresh(path, isCurrent)));
+  sync.dispose();
+}
+
 /** An explicit discard applies only to the buffer the user chose, before further typing. */
 export async function loadCurrentDiskVersion(path: string): Promise<boolean> {
   const store = useEditorStore.getState();

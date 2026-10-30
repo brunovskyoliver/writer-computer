@@ -455,3 +455,14 @@ export function saveClipboardImage(
 ): Promise<{ relative_path: string; absolute_path: string }> {
   return invoke("save_clipboard_image", { markdownFilePath, imageData, format });
 }
+
+// Git commands. Outcomes carry failures as data; only a missing workspace rejects.
+export interface GitOutcome {
+  ok: boolean;
+  message: string;
+  worktreeChanged: boolean;
+  pulled: string[];
+}
+
+export const gitPull = (): Promise<GitOutcome> => invoke("git_pull");
+export const gitPush = (): Promise<GitOutcome> => invoke("git_push");

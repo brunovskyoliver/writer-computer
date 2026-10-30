@@ -18,6 +18,7 @@ function textMatch(path: string, modifiedAt: number, lineNumber = 1): SearchMatc
     page: null,
     line_text: "hit",
     match_ranges: [[0, 3]],
+    clip_start: 0,
     context: [{ line_number: lineNumber, text: "hit" }],
   };
 }

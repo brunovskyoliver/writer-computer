@@ -47,7 +47,9 @@ pub enum SearchMatchKind {
 
 /// One content-search hit — the unit of the results list, the preview, and
 /// activation. `match_ranges` are `[char_start, len]` pairs within
-/// `line_text`, in document order and non-overlapping.
+/// `line_text`, in document order and non-overlapping. `clip_start` is where
+/// `line_text` begins in the file's line, so `clip_start + char_start` is the
+/// column; only text matches are clipped (see [`clip_line`]).
 #[derive(Debug, Clone, Serialize)]
 pub struct SearchMatch {
     pub path: String,
@@ -58,6 +60,7 @@ pub struct SearchMatch {
     pub page: Option<u32>,
     pub line_text: String,
     pub match_ranges: Vec<(u32, u32)>,
+    pub clip_start: u32,
     pub context: Vec<ContextLine>,
 }
 
@@ -546,6 +549,12 @@ const MAX_TOTAL_MATCHES: usize = 200;
 const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
 /// Lines of context emitted either side of a match (~5 total with the match).
 const CONTEXT_RADIUS: usize = 2;
+/// Longest line sent to the palette, in chars. Minified files (Excalidraw SVG
+/// exports) put hundreds of thousands of chars on one line, and the palette
+/// renders one DOM node per char of a matched line.
+const MAX_LINE_CHARS: usize = 400;
+/// Chars kept before the first match when a long line is clipped.
+const CLIP_LEAD_CHARS: usize = 40;
 
 /// Literal smart-case substring matching on one line (FR-011). Returns
 /// `[char_start, len]` pairs in document order, non-overlapping. Char units,
@@ -588,15 +597,42 @@ fn find_match_ranges(line: &str, needle: &str, case_sensitive: bool) -> Vec<(u32
     find_match_ranges_chars(line, &needle, case_sensitive)
 }
 
+/// A window of a long line around its first match: the clipped text, the
+/// ranges inside it re-based to the window, and the window's start in `line`.
+/// Short lines pass through untouched.
+fn clip_line(line: &str, ranges: Vec<(u32, u32)>) -> (String, Vec<(u32, u32)>, u32) {
+    if line.chars().nth(MAX_LINE_CHARS).is_none() {
+        return (line.to_string(), ranges, 0);
+    }
+    let (first_start, first_len) = ranges.first().copied().unwrap_or((0, 0));
+    let start = (first_start as usize).saturating_sub(CLIP_LEAD_CHARS);
+    // A query longer than the window still gets its whole first match.
+    let window = MAX_LINE_CHARS.max(first_start as usize - start + first_len as usize);
+    let end = (start + window) as u32;
+    let clip_start = start as u32;
+    let text = line.chars().skip(start).take(window).collect();
+    let ranges = ranges
+        .into_iter()
+        .filter(|&(at, len)| at + len <= end)
+        .map(|(at, len)| (at - clip_start, len))
+        .collect();
+    (text, ranges, clip_start)
+}
+
 /// The matched line plus up to `CONTEXT_RADIUS` lines either side. Fewer near
-/// file boundaries — never an error (spec edge case).
-fn context_around(lines: &[&str], index: usize) -> Vec<ContextLine> {
+/// file boundaries — never an error (spec edge case). `matched` is the row at
+/// `index` as the match carries it; the others are cut to `MAX_LINE_CHARS`.
+fn context_around(lines: &[&str], index: usize, matched: &str) -> Vec<ContextLine> {
     let start = index.saturating_sub(CONTEXT_RADIUS);
     let end = (index + CONTEXT_RADIUS + 1).min(lines.len());
     (start..end)
         .map(|i| ContextLine {
             line_number: (i + 1) as u32,
-            text: lines[i].to_string(),
+            text: if i == index {
+                matched.to_string()
+            } else {
+                lines[i].chars().take(MAX_LINE_CHARS).collect()
+            },
         })
         .collect()
 }
@@ -816,9 +852,13 @@ pub(crate) fn content_search_impl(
                                 kind: SearchMatchKind::Pdf,
                                 line_number: None,
                                 page: Some((page_index + 1) as u32),
+                                // ponytail: PDF lines stay whole because `line_text` is
+                                // the page anchor; extracted lines are visual lines, so
+                                // short. Clip for display if one ever isn't.
                                 line_text: lines[index].to_string(),
                                 match_ranges: ranges,
-                                context: context_around(&lines, index),
+                                clip_start: 0,
+                                context: context_around(&lines, index, lines[index]),
                             },
                         );
                         if capped {
@@ -851,16 +891,21 @@ pub(crate) fn content_search_impl(
                         needle_ref,
                         case_sensitive,
                         &mut batch,
-                        |index, ranges| SearchMatch {
-                            path: path_str.clone(),
-                            relative_path: rel.clone(),
-                            modified_at,
-                            kind: SearchMatchKind::Text,
-                            line_number: Some((index + 1) as u32),
-                            page: None,
-                            line_text: lines[index].to_string(),
-                            match_ranges: ranges,
-                            context: context_around(&lines, index),
+                        |index, ranges| {
+                            let (line_text, match_ranges, clip_start) =
+                                clip_line(lines[index], ranges);
+                            SearchMatch {
+                                path: path_str.clone(),
+                                relative_path: rel.clone(),
+                                modified_at,
+                                kind: SearchMatchKind::Text,
+                                line_number: Some((index + 1) as u32),
+                                page: None,
+                                context: context_around(&lines, index, &line_text),
+                                line_text,
+                                match_ranges,
+                                clip_start,
+                            }
                         },
                     );
                     if capped {
@@ -1271,10 +1316,10 @@ mod tests {
     #[test]
     fn test_context_around_clamps_at_boundaries() {
         let lines = vec!["one", "two", "three"];
-        let ctx = context_around(&lines, 0);
+        let ctx = context_around(&lines, 0, lines[0]);
         assert_eq!(ctx.len(), 3);
         assert_eq!(ctx[0].line_number, 1);
-        let ctx = context_around(&lines, 2);
+        let ctx = context_around(&lines, 2, lines[2]);
         assert_eq!(ctx.len(), 3);
         assert_eq!(ctx[2].line_number, 3);
     }
@@ -1307,6 +1352,47 @@ mod tests {
         events
             .iter()
             .find(|event| matches!(event, ContentSearchEvent::Done { .. }))
+    }
+
+    #[test]
+    fn test_long_line_is_clipped_around_match_with_true_column() {
+        let dir = TempDir::new().unwrap();
+        // Multi-byte padding: the column must stay in chars, not bytes.
+        let line = format!("{}ferry{}ferry", "é".repeat(200_000), "x".repeat(200_000));
+        let neighbour = "n".repeat(200_000);
+        fs::write(dir.path().join("a.svg"), format!("{neighbour}\n{line}\n")).unwrap();
+
+        let events = search_events(dir.path(), "ferry");
+        let hit = text_matches(&events)[0];
+        assert!(hit.line_text.chars().count() <= MAX_LINE_CHARS);
+        assert_eq!(hit.clip_start, 200_000 - CLIP_LEAD_CHARS as u32);
+        // Only the match inside the window survives, re-based to it.
+        assert_eq!(hit.match_ranges, vec![(CLIP_LEAD_CHARS as u32, 5)]);
+        let (start, len) = hit.match_ranges[0];
+        let shown: String = hit
+            .line_text
+            .chars()
+            .skip(start as usize)
+            .take(len as usize)
+            .collect();
+        assert_eq!(shown, "ferry");
+        assert!(hit
+            .context
+            .iter()
+            .all(|c| c.text.chars().count() <= MAX_LINE_CHARS));
+        assert_eq!(hit.context[1].text, hit.line_text);
+    }
+
+    #[test]
+    fn test_clip_line_keeps_short_lines_and_oversized_first_match() {
+        let (text, ranges, start) = clip_line("a ferry", vec![(2, 5)]);
+        assert_eq!((text.as_str(), ranges, start), ("a ferry", vec![(2, 5)], 0));
+
+        let line = "y".repeat(2_000);
+        let (text, ranges, start) = clip_line(&line, vec![(1_000, 600)]);
+        assert_eq!(start, 960);
+        assert_eq!(ranges, vec![(40, 600)]);
+        assert_eq!(text.chars().count(), 640);
     }
 
     #[test]

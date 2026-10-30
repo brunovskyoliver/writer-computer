@@ -612,6 +612,8 @@ pub fn run() {
             commands::workspace::open_file_in_standalone_window,
             commands::workspace::watch_standalone_file,
             commands::fonts::list_system_fonts,
+            commands::git::git_pull,
+            commands::git::git_push,
             commands::latex::latex_snippets_path,
             commands::latex::reset_latex_snippets,
             commands::latex_compile::compile_latex,

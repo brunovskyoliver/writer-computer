@@ -441,6 +441,8 @@ fn write_file_checked_impl(
         }
         Err(error) => return Err(error.into()),
     };
+    // Before the expected-content check, so a save overtaken by a pull sees the pulled bytes.
+    let _worktree = crate::commands::git::WORKTREE_GATE.read();
     let lock = file_write_lock(&file_path);
     let _guard = lock.lock();
     let permissions = match fs::metadata(&file_path) {
@@ -624,6 +626,7 @@ pub async fn write_file(
     let write_path = PathBuf::from(&path);
     let result =
         blocking(move || write_file_checked_impl(&path, &content, expected.as_ref())).await?;
+    crate::commands::git::note_edited(&write_path);
     state.index_written_file(&write_path, result.modified_at);
     let _ = app.emit_to(label, "sidebar:metadata-changed", &result.path);
     Ok(result)
@@ -729,6 +732,7 @@ fn create_file_with_content(path: &str, default_content: &str) -> Result<FileCon
         return Err(AppError::Io(error.to_string()));
     }
     crate::telemetry::track("file_created");
+    crate::commands::git::note_edited(&file_path);
     Ok(FileContent {
         path: path.to_string(),
         content: default_content.to_string(),
@@ -918,7 +922,9 @@ pub fn rename_entry_impl(old_path: &str, new_path: &str) -> Result<(), AppError>
     if new.exists() {
         return Err(AppError::AlreadyExists(new_path.to_string()));
     }
-    fs::rename(old, new)?;
+    fs::rename(&old, &new)?;
+    crate::commands::git::note_edited(&old);
+    crate::commands::git::note_edited(&new);
     Ok(())
 }
 
@@ -933,6 +939,7 @@ pub fn delete_entry_impl(path: &str) -> Result<(), AppError> {
         return Err(AppError::NotFound(path.to_string()));
     }
     trash::delete(&entry_path).map_err(|e| AppError::Io(e.to_string()))?;
+    crate::commands::git::note_edited(&entry_path);
     Ok(())
 }
 

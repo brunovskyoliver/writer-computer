@@ -120,7 +120,7 @@ export function openSearchMatch(match: SearchMatch, needle: string) {
     match.line_number !== null
       ? {
           line: match.line_number,
-          offset: match.match_ranges[0]?.[0] ?? 0,
+          offset: match.clip_start + (match.match_ranges[0]?.[0] ?? 0),
           length: match.match_ranges[0]?.[1] ?? 0,
           needle,
         }

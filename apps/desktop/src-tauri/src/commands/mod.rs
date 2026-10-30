@@ -2,6 +2,7 @@ pub mod ai;
 pub mod calendar;
 pub mod fonts;
 pub mod fs;
+pub mod git;
 pub mod images;
 pub mod latex;
 pub mod latex_compile;
