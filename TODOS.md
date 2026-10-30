@@ -11,6 +11,8 @@
 
 ## Done
 
+- Git sync in the sidebar ([report](SPECs/git-sync-spec.md), [worksheet](SPECs/Agent/worksheet-git-sync.md)). 1,863 frontend / 348 Rust tests; 25 native cases including real conflicts. On `feat/git-sync`, not merged.
+
 - Sort and name lesson notes ([report](SPECs/Agent/worksheet-audit-calendar-ingestion.md)). Verified on a copy, then run on the real SDU vault with Oliver's approval on 2026-10-30.
 
 - AUD-06: Calendar lessons in the palette ([report](SPECs/Agent/worksheet-audit-calendar-ingestion.md)). Native checks pass on a synthetic feed; Writer's HTTPS path not run against the real feed.

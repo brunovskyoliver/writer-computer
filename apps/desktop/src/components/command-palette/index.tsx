@@ -29,6 +29,7 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useCalendarStore } from "@/stores/calendar-store";
 import { courseName, lessonsOn, localTime } from "@/lib/calendar";
 import { useOrganizeLessons } from "./use-organize-lessons";
+import { gitActions, useGitStatus, revealGitPanel } from "@/hooks/use-git";
 import {
   useActiveFilePath,
   useActiveTabId,
@@ -156,6 +157,10 @@ export function CommandPalette() {
   const calendarConfigured = useCalendarStore((s) => s.configured);
   useEffect(() => {
     if (isOpen) useCalendarStore.getState().refreshIfStale();
+  }, [isOpen]);
+  const gitStatus = useGitStatus();
+  useEffect(() => {
+    if (isOpen) void gitActions().refresh();
   }, [isOpen]);
   const closeWorkspace = useCloseWorkspace();
   const openFile = useOpenFile();
@@ -285,6 +290,52 @@ export function CommandPalette() {
           }),
         )
       : []),
+    ...(root && !isCompactFileMode && gitStatus?.kind === "ok"
+      ? [
+          {
+            id: "git-sync",
+            label: "Git: Sync",
+            description: "Commit everything, pull, push",
+            run: () => runPaletteAction(() => gitActions().sync()),
+          },
+          {
+            id: "git-pull",
+            label: "Git: Pull",
+            description: "Get the latest without committing",
+            run: () => runPaletteAction(() => gitActions().pull()),
+          },
+          {
+            id: "git-push",
+            label: "Git: Push",
+            description: "Send commits to the remote",
+            run: () => runPaletteAction(() => gitActions().push()),
+          },
+          {
+            id: "git-commit",
+            label: "Git: Commit Chosen Files",
+            description: "Pick files and write a message",
+            run: () => runPaletteAction(async () => revealGitPanel()),
+          },
+          ...(gitStatus.inProgress === "merge"
+            ? [
+                {
+                  id: "git-abort-merge",
+                  label: "Git: Abort Merge",
+                  description: "Review what would be undone",
+                  run: () => runPaletteAction(async () => revealGitPanel()),
+                },
+              ]
+            : []),
+        ]
+      : []),
+    root &&
+      !isCompactFileMode &&
+      gitStatus?.kind === "noRepo" && {
+        id: "git-init",
+        label: "Git: Initialize Repository",
+        description: "Run git init in this folder",
+        run: () => runPaletteAction(() => gitActions().init()),
+      },
     root &&
       !isCompactFileMode && {
         id: "organize-lessons",

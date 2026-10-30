@@ -455,3 +455,73 @@ export function saveClipboardImage(
 ): Promise<{ relative_path: string; absolute_path: string }> {
   return invoke("save_clipboard_image", { markdownFilePath, imageData, format });
 }
+
+// Git commands. Outcomes carry failures as data; only a missing workspace rejects.
+export type GitKind =
+  | "ok"
+  | "notInstalled"
+  | "noRepo"
+  | "noRemote"
+  | "noUpstream"
+  | "detached"
+  | "inProgress"
+  | "conflict"
+  | "indexLocked"
+  | "network"
+  | "auth"
+  | "pushRejected"
+  | "hook"
+  | "localChanges"
+  | "timeout"
+  | "secrets"
+  | "oneSided"
+  | "nothingToCommit"
+  | "noIdentity"
+  | "busy"
+  | "other";
+
+export interface GitFile {
+  path: string;
+  status: string;
+  staged: boolean;
+}
+
+export interface GitStatus {
+  kind: GitKind | null;
+  message: string | null;
+  repoRoot: string | null;
+  branch: string | null;
+  upstream: string | null;
+  hasRemote: boolean;
+  ahead: number;
+  behind: number;
+  files: GitFile[];
+  outsideChanges: number;
+  inProgress: string | null;
+  conflicts: string[];
+}
+
+export interface GitOutcome {
+  ok: boolean;
+  kind: GitKind;
+  message: string;
+  worktreeChanged: boolean;
+  pulled: string[];
+  suspects: string[];
+  status: GitStatus;
+}
+
+export const gitStatus = (): Promise<GitStatus> => invoke("git_status");
+export const gitSync = (message: string, allowed: string[]): Promise<GitOutcome> =>
+  invoke("git_sync", { message, allowed });
+export const gitPull = (): Promise<GitOutcome> => invoke("git_pull");
+export const gitPush = (): Promise<GitOutcome> => invoke("git_push");
+export const gitPublish = (): Promise<GitOutcome> => invoke("git_publish");
+export const gitCommit = (
+  paths: string[],
+  message: string,
+  allowed: string[],
+  sides: string[],
+): Promise<GitOutcome> => invoke("git_commit", { paths, message, allowed, sides });
+export const gitAbortMerge = (): Promise<GitOutcome> => invoke("git_abort_merge");
+export const gitInit = (): Promise<GitOutcome> => invoke("git_init");

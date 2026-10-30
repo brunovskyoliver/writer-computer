@@ -441,6 +441,8 @@ fn write_file_checked_impl(
         }
         Err(error) => return Err(error.into()),
     };
+    // Before the expected-content check, so a save overtaken by a pull sees the merged bytes.
+    let _worktree = crate::commands::git::WORKTREE_GATE.read();
     let lock = file_write_lock(&file_path);
     let _guard = lock.lock();
     let permissions = match fs::metadata(&file_path) {
