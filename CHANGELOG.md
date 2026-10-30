@@ -2,6 +2,8 @@
 
 ## 2026-10-30
 
+- Pinned files now survive a restart. A leftover theme migration deleted `preferences.json` on every launch.
+
 - Renaming or moving a file or folder now keeps links correct across the workspace, including a moved note's own relative images and open notes with unsaved text. A note changed on disk is reported rather than overwritten. `../` Markdown images now load, wiki links follow `#heading` fragments, unresolved wiki links say so, and heading jumps land on the heading in long notes.
 
 ## 2026-10-29

@@ -11,6 +11,8 @@
 
 ## Done
 
+- AUD-13: Launch no longer deletes `preferences.json`, which erased pinned files on every restart. 306 Rust tests; file survival checked in the native app.
+
 - AUD-08: Links stay correct after a move; wiki fragments, `../` images and heading jumps fixed ([report](SPECs/Agent/worksheet-audit-links-on-move.md)). 1,822 frontend / 305 Rust tests; native drag, image and fragment checks pass. Native inline rename not driven.
 
 - AUD-12: Deleted drawing elements no longer inflate export bounds ([report](SPECs/Agent/worksheet-audit-deleted-drawing-bounds.md)). 1,802 frontend tests, native SVG geometry comparison and copy/reload/source-preservation checks pass.

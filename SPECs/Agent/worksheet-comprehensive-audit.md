@@ -121,5 +121,10 @@ Resumed 2026-10-30 at Oliver's request. AUD-08 fixed, plus two defects native ch
 images never loaded and heading jumps landed short. AUD-11 deferred: SDU's largest drawing is 394KB
 against the 1.4MB benchmark. The vault now lives at `~/Documents/Obsidian/SDU`.
 
+AUD-13 (P1): `migrate_from_preferences` in `config.rs` deleted `preferences.json` on every launch, while
+`lib/preferences.ts` still uses that file for pinned files. Found when layouts vanished on restart; reproduced by
+watching the file during a plain launch. Removed the migration, whose theme import has run on every launch since the
+initial commit. Pinned files themselves were not driven natively; layouts in the same store were.
+
 Next: course navigation inside one vault, then AUD-06 calendar ingestion design, full metadata-preserving
 drawing migration, accessibility and light-mode passes, and broader performance profiling.
