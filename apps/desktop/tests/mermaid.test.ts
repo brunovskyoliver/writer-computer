@@ -1,16 +1,21 @@
 import { describe, expect, test, vi, beforeEach } from "vite-plus/test";
 
-// Mock beautiful-mermaid before importing the renderer
-vi.mock("beautiful-mermaid", () => {
-  const renderMermaidSVG = vi
+// Mock pele before importing the renderer
+vi.mock("pele", () => {
+  const render = vi
     .fn()
-    .mockReturnValue('<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>');
-  return { renderMermaidSVG };
+    .mockReturnValue({ svg: '<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>' });
+  return { render };
 });
 
 // Import after mock setup
 const { renderMermaid, clearMermaidCache } =
   await import("../src/components/editor-area/mermaid-renderer");
+
+// The renderer only reads `.svg`; the rest of pele's RenderResult is irrelevant here.
+function peleResult(svg: string) {
+  return { svg } as ReturnType<typeof import("pele").render>;
+}
 
 describe("renderMermaid", () => {
   beforeEach(() => {
@@ -26,7 +31,7 @@ describe("renderMermaid", () => {
   });
 
   test("returns cached SVG on second call with same source", async () => {
-    const { renderMermaidSVG } = await import("beautiful-mermaid");
+    const { render } = await import("pele");
 
     const result1 = renderMermaid("graph TD;\n  A-->B;");
     expect(result1.svg).toBeDefined();
@@ -34,12 +39,12 @@ describe("renderMermaid", () => {
     const result2 = renderMermaid("graph TD;\n  A-->B;");
     expect(result2.svg).toBe(result1.svg);
 
-    expect(renderMermaidSVG).toHaveBeenCalledTimes(1);
+    expect(render).toHaveBeenCalledTimes(1);
   });
 
   test("returns error result when the renderer throws", async () => {
-    const { renderMermaidSVG } = await import("beautiful-mermaid");
-    vi.mocked(renderMermaidSVG).mockImplementationOnce(() => {
+    const { render } = await import("pele");
+    vi.mocked(render).mockImplementationOnce(() => {
       throw new Error("Parse error in mermaid");
     });
 
@@ -50,8 +55,8 @@ describe("renderMermaid", () => {
   });
 
   test("handles non-Error thrown values", async () => {
-    const { renderMermaidSVG } = await import("beautiful-mermaid");
-    vi.mocked(renderMermaidSVG).mockImplementationOnce(() => {
+    const { render } = await import("pele");
+    vi.mocked(render).mockImplementationOnce(() => {
       throw "string error";
     });
 
@@ -61,9 +66,9 @@ describe("renderMermaid", () => {
   });
 
   test("strips <script> blocks from the rendered SVG", async () => {
-    const { renderMermaidSVG } = await import("beautiful-mermaid");
-    vi.mocked(renderMermaidSVG).mockReturnValueOnce(
-      '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script><rect/></svg>',
+    const { render } = await import("pele");
+    vi.mocked(render).mockReturnValueOnce(
+      peleResult('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script><rect/></svg>'),
     );
 
     const result = renderMermaid("xss-script");
@@ -74,9 +79,9 @@ describe("renderMermaid", () => {
   });
 
   test("strips self-closing <script/> tags from the rendered SVG", async () => {
-    const { renderMermaidSVG } = await import("beautiful-mermaid");
-    vi.mocked(renderMermaidSVG).mockReturnValueOnce(
-      '<svg xmlns="http://www.w3.org/2000/svg"><script src="evil.js"/><rect/></svg>',
+    const { render } = await import("pele");
+    vi.mocked(render).mockReturnValueOnce(
+      peleResult('<svg xmlns="http://www.w3.org/2000/svg"><script src="evil.js"/><rect/></svg>'),
     );
 
     const result = renderMermaid("xss-script-selfclosing");
@@ -86,9 +91,11 @@ describe("renderMermaid", () => {
   });
 
   test("strips on*= event handler attributes from the rendered SVG", async () => {
-    const { renderMermaidSVG } = await import("beautiful-mermaid");
-    vi.mocked(renderMermaidSVG).mockReturnValueOnce(
-      '<svg xmlns="http://www.w3.org/2000/svg"><rect onclick="alert(1)" onmouseover=\'evil()\' onload=stealCookies() /></svg>',
+    const { render } = await import("pele");
+    vi.mocked(render).mockReturnValueOnce(
+      peleResult(
+        '<svg xmlns="http://www.w3.org/2000/svg"><rect onclick="alert(1)" onmouseover=\'evil()\' onload=stealCookies() /></svg>',
+      ),
     );
 
     const result = renderMermaid("xss-handlers");

@@ -135,20 +135,27 @@
   max-width: none;
 }
 
-/* xychart series palette: keep all series close to the accent in hue and
-   lightness instead of the default rainbow shifts. beautiful-mermaid scopes
-   its own `--xychart-color-N` defaults to `svg { … }` (specificity 0,0,0,1);
-   this rule is 0,0,2,1 so it wins, and the derived `--xychart-bar-fill-N`
-   expressions (which read `--xychart-color-N` via color-mix) follow along
-   for free. */
-.cm-mermaid-canvas-stage svg[data-xychart-colors] {
-  --xychart-color-1: color-mix(in srgb, var(--accent) 45%, var(--fg-base) 55%);
-  --xychart-color-2: color-mix(in srgb, var(--accent) 20%, var(--fg-base) 80%);
-  --xychart-color-3: color-mix(in srgb, var(--accent) 8%, var(--fg-base) 92%);
-  --xychart-color-4: color-mix(in srgb, var(--accent) 4%, var(--fg-base) 96%);
-  --xychart-color-5: color-mix(in srgb, var(--accent) 2%, var(--fg-base) 98%);
-  --xychart-color-6: var(--fg-base);
-  --xychart-color-7: var(--fg-base);
+/* pele reads its colours from these at paint time, so one cached SVG follows
+   theme switches without re-rendering. Scoped to :root so the fullscreen
+   overlay picks them up too. Chart series stay close to the accent instead of
+   pele's default rainbow. */
+:root {
+  --pele-bg: var(--bg-base);
+  --pele-fg: var(--fg-base);
+  --pele-muted: var(--text-muted);
+  --pele-line: color-mix(in srgb, var(--fg-base) 70%, transparent);
+  --pele-surface: color-mix(in srgb, var(--fg-base) 6%, var(--bg-base));
+  --pele-surface-alt: color-mix(in srgb, var(--fg-base) 12%, var(--bg-base));
+  --pele-border: var(--border-color);
+  --pele-accent: var(--accent);
+  --pele-series-1: color-mix(in srgb, var(--accent) 45%, var(--fg-base) 55%);
+  --pele-series-2: color-mix(in srgb, var(--accent) 20%, var(--fg-base) 80%);
+  --pele-series-3: color-mix(in srgb, var(--accent) 8%, var(--fg-base) 92%);
+  --pele-series-4: color-mix(in srgb, var(--accent) 4%, var(--fg-base) 96%);
+  --pele-series-5: color-mix(in srgb, var(--accent) 2%, var(--fg-base) 98%);
+  --pele-series-6: var(--fg-base);
+  --pele-series-7: var(--fg-base);
+  --pele-series-8: var(--fg-base);
 }
 
 .cm-mermaid-canvas-edit,
