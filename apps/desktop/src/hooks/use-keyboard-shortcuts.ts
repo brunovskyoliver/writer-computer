@@ -6,7 +6,6 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 import { toggleSidebar } from "@/hooks/use-sidebar";
 import { getWorkspaceChromeMode } from "@/lib/compact-mode";
 import { findPane } from "@/lib/editor-layout";
-import { gitActions } from "@/hooks/use-git";
 
 function isEditableTargetFocused(): boolean {
   const active = document.activeElement;
@@ -77,14 +76,6 @@ export function useKeyboardShortcuts() {
       if (plainMod && e.shiftKey && (e.key === "m" || e.key === "M")) {
         e.preventDefault();
         if (activeTabId) openCommandPalette("insert-symbol");
-        return;
-      }
-
-      // Cmd+Shift+S — git sync
-      if (plainMod && e.shiftKey && (e.key === "s" || e.key === "S")) {
-        e.preventDefault();
-        if (isCompactFileMode) return;
-        if (root) void gitActions().sync();
         return;
       }
 

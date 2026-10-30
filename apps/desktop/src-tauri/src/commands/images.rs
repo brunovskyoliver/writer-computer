@@ -58,6 +58,7 @@ pub fn save_clipboard_image_impl(
 
     let abs_path = assets_dir.join(&filename);
     fs::write(&abs_path, image_data)?;
+    crate::commands::git::note_edited(&abs_path);
 
     let relative_path = format!("{}/{}", assets_dir_name, filename);
 

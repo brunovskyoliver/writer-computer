@@ -1,5 +1,4 @@
 import { FileBrowser } from "./file-browser";
-import { GitPanel } from "./git-panel";
 import { WorkspaceSwitcher } from "./workspace-switcher";
 import { useWorkspaceGeneration } from "@/hooks/use-workspace";
 import { useSidebarSurface } from "./use-sidebar-surface";
@@ -42,7 +41,6 @@ function SidebarSurface() {
           />
         </div>
         <div data-sidebar-surface-bottom className="shrink-0 px-3 py-3">
-          <GitPanel />
           <WorkspaceSwitcher />
         </div>
       </div>

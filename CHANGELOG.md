@@ -2,7 +2,7 @@
 
 ## 2026-10-30
 
-- Git in the sidebar: see the branch, ahead and behind counts, changed files and the last result, and press Sync (Cmd+Shift+S) to save, commit, pull and push. Pull, push and committing chosen files with your own message are also there and in the command palette. It uses your system git and existing credentials. Conflicts stop and list the files, and you can abort the merge; Writer keeps a copy of your files first and never force-pushes. Files that look like credentials are named and held back until you confirm.
+- Pull and Push buttons in the top-right corner. Push saves your work, commits the files you edited in Writer as "Edited a.md, b.md", and pushes. Pull only happens if everything applies cleanly; otherwise nothing changes and it says why. They use your system git and existing credentials, and files that look like credentials are left out and named.
 
 - Obsidian Excalidraw drawings can now be edited in place: Edit in the preview opens the editor, and saves go to the same file. Frontmatter and notes stay byte for byte, and Obsidian can still read it, though a saved file is larger because it's no longer compressed. A drawing changed in Obsidian since you opened it is refused rather than overwritten. Adding images still needs Obsidian.
 

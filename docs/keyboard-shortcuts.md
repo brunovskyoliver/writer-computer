@@ -15,7 +15,6 @@ These shortcuts are handled by the global `useKeyboardShortcuts` hook and work r
 | Cmd+N           | Create new note                      |
 | Cmd+T           | New tab                              |
 | Cmd+S           | Save the focused drawing             |
-| Cmd+Shift+S     | Git sync (commit, pull, push)        |
 | Cmd+W           | Close current tab                    |
 | Cmd+\\          | Toggle sidebar                       |
 | Ctrl+Tab        | Next tab in the focused pane         |
@@ -31,7 +30,7 @@ dragged, and a focused divider (Tab to reach it) resizes with the arrow keys.
 
 In compact single-file windows, sidebar and tab-management shortcuts do not
 create hidden UI state: Cmd+\\, Cmd+T, Ctrl+Tab, Ctrl+Shift+Tab, Cmd+1 ...
-Cmd+9, Cmd+Shift+F (no workspace to search), and Cmd+Shift+S are ignored. Cmd+P, Cmd+O,
+Cmd+9, and Cmd+Shift+F (no workspace to search) are ignored. Cmd+P, Cmd+O,
 Cmd+N, and history navigation still work.
 
 ## Menu Accelerators

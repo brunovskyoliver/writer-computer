@@ -11,7 +11,7 @@
 
 ## Done
 
-- Git sync in the sidebar (`387f005`, [report](SPECs/git-sync-spec.md), [worksheet](SPECs/Agent/worksheet-git-sync.md)). 1,863 frontend / 348 Rust tests; 25 native cases including real conflicts. On `feat/git-sync`, not merged.
+- Pull and Push buttons ([report](SPECs/git-sync-spec.md), [worksheet](SPECs/Agent/worksheet-git-sync.md)). 1,848 frontend / 333 Rust tests; 11 native cases. On `feat/git-sync`, not merged.
 
 - Sort and name lesson notes ([report](SPECs/Agent/worksheet-audit-calendar-ingestion.md)). Verified on a copy, then run on the real SDU vault with Oliver's approval on 2026-10-30.
 
