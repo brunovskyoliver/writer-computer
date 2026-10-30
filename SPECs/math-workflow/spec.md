@@ -143,12 +143,23 @@ A `plot` code fence renders an inline SVG function plot:
 - Each non-empty line is an expression in `x` (a leading `y =`/`f(x) =` is
   stripped) or a `domain=a:b` / `range=a:b` setting. Multiple expressions
   draw multiple series.
+- `x = c` (any constant expression, e.g. `x = pi/2`) draws a vertical line.
+- One expression in `x` and `y` (e.g. `T(x,y) = 20*sinh(pi*y)*sin(pi*x)/sinh(pi)`)
+  draws an 80×46 heatmap under the curves: accent opacity scales from the
+  sampled minimum to the maximum, and the min … max is printed top-right.
+  `range=` sets its y extent; without it the y axis mirrors `domain`. A second
+  x,y expression is an error line.
 - Plot expressions use ordinary signed, multi-digit, right-associated powers
   (`x^12`, `2^3^2`), separate from TeX superscript token rules.
 - ~240 samples per series across the domain; non-finite or steeply jumping
   samples break the polyline (asymptotes stay gaps, not walls).
 - Axes through 0 when in view, light tick labels, first series in
   `--accent`, the rest cycling the six formula-highlight palette colours.
+- Typing a word on a fence body line suggests the plot functions (`sin`,
+  `sinh`, `sqrt`, … — accepting inserts `name()` with the caret inside),
+  `pi` and `e`; at the start of a line it also suggests `domain=`, `range=`,
+  `x =`, `y =` and `T(x,y) =`. Nothing is suggested on the info line or
+  outside a `plot` fence (`plot-completion.ts`).
 - Same fold contract as math: selection inside the fence shows the source
   with the plot rendered above it; outside, the fence is replaced by the
   plot.

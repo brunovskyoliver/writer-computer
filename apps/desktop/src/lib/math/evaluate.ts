@@ -89,6 +89,9 @@ const FUNCTIONS: Record<string, (z: Complex) => Complex> = {
   sqrt,
 };
 
+/** Bare function names plot syntax accepts — the plot completion list. */
+export const FUNCTION_NAMES = Object.keys(FUNCTIONS);
+
 const INVERSES: Record<string, string> = {
   sin: "arcsin",
   cos: "arccos",

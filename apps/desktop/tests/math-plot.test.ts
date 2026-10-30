@@ -29,10 +29,20 @@ describe("parsePlot", () => {
   });
 
   it("reports unknown variables and unparseable lines", () => {
-    const spec = parsePlot("x*y\n\\text{hi}\nx + 1");
+    const spec = parsePlot("x*z\n\\text{hi}\nx + 1");
     expect(spec.series).toHaveLength(1);
     expect(spec.errors).toHaveLength(2);
-    expect(spec.errors[0]).toContain("y");
+    expect(spec.errors[0]).toContain("z");
+  });
+
+  it("parses vertical lines and one x,y field", () => {
+    const spec = parsePlot(
+      "x = 1\nx = pi/2\nT(x,y) = 20*sinh(pi*y)*sin(pi*x)/sinh(pi)\nx*y\nx = y",
+    );
+    expect(spec.vlines.map((l) => l.x)).toEqual([1, Math.PI / 2]);
+    expect(spec.field?.label).toContain("T(x,y)");
+    expect(spec.series).toHaveLength(0);
+    expect(spec.errors).toHaveLength(2);
   });
 
   it("rejects inverted bounds", () => {
@@ -50,6 +60,14 @@ describe("renderPlotSvg", () => {
     expect(out.errors).toEqual([]);
   });
 
+  it("draws vertical lines and a heatmap without any curve", () => {
+    const out = renderPlotSvg("T(x,y) = 20*sinh(pi*y)*sin(pi*x)/sinh(pi)\nx = 0.5\ndomain=0:1");
+    expect(out.errors).toEqual([]);
+    expect(out.svg?.match(/<rect [^>]*fill-opacity/g)).toHaveLength(80 * 46);
+    expect(out.svg).toContain("<title>x = 0.5</title>");
+    expect(out.svg).toContain("… 19.32");
+  });
+
   it("breaks the polyline at asymptotes instead of walling", () => {
     const out = renderPlotSvg("1/x\ndomain=-6:6");
     // Multiple M commands = the path has gaps where the asymptote crosses.
@@ -58,7 +76,7 @@ describe("renderPlotSvg", () => {
   });
 
   it("renders an error result when nothing parses", () => {
-    const out = renderPlotSvg("x*y");
+    const out = renderPlotSvg("x*z");
     expect(out.svg).toBeUndefined();
     expect(out.errors.length).toBeGreaterThan(0);
   });

@@ -3,7 +3,8 @@
  * settings, then render an inline SVG function plot.
  *
  * Each non-empty line is an expression in `x` (a leading `y =`/`f(x) =` is
- * stripped) or a `domain=a:b` / `range=a:b` setting. Evaluation reuses the
+ * stripped), a vertical line `x = 1`, one heatmap expression in `x` and `y`
+ * (`T(x,y) = …`), or a `domain=a:b` / `range=a:b` setting. Evaluation reuses the
  * math evaluator with ordinary signed, multi-digit and right-associated
  * powers plus bare function aliases; `x^12`, `sin(x)`, `e^{-x}` all work.
  *
@@ -17,6 +18,8 @@ const SAMPLE_COUNT = 240;
 const WIDTH = 560;
 const HEIGHT = 320;
 const PAD = { top: 14, right: 14, bottom: 26, left: 44 };
+const FIELD_COLS = 80;
+const FIELD_ROWS = 46;
 
 export interface PlotSeries {
   expr: Expr;
@@ -25,6 +28,10 @@ export interface PlotSeries {
 
 export interface PlotSpec {
   series: PlotSeries[];
+  /** `x = c` lines. */
+  vlines: Array<{ x: number; label: string }>;
+  /** The one expression in `x` and `y`, drawn as a heatmap. */
+  field: PlotSeries | null;
   domain: [number, number];
   range: [number, number] | null;
   /** Lines that didn't parse — rendered inside the widget, never hidden. */
@@ -33,10 +40,18 @@ export interface PlotSpec {
 
 const SETTING_RE =
   /^(domain|xrange|range|yrange)\s*=\s*(-?(?:\d+\.?\d*|\.\d+))\s*:\s*(-?(?:\d+\.?\d*|\.\d+))\s*$/i;
-const LHS_RE = /^(?:y|f\s*\(\s*x\s*\))\s*=\s*/i;
+const LHS_RE = /^(?:y|[a-z]\w*\s*\(\s*x\s*(?:,\s*y\s*)?\))\s*=\s*/i;
+const VLINE_RE = /^x\s*=\s*(.+)$/i;
 
 export function parsePlot(source: string): PlotSpec {
-  const spec: PlotSpec = { series: [], domain: [-6, 6], range: null, errors: [] };
+  const spec: PlotSpec = {
+    series: [],
+    vlines: [],
+    field: null,
+    domain: [-6, 6],
+    range: null,
+    errors: [],
+  };
 
   for (const raw of source.split("\n")) {
     const line = raw.trim();
@@ -55,17 +70,34 @@ export function parsePlot(source: string): PlotSpec {
       continue;
     }
 
-    const text = line.replace(LHS_RE, "");
+    const vline = VLINE_RE.exec(line);
+    const text = vline ? vline[1]!.trim() : line.replace(LHS_RE, "");
     try {
       const expr = parseExpression(text, "plot");
-      const unknown = freeVariables(expr).filter((name) => name !== "x");
+      const vars = freeVariables(expr);
+      const unknown = vars.filter((name) => name !== "x" && name !== "y");
       if (unknown.length > 0) {
         spec.errors.push(
           `"${line}" — unknown variable${unknown.length > 1 ? "s" : ""}: ${unknown.join(", ")}`,
         );
         continue;
       }
-      spec.series.push({ expr, label: text });
+      if (vline) {
+        const v = vars.length === 0 ? evaluateExpr(expr, {}) : null;
+        if (!v || !Number.isFinite(v.re) || Math.abs(v.im) > 1e-9) {
+          spec.errors.push(`"${line}" — a vertical line needs a constant, e.g. x = 1`);
+          continue;
+        }
+        spec.vlines.push({ x: v.re, label: line });
+      } else if (vars.includes("y")) {
+        if (spec.field) {
+          spec.errors.push(`"${line}" — only one x,y function per plot`);
+          continue;
+        }
+        spec.field = { expr, label: line };
+      } else {
+        spec.series.push({ expr, label: text });
+      }
     } catch (err) {
       spec.errors.push(`"${line}" — ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -75,19 +107,20 @@ export function parsePlot(source: string): PlotSpec {
 
 /** Sample one series over the domain; null where the point should not draw
  *  (non-finite, complex, or a full-range jump — asymptotes stay gaps). */
+function evalReal(expr: Expr, x: number, y = 0): number | null {
+  try {
+    const v = evaluateExpr(expr, { x: { re: x, im: 0 }, y: { re: y, im: 0 } });
+    return Number.isFinite(v.re) && Math.abs(v.im) < 1e-9 ? v.re : null;
+  } catch {
+    return null;
+  }
+}
+
 function sampleSeries(series: PlotSeries, domain: [number, number]): Array<number | null> {
   const [a, b] = domain;
   const points: Array<number | null> = [];
   for (let i = 0; i < SAMPLE_COUNT; i += 1) {
-    const x = a + ((b - a) * i) / (SAMPLE_COUNT - 1);
-    let y: number | null;
-    try {
-      const v = evaluateExpr(series.expr, { x: { re: x, im: 0 } });
-      y = Number.isFinite(v.re) && Math.abs(v.im) < 1e-9 ? v.re : null;
-    } catch {
-      y = null;
-    }
-    points.push(y);
+    points.push(evalReal(series.expr, a + ((b - a) * i) / (SAMPLE_COUNT - 1)));
   }
   return points;
 }
@@ -127,7 +160,7 @@ export interface PlotRender {
 
 export function renderPlotSvg(source: string): PlotRender {
   const spec = parsePlot(source);
-  if (spec.series.length === 0) {
+  if (spec.series.length === 0 && spec.vlines.length === 0 && !spec.field) {
     return {
       errors: [...spec.errors, "no expressions — write e.g. `x^2 - 4` on its own line"],
     };
@@ -135,7 +168,9 @@ export function renderPlotSvg(source: string): PlotRender {
 
   const samples = spec.series.map((series) => sampleSeries(series, spec.domain));
   const [x0, x1] = spec.domain;
-  const [y0, y1] = spec.range ?? autoRange(samples);
+  // A heatmap's y axis is an input, not an output: without `range=` it
+  // mirrors the domain instead of fitting the curves.
+  const [y0, y1] = spec.range ?? (spec.field ? spec.domain : autoRange(samples));
 
   const px = (x: number) => PAD.left + ((x - x0) / (x1 - x0)) * (WIDTH - PAD.left - PAD.right);
   const py = (y: number) =>
@@ -145,6 +180,8 @@ export function renderPlotSvg(source: string): PlotRender {
   parts.push(
     `<svg viewBox="0 0 ${WIDTH} ${HEIGHT}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Function plot">`,
   );
+
+  if (spec.field) parts.push(renderField(spec.field, [x0, x1], [y0, y1]));
 
   // Frame.
   parts.push(
@@ -209,6 +246,56 @@ export function renderPlotSvg(source: string): PlotRender {
     }
   });
 
+  spec.vlines.forEach((line, i) => {
+    if (line.x < x0 || line.x > x1) return;
+    parts.push(
+      `<line x1="${fmt(px(line.x))}" y1="${PAD.top}" x2="${fmt(px(line.x))}" y2="${HEIGHT - PAD.bottom}" stroke="${seriesColour(spec.series.length + i)}" stroke-width="1.8"><title>${line.label.replace(/[<>&"]/g, "")}</title></line>`,
+    );
+  });
+
   parts.push("</svg>");
   return { svg: parts.join(""), errors: spec.errors };
+}
+
+/** Heatmap of an x,y expression: accent opacity scales with the value,
+ *  min → transparent, max → full accent. Min/max are printed top-right. */
+function renderField(
+  field: PlotSeries,
+  [x0, x1]: [number, number],
+  [y0, y1]: [number, number],
+): string {
+  const plotW = WIDTH - PAD.left - PAD.right;
+  const plotH = HEIGHT - PAD.top - PAD.bottom;
+  const values: Array<number | null> = [];
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (let r = 0; r < FIELD_ROWS; r += 1) {
+    const y = y1 - ((y1 - y0) * (r + 0.5)) / FIELD_ROWS;
+    for (let c = 0; c < FIELD_COLS; c += 1) {
+      const v = evalReal(field.expr, x0 + ((x1 - x0) * (c + 0.5)) / FIELD_COLS, y);
+      values.push(v);
+      if (v !== null) {
+        lo = Math.min(lo, v);
+        hi = Math.max(hi, v);
+      }
+    }
+  }
+  if (lo > hi) return "";
+  const span = hi - lo || 1;
+  const cells: string[] = [];
+  values.forEach((v, i) => {
+    if (v === null) return;
+    const c = i % FIELD_COLS;
+    const r = Math.floor(i / FIELD_COLS);
+    const x = PAD.left + (plotW * c) / FIELD_COLS;
+    const y = PAD.top + (plotH * r) / FIELD_ROWS;
+    cells.push(
+      `<rect x="${fmt(x)}" y="${fmt(y)}" width="${fmt(plotW / FIELD_COLS)}" height="${fmt(plotH / FIELD_ROWS)}" fill-opacity="${((v - lo) / span).toFixed(2)}"/>`,
+    );
+  });
+  const label = `${fmt(lo)} … ${fmt(hi)}`;
+  return (
+    `<g fill="var(--accent)" shape-rendering="crispEdges"><title>${field.label.replace(/[<>&"]/g, "")}: ${label}</title>${cells.join("")}</g>` +
+    `<text x="${WIDTH - PAD.right - 4}" y="${PAD.top + 12}" text-anchor="end" font-size="10" fill="var(--fg-base, #222)" font-family="var(--pm-code-font, monospace)">${label}</text>`
+  );
 }

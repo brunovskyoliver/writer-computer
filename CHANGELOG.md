@@ -20,6 +20,12 @@
 
 - Saving preserves a note's existing file permissions and updates symlink targets without replacing the links. Read-only and non-file destinations fail explicitly; failed atomic replacements clean up temporary output.
 
+## 2026-10-26
+
+- Typing inside a ` ```plot ` fence suggests the functions it understands (`sin`, `sinh`, `sqrt`, …), `pi` and `e`. At the start of a line it also suggests `domain=`, `range=`, `x =` for a vertical line, and `T(x,y) =` for a heatmap.
+
+- ` ```plot ` fences draw vertical lines (`x = 1`) and a heatmap for one function of `x` and `y` (`T(x,y) = 20*sinh(pi*y)*sin(pi*x)/sinh(pi)`), with the value range printed in the corner. Use `domain=` and `range=` to set the x and y extents.
+
 ## 2026-10-08
 
 - Content search now saves a PDF's extracted text to the app cache after its first pdf.js pass. Later searches match it in Rust like a text file, so large PDFs no longer get re-extracted page by page on each query. A PDF that changes on disk is extracted again.
