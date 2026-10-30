@@ -11,7 +11,7 @@
 
 ## Done
 
-- Sort and name lesson notes ([report](SPECs/Agent/worksheet-audit-calendar-ingestion.md)). Verified on a copy of the SDU vault; not yet run on the real vault.
+- Sort and name lesson notes ([report](SPECs/Agent/worksheet-audit-calendar-ingestion.md)). Verified on a copy, then run on the real SDU vault with Oliver's approval on 2026-10-30.
 
 - AUD-06: Calendar lessons in the palette ([report](SPECs/Agent/worksheet-audit-calendar-ingestion.md)). Native checks pass on a synthetic feed; Writer's HTTPS path not run against the real feed.
 

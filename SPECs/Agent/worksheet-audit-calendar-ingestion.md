@@ -73,6 +73,10 @@ files moved with links rewritten, no files lost, binaries identical, a second ru
 stray note without being asked and left a renamed one alone. The first asset attempt failed in native testing because
 `read_directory` doesn't list those folders; the mock-free run caught it.
 
+Run on the real vault on 2026-10-30, with Oliver's approval and Obsidian closed. A full backup was verified first
+(`~/agent-runs/2026-10-30-sdu-backup/SDU`, with `moves.txt` beside it). 16 notes and 7 asset files moved. File count stayed
+5,908 outside `.git`, no other file changed, and only 3 notes differ in content: 6 image-link lines, all resolving.
+
 Not sorted: notes without calendar frontmatter, Excalidraw drawings named after lessons, `boom.md` and loose images.
 The plugin keeps writing to the wrong folder while enabled; Writer corrects its notes only when Writer runs.
 
