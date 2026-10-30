@@ -154,3 +154,14 @@ RSS 108MB on SDU copy, 252MB after the large note. Nothing here justifies an opt
 Native: split layout restores with both panes after one of its notes moved; pinned file shows and its
 preference survives restart. Pin and rename context menus are native and undrivable, so those clicks are
 not exercised; the pin was seeded in preferences and the move ran through the same commands.
+
+AUD-03 in-place editing (2026-10-30): `writeObsidianDrawing` replaces only the drawing fence and, when changed,
+Text Elements and Element Links; elements with an unchanged version keep their original record. All 7 SDU
+`.excalidraw.md` copies round-trip with equal elements and appState and an identical file head. Native, on the
+copy: opening the preview and the editor left the 394KB drawing untouched; drawing one rectangle saved 422
+elements, 1,085,710 chars in a `json` fence, head identical, and matching the plugin's `DRAWING_REG` from its
+`main.js`. Not tested: opening a saved file in Obsidian itself. Reference migration isn't needed because the
+path doesn't change. Drawings with Embedded Files references still open in Obsidian only (1 in SDU).
+AUD-09 closed: SDU has 0 PDF++ `selection=`, `annotation=` or integer `rect=` anchors, so nothing to convert; such
+an anchor from elsewhere lands on its page. AUD-05 closed as not applicable: the plugin is disabled. AUD-11
+stays deferred: largest SDU drawing is 394KB; no fix.

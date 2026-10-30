@@ -61,7 +61,15 @@ const buttonClass =
   "rounded px-2 py-1 text-xs hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50";
 
 /** A rendered source preview never mounts an editable canvas or save session. */
-export default function ObsidianDrawingPane({ path, tabId }: { path: string; tabId: string }) {
+export default function ObsidianDrawingPane({
+  path,
+  tabId,
+  onEdit,
+}: {
+  path: string;
+  tabId: string;
+  onEdit: () => void;
+}) {
   const { state, retry, fail } = useObsidianDrawing(path);
   const { busy, notice, setNotice, copy } = useDrawingCopy(path, tabId);
   const [zoom, setZoom] = useState(1);
@@ -83,6 +91,14 @@ export default function ObsidianDrawingPane({ path, tabId }: { path: string; tab
           }}
         >
           Original
+        </button>
+        <button
+          className={buttonClass}
+          disabled={state.status !== "ready"}
+          title="Edit this drawing. Changes save to this file and stay readable in Obsidian."
+          onClick={onEdit}
+        >
+          Edit
         </button>
         <button
           className={buttonClass}

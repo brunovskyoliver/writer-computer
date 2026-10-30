@@ -350,10 +350,3 @@ test("save completion retains edits made before the last view detaches", async (
   expect(saveDrawing).toHaveBeenCalledTimes(2);
   expect(getDrawingSession(path)).toBeUndefined();
 });
-
-test("an Obsidian source cannot enter an editable drawing session", () => {
-  expect(() =>
-    attachDrawingView("/source.excalidraw.md", "preview", initial(), spyView().handle),
-  ).toThrow("cannot attach");
-  expect(hasDrawingSession("/source.excalidraw.md")).toBe(false);
-});

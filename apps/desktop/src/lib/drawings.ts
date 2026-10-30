@@ -2,7 +2,8 @@ import type { AppState, BinaryFiles } from "@excalidraw/excalidraw/types";
 import type { NonDeletedExcalidrawElement } from "@excalidraw/excalidraw/element/types";
 import { loadDrawingRuntime } from "./drawing-runtime";
 import { getFileName } from "./paths";
-import { readFile, writeFile } from "./tauri";
+import { readObsidianDrawing, writeObsidianDrawing } from "./obsidian-drawing-format";
+import { readDrawingSource, readFile, writeFile } from "./tauri";
 
 /**
  * Editable drawings are `.excalidraw.svg` files: the rendered picture and the editable
@@ -88,7 +89,21 @@ export type DrawingLoadResult = { ok: true; scene: DrawingScene } | { ok: false;
  */
 export async function loadDrawing(path: string): Promise<DrawingLoadResult> {
   try {
-    if (isObsidianDrawingPath(path)) throw new Error("Obsidian drawings open as previews.");
+    if (isObsidianDrawingPath(path)) {
+      const source = await readDrawingSource(path);
+      const { restore } = await loadDrawingRuntime();
+      const restored = restore(
+        readObsidianDrawing(source) as unknown as Parameters<typeof restore>[0],
+        null,
+        null,
+        { refreshDimensions: true, repairBindings: true },
+      );
+      obsidianSources.set(path, source);
+      return {
+        ok: true,
+        scene: { elements: restored.elements, appState: restored.appState, files: restored.files },
+      };
+    }
     const { content } = await readFile(path);
     const { loadFromBlob } = await loadDrawingRuntime();
     const restored = await loadFromBlob(new Blob([content], { type: "image/svg+xml" }), null, null);
@@ -106,6 +121,20 @@ export async function loadDrawing(path: string): Promise<DrawingLoadResult> {
 // per path so the last save requested is the last one on disk.
 const writeQueue = new Map<string, Promise<unknown>>();
 
+/** The source each Obsidian drawing's scene came from, to catch edits made in Obsidian. */
+const obsidianSources = new Map<string, string>();
+
+async function saveObsidianDrawing(path: string, scene: DrawingScene) {
+  const current = await readDrawingSource(path);
+  // ponytail: a moved drawing has no recorded source, so its first save can't detect an outside edit.
+  if (current !== (obsidianSources.get(path) ?? current)) {
+    throw new Error("This drawing changed outside Writer. Reopen it before editing.");
+  }
+  const next = writeObsidianDrawing(current, scene);
+  await writeFile(path, next, current);
+  obsidianSources.set(path, next);
+}
+
 /**
  * Write a drawing back to `path` through the normal Rust write path, so
  * `watcher.rs` self-write detection suppresses the echo.
@@ -115,9 +144,8 @@ const writeQueue = new Map<string, Promise<unknown>>();
  */
 export async function saveDrawing(path: string, scene: DrawingScene): Promise<void> {
   const run = async () => {
-    if (isObsidianDrawingPath(path))
-      throw new Error("Create an editable copy to save this drawing.");
-    await writeFile(path, await exportDrawing(scene));
+    if (isObsidianDrawingPath(path)) await saveObsidianDrawing(path, scene);
+    else await writeFile(path, await exportDrawing(scene));
   };
 
   const chained = (writeQueue.get(path) ?? Promise.resolve()).then(run, run);

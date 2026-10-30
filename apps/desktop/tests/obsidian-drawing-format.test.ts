@@ -1,6 +1,10 @@
 import { describe, expect, test } from "vite-plus/test";
 import { decompressBoundedBase64 } from "../src/lib/bounded-lz-string";
-import { OBSIDIAN_DRAWING_LIMITS, readObsidianDrawing } from "../src/lib/obsidian-drawing-format";
+import {
+  writeObsidianDrawing,
+  OBSIDIAN_DRAWING_LIMITS,
+  readObsidianDrawing,
+} from "../src/lib/obsidian-drawing-format";
 
 const textElement = {
   id: "text0001",
@@ -42,7 +46,7 @@ describe("Obsidian drawing reader", () => {
   test("accepts CRLF and empty scenes, with optional absent files", () => {
     expect(
       readObsidianDrawing(markdown({ ...scene, elements: [] }).replace(/\n/g, "\r\n")),
-    ).toEqual({ elements: [], appState: scene.appState, files: {} });
+    ).toMatchObject({ elements: [], appState: scene.appState, files: {} });
     expect(readObsidianDrawing(markdown({ ...scene, files: undefined })).files).toEqual({});
   });
   test("Text Elements is authoritative, preserving multiline text and explicit links", () => {
@@ -260,5 +264,92 @@ describe("bounded LZString decoder", () => {
         dictionaryCharacters: 5,
       }),
     ).toThrow(/dictionary limit/);
+  });
+});
+
+describe("writeObsidianDrawing", () => {
+  const rect = {
+    id: "r1",
+    type: "rectangle",
+    x: 0,
+    y: 0,
+    width: 5,
+    height: 5,
+    version: 1,
+    versionNonce: 1,
+    customData: { keep: true },
+  };
+  const label = {
+    id: "t1",
+    type: "text",
+    x: 1,
+    y: 1,
+    width: 5,
+    height: 5,
+    version: 1,
+    versionNonce: 2,
+    text: "old",
+    originalText: "old",
+    rawText: "old",
+  };
+  const source = [
+    "---",
+    "excalidraw-plugin: parsed",
+    "tags: [excalidraw, keep]",
+    "---",
+    "==⚠ Switch ⚠== my note $& stays",
+    "",
+    "# Excalidraw Data",
+    "",
+    "## Text Elements",
+    "old ^t1",
+    "",
+    "%%",
+    "## Drawing",
+    "```json",
+    JSON.stringify({
+      type: "excalidraw",
+      version: 2,
+      source: "plugin",
+      elements: [rect, label],
+      appState: { theme: "dark" },
+      files: {},
+    }),
+    "```",
+    "%%",
+    "",
+  ].join("\n");
+
+  test("keeps everything outside the drawing and untouched elements' unknown fields", () => {
+    const edited = [
+      { ...rect, customData: undefined },
+      { ...label, version: 2, versionNonce: 9, text: "new $&", originalText: "new $&" },
+    ];
+    const output = writeObsidianDrawing(source, { elements: edited });
+    expect(output.slice(0, output.indexOf("## Text Elements"))).toBe(
+      source.slice(0, source.indexOf("## Text Elements")),
+    );
+    expect(output).toContain("new $& ^t1\n\n%%\n## Drawing\n```json\n");
+    const scene = readObsidianDrawing(output);
+    expect(scene.elements[0].customData).toEqual({ keep: true });
+    expect(scene.elements[1].rawText).toBe("new $&");
+    expect(scene.appState).toEqual({ theme: "dark" });
+    expect((scene as unknown as { source: string }).source).toBe("plugin");
+  });
+
+  test("an unchanged scene leaves its sections alone and repeats exactly", () => {
+    const once = writeObsidianDrawing(source, { elements: [rect, label] });
+    expect(once).toContain("## Text Elements\nold ^t1\n\n%%\n## Drawing");
+    expect(writeObsidianDrawing(once, { elements: [rect, label] })).toBe(once);
+  });
+
+  test("a deleted text leaves the mapping section, and new images are refused", () => {
+    const output = writeObsidianDrawing(source, {
+      elements: [rect, { ...label, isDeleted: true, version: 2 }],
+    });
+    expect(output).toContain("## Text Elements\n%%\n## Drawing");
+    expect(readObsidianDrawing(output).elements[1].isDeleted).toBe(true);
+    const image = { ...rect, id: "i1", type: "image", fileId: "new" };
+    expect(() => writeObsidianDrawing(source, { elements: [image] })).toThrow(/in Obsidian/);
   });
 });

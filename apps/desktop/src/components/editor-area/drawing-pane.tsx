@@ -54,6 +54,8 @@ export function DrawingPane({
   isFocused: boolean;
 }) {
   const [retry, setRetry] = useState(0);
+  // Obsidian drawings start as a preview; opening the editor is the explicit step.
+  const [editingPath, setEditingPath] = useState<string | null>(null);
   const DrawingEditor = useMemo(() => lazy(() => import("./drawing-editor")), [retry]);
   const ObsidianDrawingPane = useMemo(() => lazy(() => import("./obsidian-drawing-pane")), [retry]);
   useEffect(() => {
@@ -95,8 +97,12 @@ export function DrawingPane({
         >
           {/* Keyed by path so navigating a tab to another drawing remounts with
             fresh state rather than reusing the previous scene. */}
-          {isObsidianDrawingPath(location.path) ? (
-            <ObsidianDrawingPane path={location.path} tabId={tabId} />
+          {isObsidianDrawingPath(location.path) && editingPath !== location.path ? (
+            <ObsidianDrawingPane
+              path={location.path}
+              tabId={tabId}
+              onEdit={() => setEditingPath(location.path)}
+            />
           ) : (
             <DrawingEditor
               key={location.path}

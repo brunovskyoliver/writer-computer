@@ -189,7 +189,13 @@ function validateScene(value: unknown): ObsidianDrawingScene {
       );
     }
   }
-  return { elements: value.elements, appState: value.appState, files } as ObsidianDrawingScene;
+  // Spread: the writer keeps top-level keys like `source` that nothing here reads.
+  return {
+    ...value,
+    elements: value.elements,
+    appState: value.appState,
+    files,
+  } as ObsidianDrawingScene;
 }
 
 function applyMappings(scene: ObsidianDrawingScene, sections: Map<string, string>): void {
@@ -295,4 +301,91 @@ export function readObsidianDrawing(source: string): ObsidianDrawingScene {
   const scene = validateScene(value);
   applyMappings(scene, sections);
   return scene;
+}
+
+function replaceSection(source: string, name: string, body: string): string {
+  const heading = new RegExp(`^#{1,2} ${name}[ \\t]*\\n`, "m").exec(source);
+  if (!heading) return source;
+  const start = heading.index + heading[0].length;
+  const next = /^#{1,2} (Text Elements|Element Links|Embedded Files|Drawing)[ \t]*\n/m.exec(
+    source.slice(start),
+  );
+  const end = next ? start + next.index : source.length;
+  // The `%%` that opens Obsidian's hidden block can end this section; it must survive.
+  const closing = /(?:^|\n)%%[ \t\n]*$/.test(source.slice(start, end)) ? "%%\n" : "";
+  return source.slice(0, start) + body + closing + source.slice(end);
+}
+
+function liveLinks(elements: Record<string, unknown>[]) {
+  return new Map(
+    elements
+      .filter((element) => element.type !== "text" && !element.isDeleted && element.link)
+      .map((element) => [element.id as string, element.link as string]),
+  );
+}
+
+/**
+ * The source with only its drawing, and any text or links that changed, replaced.
+ * Frontmatter and everything else stay byte for byte, and an element whose version
+ * didn't change keeps its original record, including fields Excalidraw would drop.
+ * Throws rather than return something that wouldn't read back.
+ *
+ * ponytail: writes the plugin's uncompressed `json` fence, so a saved file is several
+ * times larger. Compress with lz-string if a drawing outgrows the source limit.
+ */
+export function writeObsidianDrawing(
+  source: string,
+  edited: { elements: readonly object[] },
+): string {
+  const normalized = source.replace(/\r\n/g, "\n");
+  const original = readObsidianDrawing(normalized);
+  const originals = new Map(original.elements.map((element) => [element.id as string, element]));
+  const elements = (edited.elements as Record<string, unknown>[]).map((element) => {
+    const before = originals.get(element.id as string);
+    if (
+      before &&
+      before.version === element.version &&
+      before.versionNonce === element.versionNonce &&
+      before.isDeleted === element.isDeleted
+    )
+      return before;
+    const merged = { ...before, ...element };
+    if (merged.type === "text") merged.rawText = merged.originalText ?? merged.text;
+    return merged;
+  });
+  for (const element of elements) {
+    if (element.type !== "image" || element.isDeleted) continue;
+    if (!Object.prototype.hasOwnProperty.call(original.files, element.fileId as string)) {
+      throw new Error("Add images to this drawing in Obsidian. Your other changes aren't saved.");
+    }
+  }
+
+  const textRecords = (list: Record<string, unknown>[]) =>
+    list
+      .filter((element) => element.type === "text" && !element.isDeleted)
+      .map((element) => `${element.rawText as string} ^${element.id as string}\n\n`)
+      .sort()
+      .join("");
+  let output = normalized;
+  if (textRecords(elements) !== textRecords(original.elements)) {
+    const records = elements
+      .filter((element) => element.type === "text" && !element.isDeleted)
+      .map((element) => `${element.rawText as string} ^${element.id as string}\n\n`);
+    output = replaceSection(output, "Text Elements", records.join(""));
+  }
+  const links = liveLinks(elements);
+  const previous = liveLinks(original.elements);
+  const linksChanged =
+    links.size !== previous.size || [...links].some(([id, link]) => previous.get(id) !== link);
+  if (linksChanged) {
+    const lines = [...links].map(([id, link]) => `${id}: ${link}\n`);
+    output = replaceSection(output, "Element Links", `${lines.join("")}\n`);
+  }
+  const json = JSON.stringify({ ...original, elements }, null, "\t");
+  const drawing =
+    /^#{1,2} Drawing[ \t]*\n[ \t\n]*```(?:compressed-json|json)[ \t]*\n[\s\S]*?\n```/m;
+  // A function, so `$` in the drawing's text isn't read as a replacement pattern.
+  output = output.replace(drawing, () => `## Drawing\n\`\`\`json\n${json}\n\`\`\``);
+  readObsidianDrawing(output);
+  return output;
 }

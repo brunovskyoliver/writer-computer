@@ -3,7 +3,6 @@ import type {
   ExcalidrawElement,
   OrderedExcalidrawElement,
 } from "@excalidraw/excalidraw/element/types";
-import { isObsidianDrawingPath } from "./drawings";
 import { deleteEntry } from "./tauri";
 import { saveDrawing, type DrawingScene } from "./drawings";
 import { notifyDrawingSaved } from "./drawing-embed-sync";
@@ -178,8 +177,6 @@ export function attachDrawingView(
   initial: DrawingScene,
   handle: DrawingViewHandle,
 ): { scene: DrawingScene; detach: () => void } {
-  if (isObsidianDrawingPath(path))
-    throw new Error("Obsidian sources cannot attach an editable drawing session.");
   let session = sessions.get(path);
   if (!session) {
     session = createSession(path, initial);
