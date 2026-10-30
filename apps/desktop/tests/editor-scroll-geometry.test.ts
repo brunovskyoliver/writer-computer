@@ -20,6 +20,8 @@ function fixture(height: number, top = "", bottom = "") {
     scrollWidth: 240,
     clientTop: 12,
     parentElement: null,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
     getBoundingClientRect: () => ({ top: 100 }),
     scrollTo: vi.fn(({ top }: { top: number }) => {
       scroller.scrollTop = top;

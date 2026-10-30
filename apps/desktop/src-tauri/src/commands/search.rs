@@ -139,6 +139,32 @@ pub fn fuzzy_search(
     fuzzy_search_from(&query, &index, limit)
 }
 
+/// A fresh walk rather than the file index: callers rewrite links straight after
+/// a move, before the watcher has caught the index up.
+#[tauri::command]
+pub async fn list_workspace_notes(
+    webview: tauri::Webview,
+    app: tauri::AppHandle,
+) -> Result<Vec<String>, AppError> {
+    let state = app.state::<AppState>().get_or_create(webview.label());
+    let (root, _) = state.workspace_snapshot().ok_or(AppError::NoWorkspace)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let (files, _) = index_workspace_impl(&root, Arc::new(AtomicBool::new(false)));
+        files
+            .into_iter()
+            .filter(|file| {
+                file.path.extension().is_some_and(|extension| {
+                    extension.eq_ignore_ascii_case("md")
+                        || extension.eq_ignore_ascii_case("markdown")
+                })
+            })
+            .map(|file| file.path.to_string_lossy().to_string())
+            .collect()
+    })
+    .await
+    .map_err(|e| AppError::Io(e.to_string()))
+}
+
 /// Exact-substring hits always outrank subsequence hits: a contiguous match
 /// in a directory name is a stronger signal than a scattered match inside a
 /// filename. Fuzzy scores are clamped below this base so the two tiers can

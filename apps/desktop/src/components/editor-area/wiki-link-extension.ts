@@ -16,6 +16,10 @@ import {
 import { getVersionedImageSrc } from "@/lib/drawing-embed-sync";
 import * as tauri from "@/lib/tauri";
 import { getFileStem } from "@/lib/paths";
+import { getEditorView } from "@/lib/editor-views";
+import { slugifyHeading } from "@/lib/heading-slug";
+import { setPendingAnchor } from "@/lib/pending-anchor";
+import { scrollSameDocAnchor } from "./link-navigation";
 import { editorGeneration } from "@/lib/editor-reset";
 import { obsidianDrawings } from "@/lib/obsidian-drawings";
 import type { DrawingLease } from "@/lib/drawing-source-cache";
@@ -536,7 +540,22 @@ export async function followWikiLink(
     deps.fileExists,
     origin.filePath ?? "",
   );
-  if (origin.isDisposed() || result.kind !== "internal") return;
+  if (origin.isDisposed()) return;
+  if (result.kind !== "internal") {
+    showEditorNotice(`No single note matches "${link.path}".`, origin.tabId);
+    return;
+  }
+  // Obsidian writes the heading text, nesting parents with `#`; only the last
+  // segment names the target. Slugging it matches the Markdown anchor lookup.
+  const anchor = link.fragment ? slugifyHeading(link.fragment.split("#").pop()!) : "";
+  if (anchor && origin.tabId) {
+    const view = result.path === origin.filePath ? getEditorView(origin.tabId) : null;
+    if (view) {
+      scrollSameDocAnchor(view, result.path, anchor);
+      return;
+    }
+    setPendingAnchor(origin.tabId, result.path, anchor);
+  }
   await editorApi.navigateToFile(result.path, origin.tabId ? { tabId: origin.tabId } : undefined);
 }
 

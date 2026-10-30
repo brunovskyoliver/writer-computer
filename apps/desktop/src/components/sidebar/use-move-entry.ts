@@ -7,7 +7,10 @@ import {
 } from "@/hooks/use-file-tree";
 import { renameOpenFile, rewritePathPrefix, withDrawingSourceRename } from "@/hooks/editor-api";
 import * as tauri from "@/lib/tauri";
-import { getParentDir } from "@/lib/paths";
+import { getFileName, getParentDir } from "@/lib/paths";
+import { queueLinkUpdate } from "@/lib/update-links-after-move";
+import { showEditorNotice } from "@/components/editor-area/editor-notice-store";
+import { getWorkspaceRoot } from "@/hooks/workspace-api";
 import type { DirEntry } from "@/types/fs";
 import { canMoveInto, computeMovePath } from "./tree-move";
 
@@ -16,6 +19,24 @@ export type MoveOutcome =
   | { status: "skipped"; entry: DirEntry }
   | { status: "exists"; entry: DirEntry; newPath: string }
   | { status: "error"; entry: DirEntry; error: unknown };
+
+/** The move already succeeded, so a link failure is reported, not thrown. */
+async function updateLinks(oldPath: string, newPath: string, isDir: boolean): Promise<void> {
+  const root = getWorkspaceRoot();
+  if (!root) return;
+  try {
+    const { updated, failed } = await queueLinkUpdate(oldPath, newPath, isDir, root);
+    if (failed.length > 0) {
+      showEditorNotice(
+        `Moved, but couldn't update links in ${failed.length} note(s): ${failed.map(getFileName).join(", ")}`,
+      );
+    } else if (updated > 0) {
+      showEditorNotice(`Updated links in ${updated} note${updated === 1 ? "" : "s"}.`);
+    }
+  } catch (error) {
+    showEditorNotice(`Moved, but couldn't update links: ${String(error)}`);
+  }
+}
 
 /**
  * The single write path for relocating a file or folder. Both inline rename and
@@ -51,6 +72,7 @@ export function useMoveEntry() {
       const toParent = getParentDir(newPath);
       await refreshDirectory(fromParent);
       if (toParent !== fromParent) await refreshDirectory(toParent);
+      await updateLinks(entry.path, newPath, entry.is_dir);
     },
     [refreshDirectory, rewriteExpandedDir, rewritePinnedPath],
   );

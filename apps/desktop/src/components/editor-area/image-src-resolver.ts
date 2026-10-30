@@ -1,5 +1,10 @@
 import { imageSrcResolverFacet } from "@/lib/prosemark-core/imageSrc";
-import { decodeLinkPath, getParentDir, normalizeMarkdownDestination } from "@/lib/paths";
+import {
+  decodeLinkPath,
+  getParentDir,
+  normalizeMarkdownDestination,
+  normalizePath,
+} from "@/lib/paths";
 import { getVersionedImageSrc } from "@/lib/drawing-embed-sync";
 
 const PASSTHROUGH_PREFIXES = ["http://", "https://", "asset:", "data:", "blob:"];
@@ -12,7 +17,10 @@ export function resolveLocalImageSrc(rawSrc: string, markdownDir: string | null)
   if (!src || !markdownDir) return rawSrc;
   if (PASSTHROUGH_PREFIXES.some((prefix) => src.startsWith(prefix))) return src;
   const localSrc = decodeLinkPath(src);
-  const absolute = localSrc.startsWith("/") ? localSrc : `${markdownDir}/${localSrc}`;
+  // Collapsed so `../` destinations load: the asset protocol fails on `..`.
+  const absolute = normalizePath(
+    localSrc.startsWith("/") ? localSrc : `${markdownDir}/${localSrc}`,
+  );
   return getVersionedImageSrc(absolute);
 }
 

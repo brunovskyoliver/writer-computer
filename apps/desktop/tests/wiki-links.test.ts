@@ -17,6 +17,7 @@ import { useEditorNoticeStore } from "../src/components/editor-area/editor-notic
 import { useEditorStore } from "../src/stores/editor-store";
 import { createLayout, findPane, panes, splitPaneWithTab } from "../src/lib/editor-layout";
 import { isDrawingPath } from "../src/lib/drawings";
+import { consumePendingAnchor } from "../src/lib/pending-anchor";
 import {
   canonicalWikiTarget,
   normalizeWikiTarget,
@@ -689,6 +690,38 @@ describe("in-editor open routes", () => {
       path: "/vault/b.md",
     });
     expect(findPane(state.layout, right.id)!.tabIds).toEqual([b.id]);
+  });
+
+  test("a note fragment lands on the heading, using its last nested segment", async () => {
+    const { a } = await twoPanes();
+    const fuzzySearch = vi
+      .fn()
+      .mockResolvedValue([makeResult({ path: "/vault/Roadmap.md", relative_path: "Roadmap.md" })]);
+
+    await followWikiLink(
+      "Roadmap#Parent#Q3 Plans: Draft|see plans",
+      { workspaceRoot: "/vault", filePath: "/vault/a.md", tabId: a.id, isDisposed: () => false },
+      { fuzzySearch, fileExists: vi.fn() },
+    );
+
+    expect(consumePendingAnchor(a.id, "/vault/Roadmap.md")).toEqual({
+      kind: "anchor",
+      slug: "q3-plans-draft",
+    });
+  });
+
+  test("an unresolved wiki link reports the target and opens nothing", async () => {
+    const { a } = await twoPanes();
+    const before = useEditorStore.getState().tabs;
+
+    await followWikiLink(
+      "Missing",
+      { workspaceRoot: "/vault", filePath: "/vault/a.md", tabId: a.id, isDisposed: () => false },
+      { fuzzySearch: vi.fn().mockResolvedValue([]), fileExists: vi.fn() },
+    );
+
+    expect(useEditorStore.getState().tabs).toBe(before);
+    expect(useEditorNoticeStore.getState().message).toContain("Missing");
   });
 
   test("a wiki link whose editor was disposed before it resolved opens nothing", async () => {

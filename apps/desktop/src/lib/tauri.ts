@@ -244,6 +244,11 @@ export function indexWorkspace(): Promise<IndexStats> {
   return invoke("index_workspace");
 }
 
+/** Every Markdown note in the workspace, freshly walked (respects ignore files). */
+export function listWorkspaceNotes(): Promise<string[]> {
+  return invoke("list_workspace_notes");
+}
+
 export function fuzzySearch(query: string, limit?: number): Promise<SearchResult[]> {
   return invoke("fuzzy_search", { query, limit });
 }

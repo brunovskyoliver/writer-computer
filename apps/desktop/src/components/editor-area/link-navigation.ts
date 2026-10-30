@@ -16,7 +16,7 @@ export function findHeadingBySlug(content: string, slug: string): DocumentHeadin
   return buildSlugIndex(parseDocumentHeadings(content, { maxDepth: 6, slugDepth: 6 })).get(slug);
 }
 
-function scrollSameDocAnchor(view: EditorView, filePath: string, anchor: string) {
+export function scrollSameDocAnchor(view: EditorView, filePath: string, anchor: string) {
   // Flush so a heading typed inside the debounce window resolves too.
   editorApi.flushPendingEdit(filePath);
   const file = editorApi.getOpenFile(filePath);

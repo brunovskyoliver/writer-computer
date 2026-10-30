@@ -616,6 +616,7 @@ pub fn run() {
             commands::recents::get_recent_files_global,
             commands::search::index_workspace,
             commands::search::fuzzy_search,
+            commands::search::list_workspace_notes,
             commands::search::find_file_by_name,
             commands::search::content_search,
             commands::search::save_pdf_text,

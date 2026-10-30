@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-30
+
+- Renaming or moving a file or folder now keeps links correct across the workspace, including a moved note's own relative images and open notes with unsaved text. A note changed on disk is reported rather than overwritten. `../` Markdown images now load, wiki links follow `#heading` fragments, unresolved wiki links say so, and heading jumps land on the heading in long notes.
+
 ## 2026-10-29
 
 - Deleted drawing shapes no longer enlarge preview or exported SVG bounds. Visible shapes keep their size and placement; original files and live undo state remain intact.

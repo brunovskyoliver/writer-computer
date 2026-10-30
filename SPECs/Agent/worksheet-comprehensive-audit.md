@@ -41,17 +41,17 @@ Do not run the source vault's synchronization or modify its files during audit.
 
 ## Findings
 
-| ID     | Priority  | Finding                                                                                                | Status                                                                                           |
-| ------ | --------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
-| AUD-01 | P1        | External reload overwrites newer edits or completed saves; dirty conflicts silently discard local text | Fixed in `2a71ac0`; 1,720 frontend / 292 Rust tests and native recovery verified                 |
-| AUD-02 | P2        | Atomic text save replaces permissions and symlink identity                                             | Fixed in `3aef86f`; 286 Rust tests and native IPC verified                                       |
-| AUD-03 | P2        | SDU Obsidian Excalidraw Markdown drawings/embeds unsupported                                           | Preview/copy in `96e835d`; 1,801 frontend / 305 Rust tests; full migration remains open          |
-| AUD-04 | P2        | Active tab clipped after window/pane resize                                                            | Fixed in `7ae7721`; 1,696 frontend tests and native layout checks pass                           |
-| AUD-05 | P2        | Existing course plugin persistence queue stays rejected after one IO failure                           | Static finding; source plugin not modified                                                       |
-| AUD-06 | P2        | Calendar refresh interval, course-folder mapping and dedup map drift                                   | Static findings plus stored-data mismatch; synthetic reproduction pending                        |
-| AUD-07 | P2        | Minimum split pane clips tab chrome; conflict notice leaves zero editor height                         | Fixed in `ba29d11`; 1,726 frontend tests and native layout/conflict/Vim checks pass              |
-| AUD-08 | P2        | Wiki note fragment not passed to navigation; moves do not rewrite note links                           | Static inspection; runtime reproduction pending                                                  |
-| AUD-09 | Untriaged | PDF rectangle encoding compatibility                                                                   | Inspect actual grammar before claiming compatibility; no PDF++ selection anchors observed in SDU |
+| ID     | Priority  | Finding                                                                                                | Status                                                                                                |
+| ------ | --------- | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
+| AUD-01 | P1        | External reload overwrites newer edits or completed saves; dirty conflicts silently discard local text | Fixed in `2a71ac0`; 1,720 frontend / 292 Rust tests and native recovery verified                      |
+| AUD-02 | P2        | Atomic text save replaces permissions and symlink identity                                             | Fixed in `3aef86f`; 286 Rust tests and native IPC verified                                            |
+| AUD-03 | P2        | SDU Obsidian Excalidraw Markdown drawings/embeds unsupported                                           | Preview/copy in `96e835d`; 1,801 frontend / 305 Rust tests; full migration remains open               |
+| AUD-04 | P2        | Active tab clipped after window/pane resize                                                            | Fixed in `7ae7721`; 1,696 frontend tests and native layout checks pass                                |
+| AUD-05 | P2        | Existing course plugin persistence queue stays rejected after one IO failure                           | Static finding; source plugin not modified                                                            |
+| AUD-06 | P2        | Calendar refresh interval, course-folder mapping and dedup map drift                                   | Static findings plus stored-data mismatch; synthetic reproduction pending                             |
+| AUD-07 | P2        | Minimum split pane clips tab chrome; conflict notice leaves zero editor height                         | Fixed in `ba29d11`; 1,726 frontend tests and native layout/conflict/Vim checks pass                   |
+| AUD-08 | P2        | Wiki note fragment not passed to navigation; moves do not rewrite note links                           | Fixed; 1,822 frontend / 305 Rust tests and native checks ([report](worksheet-audit-links-on-move.md)) |
+| AUD-09 | Untriaged | PDF rectangle encoding compatibility                                                                   | Inspect actual grammar before claiming compatibility; no PDF++ selection anchors observed in SDU      |
 
 AUD-10 (P1): expected-missing saves can replace an external file created between
 check and rename. Fixed in `430e347` and verified with exclusive publication; 298 Rust / 1,727
@@ -116,3 +116,10 @@ and copy/reload/source preservation ([report](worksheet-audit-deleted-drawing-bo
 
 Audit paused at Oliver's request after AUD-12, pending review. AUD-11 research and
 controlled baseline are recorded; no performance patch has been implemented.
+
+Resumed 2026-10-30 at Oliver's request. AUD-08 fixed, plus two defects native checks exposed: `../`
+images never loaded and heading jumps landed short. AUD-11 deferred: SDU's largest drawing is 394KB
+against the 1.4MB benchmark. The vault now lives at `~/Documents/Obsidian/SDU`.
+
+Next: course navigation inside one vault, then AUD-06 calendar ingestion design, full metadata-preserving
+drawing migration, accessibility and light-mode passes, and broader performance profiling.

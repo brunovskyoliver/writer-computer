@@ -225,7 +225,9 @@ export function useTreeDrag({
       clearSelection: clear,
     } = latest.current;
 
-    const outcomes = await Promise.all(entries.map((entry) => move(entry, dest)));
+    // One at a time: each move's link rewrite must see the others' final paths.
+    const outcomes: MoveOutcome[] = [];
+    for (const entry of entries) outcomes.push(await move(entry, dest));
     clear();
 
     // Reveal the destination so the moved items are visible.
