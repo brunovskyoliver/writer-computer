@@ -955,6 +955,59 @@ pub fn save_session(
     save_all_sessions(&app, &sessions)
 }
 
+/// Replace `old` or anything under it in every string of a saved session.
+fn rewrite_path_strings(value: &mut Value, old: &str, new: &str) -> bool {
+    match value {
+        Value::String(text) => {
+            let rest = match text.strip_prefix(old) {
+                Some(rest) if rest.is_empty() || rest.starts_with('/') => rest.to_string(),
+                _ => return false,
+            };
+            *text = format!("{new}{rest}");
+            true
+        }
+        Value::Array(items) => items.iter_mut().fold(false, |changed, item| {
+            rewrite_path_strings(item, old, new) || changed
+        }),
+        Value::Object(fields) => fields.values_mut().fold(false, |changed, item| {
+            rewrite_path_strings(item, old, new) || changed
+        }),
+        _ => false,
+    }
+}
+
+fn rewrite_layout_records(
+    sessions: &mut HashMap<String, Value>,
+    workspace_root: &str,
+    old: &str,
+    new: &str,
+) -> bool {
+    let prefix = format!("{}#layout:", session_key(workspace_root));
+    sessions
+        .iter_mut()
+        .filter(|(key, _)| key.starts_with(&prefix))
+        .fold(false, |changed, (_, record)| {
+            rewrite_path_strings(record, old, new) || changed
+        })
+}
+
+/// A move rewrites open tabs in memory; saved layouts live only on disk.
+#[tauri::command]
+pub fn rewrite_layout_paths(
+    workspace_root: String,
+    old_path: String,
+    new_path: String,
+    app: tauri::AppHandle,
+) -> Result<(), AppError> {
+    let state = app.state::<AppState>();
+    let _guard = state.sessions_file_lock.lock();
+    let mut sessions = load_all_sessions(&app)?;
+    if rewrite_layout_records(&mut sessions, &workspace_root, &old_path, &new_path) {
+        save_all_sessions(&app, &sessions)?;
+    }
+    Ok(())
+}
+
 /// Classify the workspace's record and prune tabs whose files are gone, so
 /// the prefetch and the frontend both see the repaired layout. A record
 /// pruned down to nothing reads as missing; the frontend then persists an
@@ -987,6 +1040,33 @@ pub fn load_session(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn layout_rewrite_follows_moves_only_in_this_workspaces_layouts() {
+        let tab = |path: &str| serde_json::json!({ "tabs": [{ "path": path }] });
+        let mut sessions = HashMap::from([
+            ("/v#layout:a".to_string(), tab("/v/old/n.md")),
+            ("/v#layout:b".to_string(), tab("/v/older/n.md")),
+            ("/v".to_string(), tab("/v/old/n.md")),
+            ("/w#layout:a".to_string(), tab("/v/old/n.md")),
+        ]);
+        assert!(rewrite_layout_records(
+            &mut sessions,
+            "/v",
+            "/v/old",
+            "/v/new"
+        ));
+        assert_eq!(sessions["/v#layout:a"], tab("/v/new/n.md"));
+        assert_eq!(sessions["/v#layout:b"], tab("/v/older/n.md"));
+        assert_eq!(sessions["/v"], tab("/v/old/n.md"));
+        assert_eq!(sessions["/w#layout:a"], tab("/v/old/n.md"));
+        assert!(!rewrite_layout_records(
+            &mut sessions,
+            "/v",
+            "/v/gone",
+            "/v/new"
+        ));
+    }
     use tempfile::TempDir;
 
     fn valid_session(path: &str) -> SessionV2 {

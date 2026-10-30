@@ -130,3 +130,12 @@ Course navigation done: [named layouts](worksheet-audit-course-layouts.md).
 
 Next: full metadata-preserving
 drawing migration, accessibility and light-mode passes, and broader performance profiling.
+
+Independent review of layouts, calendar and sorting (2026-10-30) found eight defects, all fixed in one
+commit: sorting could run in a vault with no link right after a switch; a `..` course name or
+`lesson-date` could leave the vault; switching vaults mid-batch skipped link updates; a note could move
+without its assets; moves didn't reach saved layouts (now `rewrite_layout_paths`, on the single move
+path); moves could race unsaved edits (those notes now wait for the next sync, with a small remaining
+gap for a keystroke during the rename); duplicate notes from overlapping creation or an unreadable note
+(creation now runs one at a time and read errors surface); dropped or concurrent runs. Unit and Rust tests
+cover traversal and layout rewriting. The hook's switch behaviour has no automated test.

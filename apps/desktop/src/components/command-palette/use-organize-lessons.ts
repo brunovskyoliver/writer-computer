@@ -5,11 +5,13 @@ import { planLessonMoves, type LessonMove } from "@/lib/calendar";
 import { getFileName } from "@/lib/paths";
 import * as tauri from "@/lib/tauri";
 import { useCalendarStore } from "@/stores/calendar-store";
+import { useEditorStore } from "@/stores/editor-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 
 const PREVIEW_LINES = 8;
 const LESSON_CHECK_MS = 60_000;
 let running = false;
+let rerun = false;
 
 async function planMoves(root: string): Promise<LessonMove[]> {
   const notes = await tauri.findCalendarNotes();
@@ -39,18 +41,29 @@ export function useOrganizeLessons() {
   const apply = useCallback(
     async (workspace: string, moves: LessonMove[]) => {
       const failed: string[] = [];
+      let moved = 0;
       for (const { from, to } of moves) {
+        if (useWorkspaceStore.getState().root !== workspace) return;
+        // ponytail: skips only unsaved notes; a keystroke landing during the rename can still conflict.
+        // The next sync retries it.
+        if (useEditorStore.getState().openFiles.get(from)?.isDirty) continue;
         try {
+          const assets = `${from.slice(0, -3)}-assets`;
+          const assetsTo = `${to.slice(0, -3)}-assets`;
+          // Check first: moving the note and then failing here would separate them for good.
+          if ((await tauri.fileExists(assets)) && (await tauri.fileExists(assetsTo))) {
+            throw new Error(`${getFileName(assetsTo)} already exists`);
+          }
           const folder = to.slice(0, to.lastIndexOf("/"));
           if (!(await tauri.fileExists(folder))) await tauri.createDirectory(folder);
           const [note] = await tauri.readFileEntries([from]);
           await applyPathChange(note, to);
+          moved += 1;
           // A note's pasted images follow it under its new name.
-          const assets = `${from.slice(0, -3)}-assets`;
           if (await tauri.fileExists(assets)) {
             // The sidebar listing hides asset folders, so describe this one directly.
             const entry = { ...note, name: getFileName(assets), path: assets, is_dir: true };
-            await applyPathChange(entry, `${to.slice(0, -3)}-assets`);
+            await applyPathChange(entry, assetsTo);
           }
         } catch (error) {
           console.error("[calendar] Failed to organize a lesson note", error);
@@ -58,11 +71,11 @@ export function useOrganizeLessons() {
         }
       }
       if (useWorkspaceStore.getState().root !== workspace) return;
-      showEditorNotice(
-        failed.length > 0
-          ? `Organized ${moves.length - failed.length} lesson notes. Couldn't move: ${failed.join(", ")}`
-          : `Organized ${moves.length} lesson note${moves.length === 1 ? "" : "s"}.`,
-      );
+      if (failed.length > 0) {
+        showEditorNotice(`Organized ${moved} lesson notes. Couldn't move: ${failed.join(", ")}`);
+      } else if (moved > 0) {
+        showEditorNotice(`Organized ${moved} lesson note${moved === 1 ? "" : "s"}.`);
+      }
     },
     [applyPathChange],
   );
@@ -79,12 +92,24 @@ export function useOrganizeLessons() {
   }, [root]);
 
   useEffect(() => {
-    if (!root || !syncedAt || running) return;
+    // Read the store, not the render: a workspace switch resets it in the effect above,
+    // and the previous workspace's sync must not sort this one.
+    if (!root || !syncedAt || !useCalendarStore.getState().syncedAt) return;
+    if (running) {
+      rerun = true;
+      return;
+    }
     running = true;
     void (async () => {
-      const moves = await planMoves(root);
-      if (moves.length > 0) await apply(root, moves);
-      await useCalendarStore.getState().createCurrentLessons();
+      do {
+        rerun = false;
+        const current = useWorkspaceStore.getState().root;
+        if (!current || !useCalendarStore.getState().syncedAt) return;
+        const moves = await planMoves(current);
+        if (useWorkspaceStore.getState().root !== current) continue;
+        if (moves.length > 0) await apply(current, moves);
+        await useCalendarStore.getState().createCurrentLessons();
+      } while (rerun);
     })()
       .catch((error: unknown) => {
         showEditorNotice(`Couldn't organize lesson notes: ${String(error)}`);
@@ -96,6 +121,10 @@ export function useOrganizeLessons() {
 
   return useCallback(async () => {
     if (!root) return;
+    if (running) {
+      showEditorNotice("Lesson notes are being organized. Try again in a moment.");
+      return;
+    }
     const moves = await planMoves(root);
     if (moves.length === 0) {
       showEditorNotice("Lesson notes are already organized.");
@@ -109,7 +138,12 @@ export function useOrganizeLessons() {
     const confirmed = window.confirm(
       `Move and rename ${moves.length} lesson notes? Links are updated.\n\n${preview}${more}`,
     );
-    if (!confirmed) return;
-    await apply(root, moves);
+    if (!confirmed || running) return;
+    running = true;
+    try {
+      await apply(root, moves);
+    } finally {
+      running = false;
+    }
   }, [apply, root]);
 }

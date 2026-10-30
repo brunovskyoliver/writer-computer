@@ -235,6 +235,14 @@ export function saveSession(workspaceRoot: string, session: SessionV2 | null): P
   return invoke("save_session", { workspaceRoot, session });
 }
 
+export function rewriteLayoutPaths(
+  workspaceRoot: string,
+  oldPath: string,
+  newPath: string,
+): Promise<void> {
+  return invoke("rewrite_layout_paths", { workspaceRoot, oldPath, newPath });
+}
+
 export function loadSession(workspaceRoot: string): Promise<SessionRecordData> {
   return invoke("load_session", { workspaceRoot });
 }

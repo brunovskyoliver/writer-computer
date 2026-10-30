@@ -121,3 +121,12 @@ test("only running lessons of a real course get an automatic note", () => {
   const party = event({ summary: "Party: Hall" });
   expect(lessonsInProgress([running, finished, party], now)).toEqual([running]);
 });
+
+test("hostile feed text can't name a folder outside the vault", () => {
+  expect(lessonFolder(".., (E26): x", "/v", [], [])).toBe("/v/Own notes");
+  expect(lessonFolder(".git, (E26): x", "/v", [], [])).toBe("/v/git/Own notes");
+  const content = "---\nlesson-date: ../../x\nlesson-start: 2026-10-07T12:00:00Z\n---\n";
+  const course = "Math, (E26): Lessons - Room";
+  const file = { path: `/v/Own notes/${course.split(":")[0]} a.md`, course, content };
+  expect(planLessonMoves([file], "/v", [], new Set([file.path]))).toEqual([]);
+});

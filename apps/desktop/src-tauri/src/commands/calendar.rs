@@ -335,22 +335,29 @@ pub async fn find_calendar_notes(
                     .extension()
                     .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
             })
-            .filter_map(|file| {
+            .map(|file| {
                 let mut head = Vec::new();
-                std::fs::File::open(&file.path)
-                    .ok()?
-                    .take(FRONTMATTER_PROBE_BYTES)
-                    .read_to_end(&mut head)
-                    .ok()?;
-                parse_calendar_note(
-                    &file.path.to_string_lossy(),
-                    &String::from_utf8_lossy(&head),
-                )
+                let read = std::fs::File::open(&file.path)
+                    .and_then(|note| note.take(FRONTMATTER_PROBE_BYTES).read_to_end(&mut head));
+                match read {
+                    // Deleted since the index was built.
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                    // Unknown identity: treating it as absent would create a duplicate note.
+                    Err(error) => Err(AppError::Io(format!(
+                        "Can't read {}: {error}",
+                        file.path.display()
+                    ))),
+                    Ok(_) => Ok(parse_calendar_note(
+                        &file.path.to_string_lossy(),
+                        &String::from_utf8_lossy(&head),
+                    )),
+                }
             })
-            .collect()
+            .filter_map(Result::transpose)
+            .collect::<Result<Vec<_>, AppError>>()
     })
     .await
-    .map_err(|e| AppError::Io(e.to_string()))
+    .map_err(|e| AppError::Io(e.to_string()))?
 }
 
 #[cfg(test)]

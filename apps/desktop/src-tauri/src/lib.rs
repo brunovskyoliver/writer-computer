@@ -608,6 +608,7 @@ pub fn run() {
             commands::calendar::find_calendar_notes,
             commands::workspace::save_session,
             commands::workspace::load_session,
+            commands::workspace::rewrite_layout_paths,
             commands::workspace::open_file_in_standalone_window,
             commands::workspace::watch_standalone_file,
             commands::fonts::list_system_fonts,

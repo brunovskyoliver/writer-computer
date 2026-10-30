@@ -38,6 +38,14 @@ interface CalendarState {
 /** Tried this session, so a note you delete during a lesson stays deleted. */
 const attemptedLessons = new Set<string>();
 
+/** One creation at a time, so the timer, a sync and a click can't each make the same note. */
+let creating: Promise<unknown> = Promise.resolve();
+function oneAtATime<T>(work: () => Promise<T>): Promise<T> {
+  const result = creating.then(work, work);
+  creating = result.catch(() => undefined);
+  return result;
+}
+
 async function createLessonNote(root: string, event: CalendarEvent, notes: tauri.CalendarNote[]) {
   const entries = await tauri.readDirectory(root);
   const folders = entries.filter((entry) => entry.is_dir).map((entry) => entry.name);
@@ -98,13 +106,11 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
   openLesson: async (event) => {
     const root = useWorkspaceStore.getState().root;
     if (!root) return;
-    const notes = await tauri.findCalendarNotes();
-    const existing = notes.find((note) => note.occurrence === event.occurrence_key);
-    if (existing) {
-      await useEditorStore.getState().openFile(existing.path);
-      return;
-    }
-    const path = await createLessonNote(root, event, notes);
+    const path = await oneAtATime(async () => {
+      const notes = await tauri.findCalendarNotes();
+      const existing = notes.find((note) => note.occurrence === event.occurrence_key);
+      return existing?.path ?? createLessonNote(root, event, notes);
+    });
     await useEditorStore.getState().openFile(path);
   },
 
@@ -115,12 +121,23 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
       (event) => !attemptedLessons.has(`${root}::${event.occurrence_key}`),
     );
     if (pending.length === 0) return;
-    const notes = await tauri.findCalendarNotes();
-    for (const event of pending) {
-      attemptedLessons.add(`${root}::${event.occurrence_key}`);
-      if (notes.some((note) => note.occurrence === event.occurrence_key)) continue;
-      const path = await createLessonNote(root, event, notes);
-      showEditorNotice(`Created lesson note: ${getFileName(path)}`);
-    }
+    const keys = pending.map((event) => `${root}::${event.occurrence_key}`);
+    for (const key of keys) attemptedLessons.add(key);
+    await oneAtATime(async () => {
+      let notes: tauri.CalendarNote[];
+      try {
+        notes = await tauri.findCalendarNotes();
+      } catch (error) {
+        // Nothing was decided, so the next check may try again.
+        for (const key of keys) attemptedLessons.delete(key);
+        throw error;
+      }
+      if (useWorkspaceStore.getState().root !== root) return;
+      for (const event of pending) {
+        if (notes.some((note) => note.occurrence === event.occurrence_key)) continue;
+        const path = await createLessonNote(root, event, notes);
+        showEditorNotice(`Created lesson note: ${getFileName(path)}`);
+      }
+    });
   },
 }));

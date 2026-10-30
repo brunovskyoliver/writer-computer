@@ -62,7 +62,8 @@ function safeName(text: string) {
   return text
     .replace(/[\\/:*?"<>|#^[\]]/g, "")
     .replace(/\s+/g, " ")
-    .trim();
+    .trim()
+    .replace(/^\.+\s*/, "");
 }
 
 /** "…: MATH1-SC-B-E26 - Lessons - Room" -> "Lesson"; the type sits just before the room. */
@@ -120,6 +121,8 @@ export function lessonFolder(
   const best = [...votes].sort((a, b) => b[1] - a[1])[0]?.[0];
   if (best) return best;
   const stem = safeName(course.split(/[,(]/)[0]);
+  // Feed text is untrusted: a course named ".." leaves nothing to name a folder after.
+  if (!stem) return `${root}/${NOTES_FOLDER}`;
   const match = topLevelFolders.find((name) => name.toLowerCase() === stem.toLowerCase());
   return `${root}/${match ?? stem}/${NOTES_FOLDER}`;
 }
@@ -164,7 +167,8 @@ export function planLessonMoves(
 
     const date = frontmatterValue(file.content, "lesson-date");
     const start = frontmatterValue(file.content, "lesson-start");
-    if (!date || !start) continue;
+    // A date from frontmatter becomes part of a path, so it must be only a date.
+    if (!date || !start || !/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
     const body = file.content.replace(/^---\n[\s\S]*?\n---\n?/, "");
     const newName = generated
       ? lessonNoteName(date, lessonKind(file.course), lessonTopic(body))

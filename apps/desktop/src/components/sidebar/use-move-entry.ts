@@ -21,9 +21,19 @@ export type MoveOutcome =
   | { status: "error"; entry: DirEntry; error: unknown };
 
 /** The move already succeeded, so a link failure is reported, not thrown. */
-async function updateLinks(oldPath: string, newPath: string, isDir: boolean): Promise<void> {
-  const root = getWorkspaceRoot();
-  if (!root) return;
+async function updateLinks(
+  root: string,
+  oldPath: string,
+  newPath: string,
+  isDir: boolean,
+): Promise<void> {
+  // The note list comes from the window's current workspace, not the moved file's.
+  if (getWorkspaceRoot() !== root) {
+    showEditorNotice(
+      `Moved ${getFileName(newPath)}, but the workspace changed before its links were updated.`,
+    );
+    return;
+  }
   try {
     const { updated, failed } = await queueLinkUpdate(oldPath, newPath, isDir, root);
     if (failed.length > 0) {
@@ -53,6 +63,7 @@ export function useMoveEntry() {
   // its name (rename) or its parent (move) — the handling is identical.
   const applyPathChange = useCallback(
     async (entry: DirEntry, newPath: string): Promise<void> => {
+      const root = getWorkspaceRoot();
       await withDrawingSourceRename(entry.path, newPath, async () => {
         await withDrawingSaveBoundary(async () => {
           await tauri.renameEntry(entry.path, newPath);
@@ -72,7 +83,12 @@ export function useMoveEntry() {
       const toParent = getParentDir(newPath);
       await refreshDirectory(fromParent);
       if (toParent !== fromParent) await refreshDirectory(toParent);
-      await updateLinks(entry.path, newPath, entry.is_dir);
+      if (!root) return;
+      // Layouts drop tabs whose files are gone, so they follow the move too.
+      await tauri.rewriteLayoutPaths(root, entry.path, newPath).catch((error: unknown) => {
+        showEditorNotice(`Moved, but couldn't update saved layouts: ${String(error)}`);
+      });
+      await updateLinks(root, entry.path, newPath, entry.is_dir);
     },
     [refreshDirectory, rewriteExpandedDir, rewritePinnedPath],
   );
