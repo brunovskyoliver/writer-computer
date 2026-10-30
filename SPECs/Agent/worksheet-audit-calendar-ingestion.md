@@ -58,6 +58,24 @@ unknown.
 The Rust parser also ran offline on the saved real response: 47 events, 0 skipped, no escapes left, and 3 occurrences
 match existing SDU notes, so plugin notes are recognized. Only counts were recorded.
 
+## Sorting and naming
+
+The plugin matches a workspace name to a folder, and "Math" doesn't match "Mathematics for Science 1", so 10 math notes
+landed in the root `Own notes`. Its date suffix appears only on a filename collision.
+
+`planLessonMoves` handles notes with `calendar-occurrence`. Folder: most notes of that course inside a course folder
+(root `Own notes` doesn't vote), then a top-level folder with the course's name, then a new one. Name:
+`YYYY-MM-DD Kind - Topic.md`, with the start time added on a same-day collision. Only names still starting with the
+course name are rewritten, and notes already under the course's top-level folder stay there. `<note>-assets` moves too.
+
+Checked on an rsync copy of SDU without PDFs, `.obsidian` or `.git` (`organize-native.json`): 16 notes moved, 7 asset
+files moved with links rewritten, no files lost, binaries identical, a second run did nothing. A later launch moved a new
+stray note without being asked and left a renamed one alone. The first asset attempt failed in native testing because
+`read_directory` doesn't list those folders; the mock-free run caught it.
+
+Not sorted: notes without calendar frontmatter, Excalidraw drawings named after lessons, `boom.md` and loose images.
+The plugin keeps writing to the wrong folder while enabled; Writer corrects its notes only when Writer runs.
+
 ## Limits
 
 - Writer's own HTTPS path never ran against the real feed: the approved request was a separate script, and the native run

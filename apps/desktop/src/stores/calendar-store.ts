@@ -1,5 +1,13 @@
 import { create } from "zustand";
-import { lessonFolder, lessonNoteContent, lessonNoteName } from "@/lib/calendar";
+import {
+  lessonFolder,
+  lessonKind,
+  lessonNoteContent,
+  lessonNoteName,
+  lessonTopic,
+  localDate,
+  localTime,
+} from "@/lib/calendar";
 import * as tauri from "@/lib/tauri";
 import type { CalendarEvent } from "@/lib/tauri";
 import { showEditorNotice } from "@/components/editor-area/editor-notice-store";
@@ -66,7 +74,16 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     }
     const entries = await tauri.readDirectory(root);
     const folders = entries.filter((entry) => entry.is_dir).map((entry) => entry.name);
-    const path = `${lessonFolder(event, root, notes, folders)}/${lessonNoteName(event)}`;
+    const folder = lessonFolder(event.summary, root, notes, folders);
+    const name = lessonNoteName(
+      localDate(new Date(event.start)),
+      lessonKind(event.summary),
+      lessonTopic(event.description),
+    );
+    let path = `${folder}/${name}`;
+    if (await tauri.fileExists(path)) {
+      path = `${path.slice(0, -3)} ${localTime(event.start).replace(":", ".")}.md`;
+    }
     // Exclusive create: a file already at this path is reported, never replaced.
     await tauri.createFile(path, lessonNoteContent(event));
     await useEditorStore.getState().openFile(path);

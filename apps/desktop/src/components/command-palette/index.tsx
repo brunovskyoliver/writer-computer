@@ -27,6 +27,7 @@ import { workspaceLabels } from "@/components/sidebar/workspace-menu";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useCalendarStore } from "@/stores/calendar-store";
 import { courseName, lessonsOn, localTime } from "@/lib/calendar";
+import { useOrganizeLessons } from "./use-organize-lessons";
 import {
   useActiveFilePath,
   useActiveTabId,
@@ -148,6 +149,7 @@ export function CommandPalette() {
     if (isOpen) void refreshRecentWorkspaces();
   }, [isOpen, refreshRecentWorkspaces]);
 
+  const organizeLessons = useOrganizeLessons();
   const calendarEvents = useCalendarStore((s) => s.events);
   const calendarConfigured = useCalendarStore((s) => s.configured);
   useEffect(() => {
@@ -281,6 +283,13 @@ export function CommandPalette() {
           }),
         )
       : []),
+    root &&
+      !isCompactFileMode && {
+        id: "organize-lessons",
+        label: "Organize Lesson Notes",
+        description: "Sort calendar notes into course folders",
+        run: () => runPaletteAction(organizeLessons),
+      },
     root &&
       !isCompactFileMode &&
       calendarConfigured && {

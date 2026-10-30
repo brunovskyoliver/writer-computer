@@ -2,6 +2,8 @@
 
 ## 2026-10-30
 
+- Organize Lesson Notes sorts calendar notes into their course folder and names them by date, type and topic, such as `2026-10-05 Lesson - Eigenvalues and eigenvectors`. You confirm the first run; after that, new notes are sorted when the workspace opens and after each calendar refresh. Pasted images move with their note and links are updated. Notes you renamed keep their name, and new lesson notes follow the same rules.
+
 - Today's lessons from a private calendar link now appear in the command palette. Add the link under Settings, Workspace; it is stored outside your notes and never shown again. Picking a lesson opens its note, or creates one in the course's folder. Notes made by the Course Workspaces plugin are recognized, even after a rename. Save Layout now sits below other palette matches, so Enter can't trigger it by accident.
 
 - Named layouts: type a name in the command palette and run Save Layout as to keep the current tabs and panes. Run Layout: name to switch; open notes are saved first and changes to the current layout are kept. Delete Layout: name removes only the saved arrangement. Files that no longer exist are dropped when a layout opens.
