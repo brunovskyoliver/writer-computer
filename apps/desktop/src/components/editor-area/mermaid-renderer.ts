@@ -1,4 +1,4 @@
-import { renderMermaidSVG } from "beautiful-mermaid";
+import { render } from "pele";
 import { LruCache } from "@/lib/lru";
 
 const svgCache = new LruCache<string>(50);
@@ -13,18 +13,11 @@ export interface RenderError {
   error: string;
 }
 
-// beautiful-mermaid resolves colours from CSS custom properties at paint time,
-// so passing the app's `--bg-base` / `--fg-base` lets a single cached SVG work
-// in both light and dark themes. `transparent: true` skips the explicit
-// background fill on the SVG root — the canvas frame already shows through.
-const RENDER_OPTIONS = {
-  bg: "var(--bg-base)",
-  fg: "var(--fg-base)",
-  transparent: true,
-} as const;
-
+// pele resolves colours from `--pele-*` custom properties at paint time (mapped
+// to the app theme in `mermaid-canvas.css`), so a single cached SVG works in
+// both light and dark themes.
 // Defense-in-depth: strip <script> blocks and on*= event-handler attributes
-// before the SVG reaches innerHTML. beautiful-mermaid escapes label text, but
+// before the SVG reaches innerHTML. pele escapes label text, but
 // documents come from external sources (Obsidian vaults, repos) and the
 // third-party renderer is young — a belt-and-suspenders pass on the output
 // protects against future regressions in either the library or its inputs.
@@ -37,7 +30,7 @@ function sanitizeSvg(svg: string): string {
     .replace(/\s+on[a-z]+\s*=\s*[^\s>]+/gi, "");
 }
 
-// Synchronous on purpose: beautiful-mermaid is itself synchronous and the
+// Synchronous on purpose: pele is itself synchronous and the
 // cache makes repeat renders O(map lookup). Calling this from `toDOM` lets the
 // widget paint with its rendered SVG in the same frame the wrapper enters the
 // DOM — there's no async gap that can leave the user stuck on a placeholder.
@@ -46,7 +39,7 @@ export function renderMermaid(source: string): RenderResult | RenderError {
   if (cached !== undefined) return { svg: cached };
 
   try {
-    const svg = sanitizeSvg(renderMermaidSVG(source, RENDER_OPTIONS));
+    const svg = sanitizeSvg(render(source).svg);
     svgCache.set(source, svg);
     return { svg };
   } catch (err) {

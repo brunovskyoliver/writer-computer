@@ -16,6 +16,14 @@
 
 - Saving preserves a note's existing file permissions and updates symlink targets without replacing the links. Read-only and non-file destinations fail explicitly; failed atomic replacements clean up temporary output.
 
+## 2026-10-26
+
+- Typing inside a ` ```plot ` fence suggests the functions it understands (`sin`, `sinh`, `sqrt`, …), `pi` and `e`. At the start of a line it also suggests `domain=`, `range=`, `x =` for a vertical line, and `T(x,y) =` for a heatmap.
+
+- ` ```plot ` fences draw vertical lines (`x = 1`) and a heatmap for one function of `x` and `y` (`T(x,y) = 20*sinh(pi*y)*sin(pi*x)/sinh(pi)`), with the value range printed in the corner. Use `domain=` and `range=` to set the x and y extents.
+
+- Mermaid diagrams now render with [pele](https://pele.run), Obsidian's Mermaid renderer, in place of `beautiful-mermaid`. Pele covers every Mermaid diagram type, so diagrams that used to show an error now draw. Colours come from `--pele-*` variables mapped to the app theme, and chart series stay close to the accent colour. Pele uses its own layout engine, so diagrams look different from mermaid.js.
+
 ## 2026-10-08
 
 - Content search now saves a PDF's extracted text to the app cache after its first pdf.js pass. Later searches match it in Rust like a text file, so large PDFs no longer get re-extracted page by page on each query. A PDF that changes on disk is extracted again.

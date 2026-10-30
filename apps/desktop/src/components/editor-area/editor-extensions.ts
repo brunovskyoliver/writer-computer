@@ -43,6 +43,7 @@ import { viewportParsePlugin } from "./viewport-parse";
 import { vimModeExtension } from "./vim-mode";
 import { wikiLinkCompletions, wikiLinkExtension } from "./wiki-link-extension";
 import { editorCompletion, latexCompletions } from "./latex-completion";
+import { plotCompletions } from "./plot-completion";
 import { pdfQuoteBlockExtension } from "./pdf-quote-block";
 
 // Focus the editor when its pane is revealed (tab switch). Panes hide via an
@@ -242,7 +243,7 @@ export function createEditorExtensions(
     highlightDecorations(),
     imageSrcResolver(getFilePath),
     wikiLinkExtension(getFilePath, isDisposed),
-    editorCompletion([wikiLinkCompletions, latexCompletions(getFilePath)]),
+    editorCompletion([wikiLinkCompletions, latexCompletions(getFilePath), plotCompletions]),
     pdfQuoteBlockExtension(getFilePath, isDisposed),
     markdownFormatting,
     storeSyncExtension(getFilePath, getTabId),
