@@ -165,3 +165,19 @@ path doesn't change. Drawings with Embedded Files references still open in Obsid
 AUD-09 closed: SDU has 0 PDF++ `selection=`, `annotation=` or integer `rect=` anchors, so nothing to convert; such
 an anchor from elsewhere lands on its page. AUD-05 closed as not applicable: the plugin is disabled. AUD-11
 stays deferred: largest SDU drawing is 394KB; no fix.
+
+Installed-app check (2026-10-30): release build at `/Applications/Writer.app`, re-signed ad hoc because the copied
+bundle failed `codesign -v`. It opened `team-os`, not SDU: its recents listed a deleted `~/obsidian/SDU`. SDU put first
+in `recent_workspaces.json` (old file in `~/agent-runs/2026-10-30-sdu-backup/`). A labelled test note in the root `Own notes`
+then moved to `OOP/Own notes/2099-01-01 Lesson.md` in 4s and was deleted; vault git status clean, 5,884 files before and after.
+Vault committed locally (`6d52aea`) with the plugin's `data.json` ignored; link confirmed absent from it and from Writer's
+history. Vault has no remote. Writer `master` pushed to `origin` at `9a372c9` before this note.
+
+## Final summary
+
+Done: AUD-01, 02, 04, 06, 07, 08, 10, 12, 13 fixed; AUD-03 in-place editing; AUD-05 and AUD-09 closed; review findings
+fixed; accessibility, light mode and performance passes run.
+Open: AUD-11 large drawing export (deferred, SDU unaffected at 394KB). itslearning assignments and resources need a
+separate login. Not exercised: VoiceOver, real keyboard latency, native context-menu clicks, a saved drawing opened in
+Obsidian, drawings with Embedded Files (Obsidian only; 1 in SDU). Notes without calendar frontmatter stay unsorted.
+Deployment: local install only; no signed release was cut.
