@@ -134,7 +134,8 @@ function WorkspaceLayout({ showWelcome }: { showWelcome: boolean }) {
           only the window-drag band and the sidebar toggle float here. */}
       <div className="flex h-full min-h-0 flex-col">
         <div className="flex min-h-0 flex-1">
-          <div
+          <aside
+            aria-label="Sidebar"
             className="shrink-0 overflow-hidden"
             style={{
               width: isSidebarCollapsed ? 0 : draftSidebarWidth,
@@ -144,7 +145,7 @@ function WorkspaceLayout({ showWelcome }: { showWelcome: boolean }) {
             <div style={{ width: draftSidebarWidth }} className="h-full">
               <Sidebar />
             </div>
-          </div>
+          </aside>
           {!isSidebarCollapsed && (
             <div
               role="presentation"
@@ -155,9 +156,9 @@ function WorkspaceLayout({ showWelcome }: { showWelcome: boolean }) {
             />
           )}
 
-          <div className="relative min-w-0 flex-1 bg-bg">
+          <main className="relative min-w-0 flex-1 bg-bg">
             {showWelcome ? <WelcomeScreen /> : <EditorArea />}
-          </div>
+          </main>
         </div>
       </div>
     </div>

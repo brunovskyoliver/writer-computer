@@ -54,6 +54,7 @@ export const codeMirrorBaseSetup = (): Extension => [
     indentWithTab,
   ]),
   EditorView.lineWrapping,
+  EditorView.contentAttributes.of({ "aria-label": "Note text" }),
 ];
 
 export const prosemarkBasicSetup = (): Extension => [

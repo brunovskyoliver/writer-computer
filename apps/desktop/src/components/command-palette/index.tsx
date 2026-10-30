@@ -15,6 +15,7 @@ import {
   useIsCommandPaletteOpen,
   useOpenCommandPalette,
   useSetCommandPaletteSearch,
+  useRestoreFocus,
 } from "@/hooks/use-command-palette";
 import { useSidebar } from "@/hooks/use-sidebar";
 import {
@@ -135,6 +136,7 @@ export function CommandPalette() {
   const close = useCloseCommandPalette();
   const openCommandPalette = useOpenCommandPalette();
   const intent = useCommandPaletteIntent();
+  useRestoreFocus(isOpen && intent !== "content-search");
   const search = useCommandPaletteSearch();
   const setSearch = useSetCommandPaletteSearch();
   const { toggleSidebar } = useSidebar();

@@ -2,6 +2,10 @@
 
 ## 2026-10-30
 
+- Accessibility: closing the command palette or content search returns focus to where you were typing. Muted text, sidebar search and light-mode links now meet 4.5:1 contrast, keyboard focus shows on Settings and search-bar buttons, and the app exposes main and sidebar landmarks, a named editor and the active tab to screen readers.
+
+- Lesson sorting is safer: it no longer runs in a vault without a calendar link, can't write outside the vault from feed text, keeps notes with their assets, waits for unsaved notes, and saved layouts follow moved files.
+
 - Organize Lesson Notes sorts calendar notes into their course folder and names them by date, type and topic, such as `2026-10-05 Lesson - Eigenvalues and eigenvectors`. With a calendar link set, this runs by itself after each sync, and a note is created when a lesson starts, without taking focus. Pasted images move with their note and links are updated. Notes you renamed keep their name, and new lesson notes follow the same rules.
 
 - Today's lessons from a private calendar link now appear in the command palette. Add the link under Settings, Workspace; it is stored outside your notes and never shown again. Picking a lesson opens its note, or creates one in the course's folder. Notes made by the Course Workspaces plugin are recognized, even after a rename. Save Layout now sits below other palette matches, so Enter can't trigger it by accident.

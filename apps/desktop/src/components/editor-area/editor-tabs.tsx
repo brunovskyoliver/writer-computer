@@ -107,6 +107,8 @@ function EditorTabButton({
       // eslint-disable-next-line react-doctor/prefer-tag-over-role
       role="button"
       tabIndex={0}
+      aria-label={title}
+      aria-current={isActive ? "page" : undefined}
       data-dragging={isDragging || undefined}
       onPointerDown={(event) => onPointerDown(event, tab)}
       onClick={() => onSelect(tab.id)}
@@ -403,7 +405,12 @@ export function EditorTabs({
             ref={stripRefCallback}
             className="relative flex min-w-0 items-center overflow-x-auto scrollbar-none"
           >
-            <div data-tauri-drag-region className="flex min-w-max items-center">
+            <div
+              role="group"
+              aria-label="Open tabs"
+              data-tauri-drag-region
+              className="flex min-w-max items-center"
+            >
               {presentedTabs.map(({ tab, exiting, exitLeft }) => {
                 const isActive = tab.id === activeTabId;
 

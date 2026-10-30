@@ -13,6 +13,7 @@ import {
   useCommandPaletteSearch,
   useIsCommandPaletteOpen,
   useSetCommandPaletteSearch,
+  useRestoreFocus,
 } from "@/hooks/use-command-palette";
 import { openSearchMatch } from "@/hooks/editor-api";
 import { getFileName, getParentDir } from "@/lib/paths";
@@ -54,6 +55,7 @@ export function ContentSearchPalette() {
   const setSearch = useSetCommandPaletteSearch();
 
   const active = isOpen && intent === "content-search";
+  useRestoreFocus(active);
   const trimmed = search.trim();
   // The hook only scans while this intent actually owns the shared search
   // field — typing in the `Cmd+P` palette must not start a workspace walk.

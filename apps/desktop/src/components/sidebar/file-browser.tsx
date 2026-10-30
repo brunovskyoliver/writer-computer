@@ -35,7 +35,7 @@ export function FileBrowser({
             type="button"
             data-sidebar-search-button
             onClick={() => openCommandPalette()}
-            className="relative flex w-full items-center rounded-lg border border-transparent bg-[var(--surface-input)] pl-[34px] pr-3 text-[13px] text-[var(--text-muted)] transition-colors hover:text-[var(--fg-base)] h-[var(--chrome-control-height)]"
+            className="relative flex w-full items-center rounded-lg border border-transparent bg-[var(--surface-input)] pl-[34px] pr-3 text-[13px] text-[var(--text-secondary)] transition-colors hover:text-[var(--fg-base)] h-[var(--chrome-control-height)]"
           >
             <span
               aria-hidden="true"

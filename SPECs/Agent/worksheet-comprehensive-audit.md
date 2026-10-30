@@ -139,3 +139,18 @@ path); moves could race unsaved edits (those notes now wait for the next sync, w
 gap for a keystroke during the rename); duplicate notes from overlapping creation or an unreadable note
 (creation now runs one at a time and read errors surface); dropped or concurrent runs. Unit and Rust tests
 cover traversal and layout rewriting. The hook's switch behaviour has no automated test.
+
+Accessibility, light mode and performance pass (2026-10-30), native audit build, isolated app data.
+Fixed: focus left on `body` after closing either palette; no `main`/`aside` landmarks; unnamed editor; no
+active-tab state; no focus ring on Settings and search-bar buttons; muted text 3.89 to 4.16:1 (now above
+4.5:1 except where listed); light-mode links 2.87:1. Remaining under 4.5:1 by choice: disabled history
+arrows (exempt), decorative `#` heading marks, icon glyphs at 3.8:1 (3:1 applies). The palette's dangling
+`aria-labelledby` falls back to its `aria-label`, so it was left alone. Not tested: VoiceOver itself, sidebar
+drag resize by keyboard (no handler; Cmd+\\ toggles the sidebar).
+Performance: 400KB, 4,000-heading note opens in 135ms; synthetic typing there p50 9ms, p95 12ms, max 27ms
+(dispatch to next frame, not keyboard-to-screen); scroll 120 frames p95 18ms, none over 50ms; palette opens
+in 57ms. Copy of SDU without PDFs (29 notes): note list 3ms, calendar scan 6ms, palette search 110ms.
+RSS 108MB on SDU copy, 252MB after the large note. Nothing here justifies an optimization.
+Native: split layout restores with both panes after one of its notes moved; pinned file shows and its
+preference survives restart. Pin and rename context menus are native and undrivable, so those clicks are
+not exercised; the pin was seeded in preferences and the move ran through the same commands.
