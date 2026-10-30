@@ -90,6 +90,16 @@ Checked on a vault copy with a loopback feed and no interaction: a stray note so
 party event got none, and a relaunch made no duplicate. Writer's HTTPS fetch then ran against the real feed from the
 real vault: 47 events, and the vault's file list didn't change.
 
+## Status
+
+- Implemented and merged to local `master`; not pushed or released.
+- Installed locally on 2026-10-30: `/Applications/Writer.app` is a local ad-hoc build, same signature state as the build it
+  replaced, which is kept at `~/agent-runs/2026-10-30-sdu-backup/Writer-0.6.0-previous.app`.
+- The SDU link is stored for the installed app. Course Workspaces was already off in `community-plugins.json`, changed at
+  21:18 by something other than this work; its folder and `data.json` remain.
+- The installed build launched and left the vault's file list unchanged. It has no WebDriver, so its own sync and sorting
+  were not observed; the same code was checked in the `e2e` build.
+
 ## Limits
 
 - Only today's lessons are listed, and the list updates when the palette opens.
