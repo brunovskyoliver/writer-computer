@@ -25,6 +25,8 @@ import {
 } from "@/hooks/use-workspace";
 import { workspaceLabels } from "@/components/sidebar/workspace-menu";
 import { useWorkspaceStore } from "@/stores/workspace-store";
+import { useCalendarStore } from "@/stores/calendar-store";
+import { courseName, lessonsOn, localTime } from "@/lib/calendar";
 import {
   useActiveFilePath,
   useActiveTabId,
@@ -145,6 +147,12 @@ export function CommandPalette() {
   useEffect(() => {
     if (isOpen) void refreshRecentWorkspaces();
   }, [isOpen, refreshRecentWorkspaces]);
+
+  const calendarEvents = useCalendarStore((s) => s.events);
+  const calendarConfigured = useCalendarStore((s) => s.configured);
+  useEffect(() => {
+    if (isOpen) useCalendarStore.getState().refreshIfStale();
+  }, [isOpen]);
   const closeWorkspace = useCloseWorkspace();
   const openFile = useOpenFile();
   const closeActiveTab = useCloseActiveTab();
@@ -255,7 +263,7 @@ export function CommandPalette() {
 
   type Command = { id: string; label: string; description: string; run: () => void };
 
-  function runLayoutAction(action: () => Promise<void>) {
+  function runPaletteAction(action: () => Promise<void>) {
     close();
     void action().catch((error) => {
       showEditorNotice(error instanceof Error ? error.message : String(error));
@@ -264,29 +272,39 @@ export function CommandPalette() {
 
   const commands: Command[] = [
     ...(root && !isCompactFileMode
+      ? lessonsOn(calendarEvents, new Date()).map(
+          (event): Command => ({
+            id: `lesson-${event.occurrence_key}`,
+            label: `Lesson: ${localTime(event.start)} ${courseName(event.summary) ?? event.summary}`,
+            description: "Open or create this lesson's note",
+            run: () => runPaletteAction(() => useCalendarStore.getState().openLesson(event)),
+          }),
+        )
+      : []),
+    root &&
+      !isCompactFileMode &&
+      calendarConfigured && {
+        id: "refresh-calendar",
+        label: "Refresh Calendar",
+        description: "Command",
+        run: () => runPaletteAction(() => useCalendarStore.getState().refresh()),
+      },
+    ...(root && !isCompactFileMode
       ? layouts.flatMap((name): Command[] => [
           {
             id: `open-layout-${name}`,
             label: `Layout: ${name}`,
             description: name === activeLayout ? "Current layout" : "Command",
-            run: () => runLayoutAction(() => useWorkspaceStore.getState().openLayout(name)),
+            run: () => runPaletteAction(() => useWorkspaceStore.getState().openLayout(name)),
           },
           {
             id: `delete-layout-${name}`,
             label: `Delete Layout: ${name}`,
             description: "Command",
-            run: () => runLayoutAction(() => useWorkspaceStore.getState().deleteLayout(name)),
+            run: () => runPaletteAction(() => useWorkspaceStore.getState().deleteLayout(name)),
           },
         ])
       : []),
-    root &&
-      !isCompactFileMode &&
-      trimmedSearch && {
-        id: "save-layout",
-        label: `Save Layout as “${trimmedSearch}”`,
-        description: "Command",
-        run: () => runLayoutAction(() => useWorkspaceStore.getState().saveLayoutAs(trimmedSearch)),
-      },
     root &&
       !isCompactFileMode && {
         id: "toggle-sidebar",
@@ -487,6 +505,15 @@ export function CommandPalette() {
           }),
         )
       : []),
+    // Last, so Enter never saves a layout while another command matches.
+    root &&
+      !isCompactFileMode &&
+      trimmedSearch && {
+        id: "save-layout",
+        label: `Save Layout as “${trimmedSearch}”`,
+        description: "Command",
+        run: () => runPaletteAction(() => useWorkspaceStore.getState().saveLayoutAs(trimmedSearch)),
+      },
   ].filter((c): c is Command => Boolean(c));
 
   const visibleFiles: SearchResult[] =

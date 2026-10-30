@@ -62,8 +62,8 @@ export function latexRoot(path: string): Promise<string | null> {
   return invoke("latex_root", { path });
 }
 
-export function createFile(path: string): Promise<FileContent> {
-  return invoke("create_file", { path });
+export function createFile(path: string, content?: string): Promise<FileContent> {
+  return invoke("create_file", { path, content });
 }
 
 export function createDirectory(path: string): Promise<DirEntry> {
@@ -245,6 +245,39 @@ export function indexWorkspace(): Promise<IndexStats> {
 }
 
 /** Every Markdown note in the workspace, freshly walked (respects ignore files). */
+export interface CalendarEvent {
+  uid: string;
+  occurrence_key: string;
+  summary: string;
+  description: string;
+  location: string | null;
+  start: string;
+  end: string;
+}
+
+export interface CalendarNote {
+  path: string;
+  occurrence: string;
+  course: string | null;
+}
+
+export function calendarFeedConfigured(): Promise<boolean> {
+  return invoke("calendar_feed_configured");
+}
+
+export function setCalendarFeed(url: string | null): Promise<void> {
+  return invoke("set_calendar_feed", { url });
+}
+
+/** Null when this workspace has no feed. */
+export function fetchCalendar(): Promise<{ events: CalendarEvent[]; skipped: number } | null> {
+  return invoke("fetch_calendar");
+}
+
+export function findCalendarNotes(): Promise<CalendarNote[]> {
+  return invoke("find_calendar_notes");
+}
+
 export function listWorkspaceNotes(): Promise<string[]> {
   return invoke("list_workspace_notes");
 }

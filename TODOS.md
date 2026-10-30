@@ -11,6 +11,8 @@
 
 ## Done
 
+- AUD-06: Calendar lessons in the palette ([report](SPECs/Agent/worksheet-audit-calendar-ingestion.md)). Native checks pass on a synthetic feed; Writer's HTTPS path not run against the real feed.
+
 - Named course layouts in one vault ([report](SPECs/Agent/worksheet-audit-course-layouts.md)). 1,826 frontend tests; native switching, typing, restart, pruning and deletion pass.
 
 - AUD-13: Launch no longer deletes `preferences.json`, which erased pinned files on every restart. 306 Rust tests; file survival checked in the native app.

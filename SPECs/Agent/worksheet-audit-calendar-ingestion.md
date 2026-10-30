@@ -1,6 +1,6 @@
 # AUD-06: calendar ingestion design
 
-Status: design only. No code, no feed request, no vault change. Evidence comes from reading the Course Workspaces
+Status: built. No vault file was changed. Evidence comes from reading the Course Workspaces
 source and `data.json` in `~/Documents/Obsidian/SDU`, with the feed URL redacted.
 
 ## What the plugin does today
@@ -23,38 +23,45 @@ check creates a lesson note while a lesson is in progress in the active workspac
 
 The stored list was last refreshed on 2026-10-05, so it is not a current picture of the feed.
 
-## Proposed Writer design
+## Feed sample
 
-1. **Feed secret.** Store the URL in the app data directory, outside the vault, with `0600` permissions and keyed by
-   workspace root. Rust does all fetching: the webview CSP already blocks it, and the frontend only learns whether a URL
-   is set. Never log it or put it in an error. Keychain storage would need a new dependency; add it if file permissions
-   prove insufficient.
-2. **Fetch.** `reqwest` is already a dependency. Convert `webcal` to `https`, refuse plain `http`, set a timeout and a
-   body cap, and report 401/403 as an expired link. Refresh on the configured interval, not each minute.
-3. **Parse.** Rust, one pure function with fixture tests. All 55 stored events have distinct UIDs, which suggests the
-   feed lists single events, but raw feed text isn't stored. Recurring events must fail with a visible count rather than
-   be skipped until a real feed sample settles whether RRULE expansion is needed.
-4. **Identity.** `calendar-occurrence` in note frontmatter is the only duplicate check, found by scanning the vault's
-   notes. Renames and moves then keep working, and existing SDU notes are recognized with no migration or map import.
-5. **Course mapping.** Derive the course from the text before `-` in `SUMMARY`, dropping lesson type and room, and
-   store a user-editable course-to-folder mapping in the workspace. Keep room in `location`. The summary format is
-   observed from one institution's feed, so an event that doesn't match goes to an "unmapped" list instead of guessing.
-6. **Note creation.** Keep the existing frontmatter keys so Obsidian and Writer read the same notes. Use the workspace
-   timezone for `lesson-date`, unescape descriptions, and write through the existing exclusive-create path (AUD-10) so
-   an existing file is never replaced. Create notes only on explicit action or while a lesson runs, and never edit an
-   existing note when the feed changes.
-7. **Surface.** Palette commands "Today's Lessons" and "Refresh Calendar", plus a notice for each created note. Layout
-   switching stays independent of the calendar. No background timer runs without a configured feed.
+One read-only request, approved by Oliver on 2026-10-30, returned 47 events: all single UTC times with unique UIDs, no
+`RRULE`, `EXDATE`, `VTIMEZONE` or `LOCATION`. The response is served as `text/html`, so the parser checks for
+`BEGIN:VCALENDAR` instead of the content type. Summaries read `Course, (E26): type - room`, and some course names contain
+colons. The raw response was deleted; tests use synthetic values in the same shape.
 
-## Coexistence
+## Built
 
-Running this next to the plugin could create notes twice in the window before Obsidian's vault scan catches up.
-Frontmatter scanning handles notes already on disk, not a simultaneous create. Writer's creation should stay off by
-default until the plugin is disabled.
+- **Secret:** `calendar_feeds.json` in app data, `0600`, keyed by workspace root. Rust does all fetching. The frontend
+  can set or remove the link but never reads it, and errors strip the URL.
+- **Fetch:** HTTPS only, 30-second timeout, 5 MB cap. No timer: the palette refreshes when the data is over an hour old,
+  and `Refresh Calendar` forces it.
+- **Parse:** a small hand-written parser. Recurring, cancelled, all-day and floating-time events are counted and
+  reported, not guessed.
+- **Identity:** `calendar-occurrence` in note frontmatter is the only duplicate check. There is no map to import.
+- **Course:** `^(.+?, \([^)]*\)):`. A summary that doesn't match keeps its full text and goes to the default folder.
+- **Folder:** a note of the same course decides, then a top-level folder named after the course, then `Own notes`.
+- **Notes:** created only when you pick a `Lesson:` palette command, through exclusive create. Same frontmatter keys as
+  the plugin, except `workspace` and `location` unless the feed has one. Existing notes are never edited.
 
-## Open before implementation
+Because Writer never creates notes on its own, it can run beside the plugin. If both act on one lesson within the same
+moment a duplicate is possible, but the plugin's check doesn't read notes, so it can also create one after Writer has.
 
-- One real feed response is needed for parser fixtures and the RRULE question. It would be saved with the token removed
-  and personal details synthesized.
-- Assignments and resources aren't in the feed. Getting them would need a separate itslearning API with its own
-  authentication, which is out of scope here.
+## Verification
+
+Native audit build, disposable vault, synthetic feed on loopback (`calendar-native.json` and `calendar-*.png` in
+`~/agent-runs/2026-10-29-writer-audit/`): 13 of 13 checks. They cover link rejection without echoing it, `0600` storage,
+no link in the vault or UI, listing today's lessons, reusing a renamed plugin-style note, folder selection and no
+duplicate on repeat. One earlier run failed to find a second lesson in the palette; it didn't recur and the cause is
+unknown.
+
+The Rust parser also ran offline on the saved real response: 47 events, 0 skipped, no escapes left, and 3 occurrences
+match existing SDU notes, so plugin notes are recognized. Only counts were recorded.
+
+## Limits
+
+- Writer's own HTTPS path never ran against the real feed: the approved request was a separate script, and the native run
+  used loopback HTTP, which only the `e2e` build allows.
+- Only today's lessons are listed, and the list updates when the palette opens.
+- Assignments and resources aren't in the feed; getting them needs a separate authenticated itslearning API.
+- `Own notes` is a fixed folder name.

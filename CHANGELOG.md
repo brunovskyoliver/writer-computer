@@ -2,6 +2,8 @@
 
 ## 2026-10-30
 
+- Today's lessons from a private calendar link now appear in the command palette. Add the link under Settings, Workspace; it is stored outside your notes and never shown again. Picking a lesson opens its note, or creates one in the course's folder. Notes made by the Course Workspaces plugin are recognized, even after a rename. Save Layout now sits below other palette matches, so Enter can't trigger it by accident.
+
 - Named layouts: type a name in the command palette and run Save Layout as to keep the current tabs and panes. Run Layout: name to switch; open notes are saved first and changes to the current layout are kept. Delete Layout: name removes only the saved arrangement. Files that no longer exist are dropped when a layout opens.
 
 - Pinned files now survive a restart. A leftover theme migration deleted `preferences.json` on every launch.

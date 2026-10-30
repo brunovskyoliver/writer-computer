@@ -1,4 +1,5 @@
 pub mod ai;
+pub mod calendar;
 pub mod fonts;
 pub mod fs;
 pub mod images;

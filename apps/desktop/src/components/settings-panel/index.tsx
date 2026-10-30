@@ -11,6 +11,8 @@ import { EditorScrollContainer } from "@/components/editor-area/editor-scroll-co
 /** Section that renders above the Themes block. The schema-driven section
  *  list is rendered in two passes — these come first, the Themes section
  *  comes next, and everything else is rendered after. */
+import { CalendarSection } from "./calendar-section";
+
 const SECTIONS_BEFORE_THEMES = ["Appearance", "Typography"] as const;
 
 /** Extra, non-schema UI rendered under a section's generated controls. */
@@ -18,6 +20,7 @@ const SECTION_EXTRAS: Record<string, ComponentType> = {
   "LaTeX Suite": LatexSuiteExtras,
   Privacy: McpSection,
   AI: AiSection,
+  Workspace: CalendarSection,
 };
 
 export function SettingsPanel({ isVisible }: { isVisible: boolean }) {

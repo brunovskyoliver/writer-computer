@@ -705,11 +705,14 @@ pub async fn read_file_entries(
 }
 
 pub fn create_file_impl(path: &str) -> Result<FileContent, AppError> {
+    create_file_with_content(path, "# ")
+}
+
+fn create_file_with_content(path: &str, default_content: &str) -> Result<FileContent, AppError> {
     let file_path = PathBuf::from(path);
     if let Some(parent) = file_path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let default_content = "# ";
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -734,8 +737,8 @@ pub fn create_file_impl(path: &str) -> Result<FileContent, AppError> {
 }
 
 #[tauri::command]
-pub async fn create_file(path: String) -> Result<FileContent, AppError> {
-    blocking(move || create_file_impl(&path)).await
+pub async fn create_file(path: String, content: Option<String>) -> Result<FileContent, AppError> {
+    blocking(move || create_file_with_content(&path, content.as_deref().unwrap_or("# "))).await
 }
 
 pub fn create_directory_impl(path: &str) -> Result<DirEntry, AppError> {
