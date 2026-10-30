@@ -125,7 +125,7 @@ so this protects larger drawings more than it changes SDU.
 Fidelity: exported SVG is byte-identical between the two builds for a mixed fixture (frame,
 bound text, arrow, link, freedraw, deleted element), the real drawing, Big430 and Huge1200.
 Switching drawings during a Big430 export shows the second one without error. Create editable
-copy still writes an `.excalidraw.svg` with its embedded scene. 1,839 frontend tests pass, and
+copy still writes an `.excalidraw.svg` with its embedded scene. 1,838 frontend tests pass, and
 `vp check` reports 0 errors.
 
 Limits: while a drawing over budget stays open in any tab, every other drawing is refused with
