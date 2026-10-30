@@ -51,6 +51,8 @@ export interface SearchMatch {
   page: number | null;
   line_text: string;
   match_ranges: [number, number][];
+  /** Where `line_text` starts in the file's line: long text lines are clipped. */
+  clip_start: number;
   context: ContextLine[];
 }
 

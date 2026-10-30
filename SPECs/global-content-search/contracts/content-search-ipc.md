@@ -51,6 +51,10 @@ is the receiver's job (research R5).
 
 ## `SearchMatch` / `PdfCandidate` / `ContextLine` shapes
 
+Text lines over 400 chars arrive as a window around the first match, and
+`clip_start` is where that window starts in the line (0 otherwise), so the
+column is `clip_start + char_start`.
+
 As defined in `data-model.md`. `match_ranges` are char offsets within
 `line_text`; `context` holds the matched line plus up to ~2 either side.
 

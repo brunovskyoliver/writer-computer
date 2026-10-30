@@ -120,6 +120,7 @@ export function matchPdfPageLines(
       page: pageIndex + 1,
       line_text: lines[i]!,
       match_ranges: ranges,
+      clip_start: 0,
       context,
     });
   }

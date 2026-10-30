@@ -11,6 +11,7 @@
 
 ## Done
 
+- Content search freeze on very long lines (f03dffe, [worksheet](SPECs/Agent/worksheet-content-search-long-lines.md)). On `feat/git-sync`, not merged.
 - Pull and Push buttons ([report](SPECs/git-sync-spec.md), [worksheet](SPECs/Agent/worksheet-git-sync.md)). 1,848 frontend / 333 Rust tests; 11 native cases. On `feat/git-sync`, not merged.
 
 - AUD-11: large drawing export no longer freezes the window for long ([report](SPECs/Agent/worksheet-audit-drawing-performance.md)).

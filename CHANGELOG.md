@@ -2,6 +2,8 @@
 
 ## 2026-10-30
 
+- Content search (Cmd+Shift+F) no longer freezes the window when a match is in a very long line, such as an Excalidraw SVG export. Results now show about 400 characters around the match, and opening one still lands on the match.
+
 - Pull and Push buttons in the top-right corner. Push saves your work, commits the files you edited in Writer as "Edited a.md, b.md", and pushes. Pull only happens if everything applies cleanly; otherwise nothing changes and it says why. They use your system git and existing credentials, and files that look like credentials are left out and named.
 
 - Opening a very large Excalidraw drawing no longer freezes the window for long: the worst pause on a 1.37MB test drawing fell from about 545ms to 63ms, and the output is unchanged. A drawing too big for the preview budget now opens when nothing else is open, instead of failing with a false error; other drawings need it closed first.

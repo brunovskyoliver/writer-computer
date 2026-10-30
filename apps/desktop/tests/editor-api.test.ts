@@ -286,6 +286,7 @@ describe("editorApi", () => {
         page: null,
         line_text: "find me",
         match_ranges: [[0, 4]],
+        clip_start: 100,
         context: [],
       },
       "find",
@@ -307,7 +308,7 @@ describe("editorApi", () => {
     expect(consumePendingAnchor(bTab.id, "/b.md")).toEqual({
       kind: "line",
       line: 1,
-      offset: 0,
+      offset: 100,
       length: 4,
       needle: "find",
     });
