@@ -126,5 +126,7 @@ AUD-13 (P1): `migrate_from_preferences` in `config.rs` deleted `preferences.json
 watching the file during a plain launch. Removed the migration, whose theme import has run on every launch since the
 initial commit. Pinned files themselves were not driven natively; layouts in the same store were.
 
-Next: course navigation inside one vault, then AUD-06 calendar ingestion design, full metadata-preserving
+Course navigation done: [named layouts](worksheet-audit-course-layouts.md).
+
+Next: AUD-06 calendar ingestion design, full metadata-preserving
 drawing migration, accessibility and light-mode passes, and broader performance profiling.

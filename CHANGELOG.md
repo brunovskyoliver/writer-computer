@@ -2,6 +2,8 @@
 
 ## 2026-10-30
 
+- Named layouts: type a name in the command palette and run Save Layout as to keep the current tabs and panes. Run Layout: name to switch; open notes are saved first and changes to the current layout are kept. Delete Layout: name removes only the saved arrangement. Files that no longer exist are dropped when a layout opens.
+
 - Pinned files now survive a restart. A leftover theme migration deleted `preferences.json` on every launch.
 
 - Renaming or moving a file or folder now keeps links correct across the workspace, including a moved note's own relative images and open notes with unsaved text. A note changed on disk is reported rather than overwritten. `../` Markdown images now load, wiki links follow `#heading` fragments, unresolved wiki links say so, and heading jumps land on the heading in long notes.

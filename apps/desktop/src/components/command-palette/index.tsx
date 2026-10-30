@@ -138,6 +138,8 @@ export function CommandPalette() {
   const { root, isIndexing, openWorkspace, recentWorkspaces } = useWorkspace();
   const switchWorkspace = useSwitchWorkspace();
   const refreshRecentWorkspaces = useWorkspaceStore((s) => s.refreshRecentWorkspaces);
+  const layouts = useWorkspaceStore((s) => s.layouts);
+  const activeLayout = useWorkspaceStore((s) => s.activeLayout);
   // The recents list is shared by every window; one opened elsewhere since
   // this window loaded must still be offered as "Switch Workspace: …".
   useEffect(() => {
@@ -253,7 +255,38 @@ export function CommandPalette() {
 
   type Command = { id: string; label: string; description: string; run: () => void };
 
+  function runLayoutAction(action: () => Promise<void>) {
+    close();
+    void action().catch((error) => {
+      showEditorNotice(error instanceof Error ? error.message : String(error));
+    });
+  }
+
   const commands: Command[] = [
+    ...(root && !isCompactFileMode
+      ? layouts.flatMap((name): Command[] => [
+          {
+            id: `open-layout-${name}`,
+            label: `Layout: ${name}`,
+            description: name === activeLayout ? "Current layout" : "Command",
+            run: () => runLayoutAction(() => useWorkspaceStore.getState().openLayout(name)),
+          },
+          {
+            id: `delete-layout-${name}`,
+            label: `Delete Layout: ${name}`,
+            description: "Command",
+            run: () => runLayoutAction(() => useWorkspaceStore.getState().deleteLayout(name)),
+          },
+        ])
+      : []),
+    root &&
+      !isCompactFileMode &&
+      trimmedSearch && {
+        id: "save-layout",
+        label: `Save Layout as “${trimmedSearch}”`,
+        description: "Command",
+        run: () => runLayoutAction(() => useWorkspaceStore.getState().saveLayoutAs(trimmedSearch)),
+      },
     root &&
       !isCompactFileMode && {
         id: "toggle-sidebar",

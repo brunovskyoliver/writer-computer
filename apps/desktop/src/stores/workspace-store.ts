@@ -34,6 +34,9 @@ interface WorkspaceState {
   pinnedFiles: string[];
   sidebarMetadataVersion: number;
   recentWorkspaces: string[];
+  /** Named layouts of this workspace, and the one the window currently shows. */
+  layouts: string[];
+  activeLayout: string | null;
 
   openWorkspace: (path: string) => Promise<void>;
   /** Show `path` in *this* window: focus the window that already has it, or
@@ -55,6 +58,12 @@ interface WorkspaceState {
   removePinnedFilesWithPrefix: (prefix: string) => void;
   rewritePinnedPath: (oldPath: string, newPath: string) => void;
   bumpSidebarMetadataVersion: () => void;
+  hydrateLayouts: (root: string) => Promise<void>;
+  /** Save the current tabs and panes under `name`, replacing any layout with that name. */
+  saveLayoutAs: (name: string) => Promise<void>;
+  /** Save open buffers and the active layout, then replace the window with `name`. */
+  openLayout: (name: string) => Promise<void>;
+  deleteLayout: (name: string) => Promise<void>;
   removeRecentWorkspace: (path: string) => Promise<void>;
   /** Re-read the shared recents list — another window may have added to it. */
   refreshRecentWorkspaces: () => Promise<void>;
@@ -62,6 +71,30 @@ interface WorkspaceState {
 
 function pinnedFilesPreferenceKey(root: string) {
   return `workspace:${root}:sidebar-pinned-files`;
+}
+
+function layoutsPreferenceKey(root: string) {
+  return `workspace:${root}:layouts`;
+}
+
+/** Layouts live beside workspace sessions in `sessions.json`, under a derived key. */
+function layoutSessionKey(root: string, name: string) {
+  return `${root}#layout:${name}`;
+}
+
+function normalizeLayouts(stored: unknown) {
+  const { names, active } = (stored ?? {}) as { names?: unknown; active?: unknown };
+  const layouts = Array.isArray(names)
+    ? dedupe(names.filter((name): name is string => typeof name === "string"))
+    : [];
+  return {
+    layouts,
+    activeLayout: typeof active === "string" && layouts.includes(active) ? active : null,
+  };
+}
+
+function persistLayouts(root: string, names: string[], active: string | null) {
+  return setPreference(layoutsPreferenceKey(root), { names, active });
 }
 
 function normalizePinnedFiles(root: string, paths: unknown): string[] {
@@ -116,6 +149,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   pinnedFiles: [],
   sidebarMetadataVersion: 0,
   recentWorkspaces: [],
+  layouts: [],
+  activeLayout: null,
 
   openWorkspace: async (path: string) => {
     // Multi-window: when this window already has a workspace, open the new
@@ -157,11 +192,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         directoryCache: new Map([[info.root, entries]]),
         expandedDirs: new Set(),
         pinnedFiles: [],
+        layouts: [],
+        activeLayout: null,
         sidebarMetadataVersion: 0,
         recentWorkspaces: recents,
       }),
     );
     void get().hydratePinnedFiles(info.root);
+    void get().hydrateLayouts(info.root);
 
     const record = await loadSession(info.root);
     // The read raced a later switch: this workspace is no longer the one
@@ -212,6 +250,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           directoryCache: new Map(),
           expandedDirs: new Set(),
           pinnedFiles: [],
+          layouts: [],
+          activeLayout: null,
           sidebarMetadataVersion: 0,
           isIndexing: false,
         }),
@@ -236,11 +276,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         directoryCache: new Map([[bundle.workspace.root, bundle.entries]]),
         expandedDirs: new Set(),
         pinnedFiles: [],
+        layouts: [],
+        activeLayout: null,
         sidebarMetadataVersion: 0,
         recentWorkspaces: bundle.recent_workspaces,
       }),
     );
     void get().hydratePinnedFiles(bundle.workspace.root);
+    void get().hydrateLayouts(bundle.workspace.root);
 
     const record = classifyRecord(bundle.session);
     if (record.status !== "missing") {
@@ -423,6 +466,79 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   bumpSidebarMetadataVersion: () => {
     set((state) => ({ sidebarMetadataVersion: state.sidebarMetadataVersion + 1 }));
+  },
+
+  hydrateLayouts: async (root: string) => {
+    const stored = await getPreference<unknown>(layoutsPreferenceKey(root), null);
+    if (get().root !== root) return;
+    set(normalizeLayouts(stored));
+  },
+
+  saveLayoutAs: async (rawName: string) => {
+    const root = get().root;
+    const name = rawName.trim();
+    if (!root) return;
+    // session_key trims trailing slashes, which would merge distinct names.
+    if (!name || name.includes("/")) throw new Error("A layout name can't be empty or contain /.");
+    const { tabs, layout } = useEditorStore.getState();
+    const snapshot = encodeSession(tabs, layout);
+    if (!snapshot) throw new Error("Open a note before saving a layout.");
+    await tauri.saveSession(layoutSessionKey(root, name), snapshot);
+    if (get().root !== root) return;
+    const layouts = dedupe([...get().layouts, name]);
+    set({ layouts, activeLayout: name });
+    await persistLayouts(root, layouts, name);
+  },
+
+  openLayout: async (name: string) => {
+    const root = get().root;
+    if (!root) return;
+    const release = freezeEditorInput();
+    try {
+      await settleEditorInput();
+      await saveAllNow();
+      if (hasDrawingSession()) await withDrawingSaveBoundary(() => {});
+      if (get().root !== root) return;
+
+      const active = get().activeLayout;
+      if (active && active !== name) {
+        const { tabs, layout } = useEditorStore.getState();
+        const snapshot = encodeSession(tabs, layout);
+        if (snapshot) await tauri.saveSession(layoutSessionKey(root, active), snapshot);
+      }
+
+      const record = classifyRecord(await tauri.loadSession(layoutSessionKey(root, name)));
+      if (get().root !== root) return;
+      // Leave the window alone: an unreadable layout must not cost the current one.
+      if (record.status !== "ready") {
+        showEditorNotice(
+          record.status === "missing"
+            ? `None of the files in layout "${name}" still exist.`
+            : `Layout "${name}" could not be read.`,
+        );
+        return;
+      }
+
+      sessionPersister.cancel();
+      useEditorStore.getState().resetEditorState();
+      await applySessionRecord(root, record, null, { background: false });
+      if (get().root !== root) return;
+      set({ activeLayout: name });
+      await persistLayouts(root, get().layouts, name);
+    } finally {
+      release();
+    }
+  },
+
+  deleteLayout: async (name: string) => {
+    const root = get().root;
+    if (!root) return;
+    await tauri.saveSession(layoutSessionKey(root, name), null);
+    if (get().root !== root) return;
+    const layouts = get().layouts.filter((candidate) => candidate !== name);
+    const activeLayout = get().activeLayout === name ? null : get().activeLayout;
+    set({ layouts, activeLayout });
+    await persistLayouts(root, layouts, activeLayout);
   },
 
   refreshRecentWorkspaces: async () => {
